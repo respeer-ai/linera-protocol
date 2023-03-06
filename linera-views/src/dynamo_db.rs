@@ -154,8 +154,9 @@ impl DynamoDbClient {
         &self,
         attribute_str: &str,
         key_prefix: &[u8],
+        start_key_map: Option<HashMap<String, AttributeValue>>,
     ) -> Result<QueryOutput, DynamoDbContextError> {
-        let response = self
+        let mut response = self
             .client
             .query()
             .table_name(self.table.as_ref())
@@ -168,6 +169,7 @@ impl DynamoDbClient {
                 AttributeValue::B(Blob::new(DUMMY_PARTITION_KEY)),
             )
             .expression_attribute_values(":prefix", AttributeValue::B(Blob::new(key_prefix)))
+            .set_exclusive_start_key(start_key_map)
             .send()
             .await?;
         Ok(response)
@@ -176,39 +178,75 @@ impl DynamoDbClient {
 
 // Inspired by https://depth-first.com/articles/2020/06/22/returning-rust-iterators/
 #[doc(hidden)]
-pub struct DynamoDbKeyIterator<'a> {
+pub struct DynamoDbKeyIterator {
+    key_prefix: Vec<u8>,
     prefix_len: usize,
-    iter: std::iter::Flatten<
-        std::option::Iter<'a, Vec<HashMap<std::string::String, AttributeValue>>>,
-    >,
-}
-
-impl<'a> Iterator for DynamoDbKeyIterator<'a> {
-    type Item = Result<&'a [u8], DynamoDbContextError>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .next()
-            .map(|x| DynamoDbClient::extract_key(self.prefix_len, x))
-    }
+    DynamoDbClient: client,
+    response: Box<QueryOutput>,
+    exclusive_start_key: Option<HashMap<String, AttributeValue>>,
+    iter: std::iter::Flatten<std::option::Iter<Vec<HashMap<std::string::String, AttributeValue>>>>,
 }
 
 /// A set of keys returned by a search query on DynamoDb.
 pub struct DynamoDbKeys {
-    prefix_len: usize,
-    response: Box<QueryOutput>,
+    key_prefix: Vec<u8>,
+    DynamoDbClient: client,
+}
+
+impl<'a> Iterator for DynamoDbKeyIterator {
+    type Item = Result<[u8], DynamoDbContextError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match response.last_evaluated_key {
+            None => {
+                self.iter
+                    .next()
+                    .map(|x| DynamoDbClient::extract_key(self.prefix_len, x))
+            },
+            Some(map) => {
+                let result = self.iter
+                    .next()
+                    .map(|x| DynamoDbClient::extract_key(self.prefix_len, x));
+                match result {
+                    None => {
+                        self.response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix, Some(map)).await?);
+                        self.iter = self.response.items.iter.flatten();
+                        self.iter
+                            .next()
+                            .map(|x| DynamoDbClient::extract_key(self.prefix_len, x))
+                    },
+                    Some(value) => Some(value),
+                }
+            },
+        }
+    }
 }
 
 impl KeyIterable<DynamoDbContextError> for DynamoDbKeys {
-    type Iterator<'a> = DynamoDbKeyIterator<'a> where Self: 'a;
+    type Iterator = DynamoDbKeyIterator where Self;
 
     fn iterator(&self) -> Self::Iterator<'_> {
+        let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix, None).await?);
         DynamoDbKeyIterator {
-            prefix_len: self.prefix_len,
+            key_prefix: self.key_prefix.clone(),
+            prefix_len: self.key_prefix.len(),
+            client: self.client.clone(),
+            response,
+            exclusive_start_key: None,
             iter: self.response.items.iter().flatten(),
         }
     }
 }
+
+
+
+
+
+
+
+
+
+
 
 // Inspired by https://depth-first.com/articles/2020/06/22/returning-rust-iterators/
 #[doc(hidden)]
@@ -272,6 +310,13 @@ impl KeyValueIterable<DynamoDbContextError> for DynamoDbKeyValues {
     }
 }
 
+
+
+
+
+
+
+
 #[async_trait]
 impl KeyValueStoreClient for DynamoDbClient {
     type Error = DynamoDbContextError;
@@ -297,7 +342,7 @@ impl KeyValueStoreClient for DynamoDbClient {
         &self,
         key_prefix: &[u8],
     ) -> Result<Self::Keys, DynamoDbContextError> {
-        let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix).await?);
+        let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix, None).await?);
         Ok(DynamoDbKeys {
             prefix_len: key_prefix.len(),
             response,
@@ -308,8 +353,8 @@ impl KeyValueStoreClient for DynamoDbClient {
         &self,
         key_prefix: &[u8],
     ) -> Result<Self::KeyValues, DynamoDbContextError> {
-        let response = Box::new(
-            self.get_query_output(KEY_VALUE_ATTRIBUTE, key_prefix)
+        let response : String = Box::new(
+            self.get_query_output(KEY_VALUE_ATTRIBUTE, key_prefix, None)
                 .await?,
         );
         Ok(DynamoDbKeyValues {
