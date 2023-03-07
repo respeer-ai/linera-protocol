@@ -174,6 +174,8 @@ impl DynamoDbClient {
             .await?;
         Ok(response)
     }
+
+    
 }
 
 // Inspired by https://depth-first.com/articles/2020/06/22/returning-rust-iterators/
@@ -274,10 +276,14 @@ impl KeyValueIterable<DynamoDbContextError> for DynamoDbKeyValues {
     }
 }
 
+
+
+
+
 #[async_trait]
 impl KeyValueStoreClient for DynamoDbClient {
     type Error = DynamoDbContextError;
-    type Keys = DynamoDbKeys;
+    type Keys = Box<Vec<Vec<u8>>>;
     type KeyValues = DynamoDbKeyValues;
 
     async fn read_key_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, DynamoDbContextError> {
@@ -295,22 +301,53 @@ impl KeyValueStoreClient for DynamoDbClient {
         }
     }
 
-    async fn find_keys_by_prefix(
+    async fn find_keys_by_prefix_interval(
         &self,
         key_prefix: &[u8],
+        lower: Option<Vec<u8>>,
+        upper: Option<Vec<u8>>,
     ) -> Result<Self::Keys, DynamoDbContextError> {
-        let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix, None).await?);
-        Ok(DynamoDbKeys {
-            prefix_len: key_prefix.len(),
-            response,
-        })
+        let mut exclusive_start_key = match lower {
+            None => None,
+            Some(lower) => Some(Self::build_key(lower)),
+        };
+        let prefix_len = key_prefix.len();
+        let mut keys = Box::new(Vec::<Vec<u8>>::new());
+        loop {
+            let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix, exclusive_start_key).await?);
+            let mut reach_end = false;
+            if let Some(items) = response.items {
+                for path in items {
+                    let key = DynamoDbClient::extract_key(prefix_len, &path)?.to_vec();
+                    if let Some(upper) = &upper {
+                        if &key >= upper {
+                            reach_end = true;
+                            break;
+                        }
+                    }
+                    keys.push(key.to_vec());
+                }
+            }
+            if reach_end {
+                break;
+            }
+            match response.last_evaluated_key {
+                None => {
+                    break;
+                },
+                Some(value) => {
+                    exclusive_start_key = Some(value);
+                },
+            }
+        }
+        Ok(keys)
     }
 
     async fn find_key_values_by_prefix(
         &self,
         key_prefix: &[u8],
     ) -> Result<Self::KeyValues, DynamoDbContextError> {
-        let response : String = Box::new(
+        let response = Box::new(
             self.get_query_output(KEY_VALUE_ATTRIBUTE, key_prefix, None)
                 .await?,
         );
@@ -339,7 +376,7 @@ impl KeyValueStoreClient for DynamoDbClient {
                     insert_list.push((key, value));
                 }
                 WriteOperation::DeletePrefix { key_prefix } => {
-                    for short_key in self.find_keys_by_prefix(&key_prefix).await?.iterator() {
+                    for short_key in <Box<Vec<Vec<u8>>> as KeyIterable<Self::Error>>::iterator(&self.find_keys_by_prefix(&key_prefix).await?) {
                         let short_key = short_key?;
                         let mut key = key_prefix.clone();
                         key.extend_from_slice(short_key);

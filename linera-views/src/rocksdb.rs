@@ -45,7 +45,7 @@ impl KeyValueStoreClient for RocksdbClient {
                 value.extend_from_slice(&lower);
                 value
             },
-        }
+        };
         let keys = tokio::task::spawn_blocking(move || {
             let mut iter = db.raw_iterator();
             let mut keys = Vec::new();
@@ -56,8 +56,8 @@ impl KeyValueStoreClient for RocksdbClient {
                     break;
                 }
                 let key_red = key[len..].to_vec();
-                if let Some(upper) = upper {
-                    if key_red >= upper {
+                if let Some(upper) = &upper {
+                    if &key_red >= upper {
                         break;
                     }
                 }

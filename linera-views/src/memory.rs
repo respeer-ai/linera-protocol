@@ -8,6 +8,7 @@ use async_lock::{Mutex, MutexGuardArc, RwLock};
 use async_trait::async_trait;
 use std::{collections::BTreeMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
+use std::ops::Bound;
 
 /// The data is serialized in memory just like for rocksdb / dynamodb
 /// The analogue of the database is the BTreeMap
@@ -60,12 +61,12 @@ impl KeyValueStoreClient for MemoryClient {
         let mut interval = get_interval(key_prefix.to_vec());
         if let Some(lower) = lower {
             let mut value = key_prefix.to_vec();
-            value.extend_from_slice(lower);
+            value.extend_from_slice(&lower);
             interval.0 = Bound::Included(value);
         }
         if let Some(upper) = upper {
             let mut value = key_prefix.to_vec();
-            value.extend_from_slice(upper);
+            value.extend_from_slice(&upper);
             interval.1 = Bound::Excluded(value);
         }
         for (key, _value) in map.range(interval) {

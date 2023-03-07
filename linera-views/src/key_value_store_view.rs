@@ -16,6 +16,7 @@ use std::{
     mem,
     ops::Bound::Included,
 };
+use std::ops::Bound;
 
 #[cfg(any(test, feature = "test"))]
 use {
@@ -315,14 +316,28 @@ where
     }
 
     /// Iterate over all the keys matching the given prefix. The prefix is not included in the returned keys.
-    pub async fn find_keys_by_prefix(&self, key_prefix: &[u8]) -> Result<Vec<Vec<u8>>, ViewError> {
+    pub async fn find_keys_by_prefix_interval(&self,
+                                              key_prefix: &[u8], lower: Option<Vec<u8>>, upper: Option<Vec<u8>>) -> Result<Vec<Vec<u8>>, ViewError> {
         let len = key_prefix.len();
         let key_prefix_full = self.context.base_tag_index(KeyTag::Index as u8, key_prefix);
         let mut keys = Vec::new();
-        let key_prefix_upper = get_upper_bound(key_prefix);
-        let mut updates = self
-            .updates
-            .range((Included(key_prefix.to_vec()), key_prefix_upper));
+        let lower_range = Bound::Included(match lower {
+            None => key_prefix.to_vec(),
+            Some(lower) => {
+                let mut value = key_prefix.to_vec();
+                value.extend_from_slice(&lower);
+                value
+            }
+        });
+        let upper_range = match upper {
+            None => get_upper_bound(key_prefix),
+            Some(upper) => {
+                let mut value = key_prefix.to_vec();
+                value.extend_from_slice(&upper);
+                Bound::Excluded(value)
+            }
+        };
+        let mut updates = self.updates.range((lower_range, upper_range));
         let mut update = updates.next();
         let mut lower_bound = NextLowerKeyIterator::new(&self.deleted_prefixes);
         if !self.was_cleared {
@@ -518,9 +533,9 @@ where
         kvsv.get(key).await
     }
 
-    async fn find_keys_by_prefix(&self, key_prefix: &[u8]) -> Result<Self::Keys, ViewError> {
+    async fn find_keys_by_prefix_interval(&self, key_prefix: &[u8], lower: Option<Vec<u8>>, upper: Option<Vec<u8>>) -> Result<Self::Keys, ViewError> {
         let kvsv = self.kvsv.read().await;
-        kvsv.find_keys_by_prefix(key_prefix).await
+        kvsv.find_keys_by_prefix_interval(key_prefix, lower, upper).await
     }
 
     async fn find_key_values_by_prefix(
