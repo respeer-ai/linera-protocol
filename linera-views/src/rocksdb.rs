@@ -30,23 +30,38 @@ impl KeyValueStoreClient for RocksdbClient {
         Ok(tokio::task::spawn_blocking(move || db.get(&key)).await??)
     }
 
-    async fn find_keys_by_prefix(
+    async fn find_keys_by_prefix_interval(
         &self,
         key_prefix: &[u8],
+        lower: Option<Vec<u8>>, upper: Option<Vec<u8>>,
     ) -> Result<Self::Keys, RocksdbContextError> {
         let db = self.clone();
         let prefix = key_prefix.to_vec();
         let len = prefix.len();
+        let start = match lower {
+            None => prefix.clone(),
+            Some(lower) => {
+                let mut value = prefix.to_vec();
+                value.extend_from_slice(&lower);
+                value
+            },
+        }
         let keys = tokio::task::spawn_blocking(move || {
             let mut iter = db.raw_iterator();
             let mut keys = Vec::new();
-            iter.seek(&prefix);
+            iter.seek(&start);
             let mut next_key = iter.key();
             while let Some(key) = next_key {
                 if !key.starts_with(&prefix) {
                     break;
                 }
-                keys.push(key[len..].to_vec());
+                let key_red = key[len..].to_vec();
+                if let Some(upper) = upper {
+                    if key_red >= upper {
+                        break;
+                    }
+                }
+                keys.push(key_red);
                 iter.next();
                 next_key = iter.key();
             }

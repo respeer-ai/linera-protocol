@@ -48,14 +48,27 @@ impl KeyValueStoreClient for MemoryClient {
         Ok(map.get(key).cloned())
     }
 
-    async fn find_keys_by_prefix(
+    async fn find_keys_by_prefix_interval(
         &self,
         key_prefix: &[u8],
+        lower: Option<Vec<u8>>,
+        upper: Option<Vec<u8>>,
     ) -> Result<Self::Keys, MemoryContextError> {
         let map = self.read().await;
         let mut values = Vec::new();
         let len = key_prefix.len();
-        for (key, _value) in map.range(get_interval(key_prefix.to_vec())) {
+        let mut interval = get_interval(key_prefix.to_vec());
+        if let Some(lower) = lower {
+            let mut value = key_prefix.to_vec();
+            value.extend_from_slice(lower);
+            interval.0 = Bound::Included(value);
+        }
+        if let Some(upper) = upper {
+            let mut value = key_prefix.to_vec();
+            value.extend_from_slice(upper);
+            interval.1 = Bound::Excluded(value);
+        }
+        for (key, _value) in map.range(interval) {
             values.push(key[len..].to_vec())
         }
         Ok(values)

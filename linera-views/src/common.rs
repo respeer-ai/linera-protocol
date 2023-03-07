@@ -218,8 +218,14 @@ pub trait KeyValueStoreClient {
     /// Retrieve a `Vec<u8>` from the database using the provided `key`
     async fn read_key_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
 
+    /// Find the keys matching the prefix within specific lower/upper bounds. The prefix is not included in the returned keys.
+    /// the lower/upper do not include the prefix.
+    async fn find_keys_by_prefix_interval(&self, key_prefix: &[u8], lower: Option<Vec<u8>>, upper: Option<Vec<u8>>) -> Result<Self::Keys, Self::Error>;
+
     /// Find the keys matching the prefix. The prefix is not included in the returned keys.
-    async fn find_keys_by_prefix(&self, key_prefix: &[u8]) -> Result<Self::Keys, Self::Error>;
+    async fn find_keys_by_prefix(&self, key_prefix: &[u8]) -> Result<Self::Keys, Self::Error> {
+        self.find_keys_by_prefix_interval(key_prefix, None, None).await
+    }
 
     /// Find the key-value pairs matching the prefix. The prefix is not included in the returned keys.
     async fn find_key_values_by_prefix(
@@ -243,6 +249,7 @@ pub trait KeyValueStoreClient {
             None => Ok(None),
         }
     }
+
 }
 
 #[doc(hidden)]
