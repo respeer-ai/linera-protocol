@@ -397,6 +397,9 @@ pub trait Context {
     /// context.
     async fn read_key_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error>;
 
+    /// Find keys matching the prefix with the specific lower/upper bound. The prefix is not included in the returned keys.
+    async fn find_keys_by_prefix_interval(&self, key_prefix: &[u8], lower: Option<Vec<u8>>, upper: Option<Vec<u8>>) -> Result<Self::Keys, Self::Error>;
+
     /// Find keys matching the prefix. The prefix is not included in the returned keys.
     async fn find_keys_by_prefix(&self, key_prefix: &[u8]) -> Result<Self::Keys, Self::Error>;
 
@@ -502,6 +505,10 @@ where
 
     async fn read_key_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Self::Error> {
         self.db.read_key_bytes(key).await
+    }
+
+    async fn find_keys_by_prefix_interval(&self, key_prefix: &[u8], lower: Option<Vec<u8>>, upper: Option<Vec<u8>>) -> Result<Self::Keys, Self::Error> {
+        self.db.find_keys_by_prefix_interval(key_prefix, lower, upper).await
     }
 
     async fn find_keys_by_prefix(&self, key_prefix: &[u8]) -> Result<Self::Keys, Self::Error> {

@@ -321,7 +321,7 @@ where
         let len = key_prefix.len();
         let key_prefix_full = self.context.base_tag_index(KeyTag::Index as u8, key_prefix);
         let mut keys = Vec::new();
-        let lower_range = Bound::Included(match lower {
+        let lower_range = Bound::Included(match lower.clone() {
             None => key_prefix.to_vec(),
             Some(lower) => {
                 let mut value = key_prefix.to_vec();
@@ -329,7 +329,7 @@ where
                 value
             }
         });
-        let upper_range = match upper {
+        let upper_range = match upper.clone() {
             None => get_upper_bound(key_prefix),
             Some(upper) => {
                 let mut value = key_prefix.to_vec();
@@ -343,7 +343,7 @@ where
         if !self.was_cleared {
             for key in self
                 .context
-                .find_keys_by_prefix(&key_prefix_full)
+                .find_keys_by_prefix_interval(&key_prefix_full, lower.clone(), upper.clone())
                 .await?
                 .iterator()
             {
