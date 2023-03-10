@@ -279,17 +279,6 @@ impl<E> KeyIterable<E> for Vec<Vec<u8>> {
     }
 }
 
-impl<E> KeyIterable<E> for Box<Vec<Vec<u8>>> {
-    type Iterator<'a> = SimpleKeyIterator<'a, E>;
-
-    fn iterator(&self) -> Self::Iterator<'_> {
-        SimpleKeyIterator {
-            iter: self.iter(),
-            _error_type: std::marker::PhantomData,
-        }
-    }
-}
-
 #[doc(hidden)]
 /// Same as `SimpleKeyIterator` but for key-value pairs.
 pub struct SimpleKeyValueIterator<'a, E> {

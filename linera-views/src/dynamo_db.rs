@@ -245,7 +245,7 @@ impl KeyValueIterable<DynamoDbContextError> for DynamoDbKeyValues {
 #[async_trait]
 impl KeyValueStoreClient for DynamoDbClient {
     type Error = DynamoDbContextError;
-    type Keys = Box<Vec<Vec<u8>>>;
+    type Keys = Vec<Vec<u8>>;
     type KeyValues = DynamoDbKeyValues;
 
     async fn read_key_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, DynamoDbContextError> {
@@ -274,7 +274,7 @@ impl KeyValueStoreClient for DynamoDbClient {
             Some(lower) => Some(Self::build_key(lower)),
         };
         let prefix_len = key_prefix.len();
-        let mut keys = Box::new(Vec::<Vec<u8>>::new());
+        let mut keys = Vec::new();
         loop {
             let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix, exclusive_start_key).await?);
             let mut reach_end = false;
@@ -338,7 +338,7 @@ impl KeyValueStoreClient for DynamoDbClient {
                     insert_list.push((key, value));
                 }
                 WriteOperation::DeletePrefix { key_prefix } => {
-                    for short_key in <Box<Vec<Vec<u8>>> as KeyIterable<Self::Error>>::iterator(&self.find_keys_by_prefix(&key_prefix).await?) {
+                    for short_key in <Vec<Vec<u8>> as KeyIterable<Self::Error>>::iterator(&self.find_keys_by_prefix(&key_prefix).await?) {
                         let short_key = short_key?;
                         let mut key = key_prefix.clone();
                         key.extend_from_slice(short_key);
