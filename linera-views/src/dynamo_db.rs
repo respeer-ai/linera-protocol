@@ -178,6 +178,42 @@ impl DynamoDbClient {
 
 // Inspired by https://depth-first.com/articles/2020/06/22/returning-rust-iterators/
 #[doc(hidden)]
+pub struct DynamoDbKeyIterator<'a> {
+    prefix_len: usize,
+    iter: std::iter::Flatten<
+        std::option::Iter<'a, Vec<HashMap<std::string::String, AttributeValue>>>,
+    >,
+}
+
+impl<'a> Iterator for DynamoDbKeyIterator<'a> {
+    type Item = Result<&'a [u8], DynamoDbContextError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter
+            .next()
+            .map(|x| DynamoDbClient::extract_key(self.prefix_len, x))
+    }
+}
+
+/// A set of keys returned by a search query on DynamoDb.
+pub struct DynamoDbKeys {
+    prefix_len: usize,
+    response: Box<QueryOutput>,
+}
+
+impl KeyIterable<DynamoDbContextError> for DynamoDbKeys {
+    type Iterator<'a> = DynamoDbKeyIterator<'a> where Self: 'a;
+
+    fn iterator(&self) -> Self::Iterator<'_> {
+        DynamoDbKeyIterator {
+            prefix_len: self.prefix_len,
+            iter: self.response.items.iter().flatten(),
+        }
+    }
+}
+
+// Inspired by https://depth-first.com/articles/2020/06/22/returning-rust-iterators/
+#[doc(hidden)]
 pub struct DynamoDbKeyValueIterator<'a> {
     prefix_len: usize,
     iter: std::iter::Flatten<
@@ -216,7 +252,7 @@ impl Iterator for DynamoDbKeyValueIteratorOwned {
 /// A set of key-values returned by a search query on DynamoDb.
 pub struct DynamoDbKeyValues {
     prefix_len: usize,
-    response: Box<QueryOutput>,
+    items: Vec<HashMap<String, AttributeValue>>,
 }
 
 impl KeyValueIterable<DynamoDbContextError> for DynamoDbKeyValues {
@@ -226,26 +262,43 @@ impl KeyValueIterable<DynamoDbContextError> for DynamoDbKeyValues {
     fn iterator(&self) -> Self::Iterator<'_> {
         DynamoDbKeyValueIterator {
             prefix_len: self.prefix_len,
-            iter: self.response.items.iter().flatten(),
+            iter: self.items.iter().flatten(),
         }
     }
 
     fn into_iterator_owned(self) -> Self::IteratorOwned {
         DynamoDbKeyValueIteratorOwned {
             prefix_len: self.prefix_len,
-            iter: self.response.items.into_iter().flatten(),
+            iter: self.items.into_iter().flatten(),
         }
     }
 }
 
 
+fn get_exclusive_start_key(key_prefix: &[u8], lower: Option<Vec<u8>>) -> Option<HashMap<String, AttributeValue>> {
+    match lower {
+        None => None,
+        Some(lower) => {
+            let mut key = key_prefix.to_vec();
+            key.extend_from_slice(&lower);
+            Some(DynamoDbClient::build_key(key))
+        },
+    }
+}
+
+fn get_restart_key(key_prefix: &[u8], exclusive_start_key: Option<HashMap<String, AttributeValue>>) -> Result<Option<Vec<u8>>,DynamoDbContextError> {
+    match exclusive_start_key {
+        None => None,
+        Some(map) => Some(DynamoDbClient::extract_key(key_prefix.len(), map)?),
+    }
+}
 
 
 
 #[async_trait]
 impl KeyValueStoreClient for DynamoDbClient {
     type Error = DynamoDbContextError;
-    type Keys = Vec<Vec<u8>>;
+    type Keys = DynamoDbKeys;
     type KeyValues = DynamoDbKeyValues;
 
     async fn read_key_bytes(&self, key: &[u8]) -> Result<Option<Vec<u8>>, DynamoDbContextError> {
@@ -263,16 +316,36 @@ impl KeyValueStoreClient for DynamoDbClient {
         }
     }
 
+    async fn find_keys_by_prefix_partial(
+        &self,
+        key_prefix: &[u8],
+    ) -> Result<Self::Keys, DynamoDbContextError> {
+        let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix).await?);
+        Ok(DynamoDbKeys {
+            prefix_len: key_prefix.len(),
+            response,
+        })
+    }
+
+    async fn find_keys_by_prefix_partial(
+        &self,
+        key_prefix: &[u8],
+        lower: Option<Vec<u8>>,
+    ) -> Result<(Option<Vec<u8>>, Self::Keys), DynamoDbContextError> {
+        let mut exclusive_start_key = get_exclusive_start_key(key_prefix, lower);
+        let response = Box::new(self.get_query_output(KEY_ATTRIBUTE, key_prefix).await?);
+        let key_iterable = DynamoDbKeys { prefix_len: key_prefix.len(), items: response.items };
+        let restart_key = get_restart_key(key_prefix, response.exclusive_start_key)?;
+        Ok((restart_key, key_iterable))
+    }
+
     async fn find_keys_by_prefix_interval(
         &self,
         key_prefix: &[u8],
         lower: Option<Vec<u8>>,
         upper: Option<Vec<u8>>,
-    ) -> Result<Self::Keys, DynamoDbContextError> {
-        let mut exclusive_start_key = match lower {
-            None => None,
-            Some(lower) => Some(Self::build_key(lower)),
-        };
+    ) -> Result<Vec<Vec<u8>>, DynamoDbContextError> {
+        let mut exclusive_start_key = get_exclusive_start_key(lower);
         let prefix_len = key_prefix.len();
         let mut keys = Vec::new();
         loop {

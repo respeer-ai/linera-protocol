@@ -30,11 +30,19 @@ impl KeyValueStoreClient for RocksdbClient {
         Ok(tokio::task::spawn_blocking(move || db.get(&key)).await??)
     }
 
+    async fn find_keys_by_prefix_partial(
+        &self,
+        key_prefix: &[u8],
+        lower: Option<Vec<u8>>,
+    ) -> Result<(Option<Vec<u8>>, Self::Keys), RocksdbContextError> {
+        Ok((None, self.find_keys_by_prefix_interval(key_prefix, lower, None).await?))
+    }
+
     async fn find_keys_by_prefix_interval(
         &self,
         key_prefix: &[u8],
         lower: Option<Vec<u8>>, upper: Option<Vec<u8>>,
-    ) -> Result<Self::Keys, RocksdbContextError> {
+    ) -> Result<Vec<Vec<u8>>, RocksdbContextError> {
         let db = self.clone();
         let prefix = key_prefix.to_vec();
         let len = prefix.len();

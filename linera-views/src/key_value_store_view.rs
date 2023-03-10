@@ -533,7 +533,12 @@ where
         kvsv.get(key).await
     }
 
-    async fn find_keys_by_prefix_interval(&self, key_prefix: &[u8], lower: Option<Vec<u8>>, upper: Option<Vec<u8>>) -> Result<Self::Keys, ViewError> {
+    async fn find_keys_by_prefix_partial(&self,
+                                         key_prefix: &[u8], lower: Option<Vec<u8>>) -> Result<(Option<Vec<u8>>, Self::Keys), ViewError> {
+        Ok((None, self.find_keys_by_prefix_interval(key_prefix, lower, None).await?))
+    }
+
+    async fn find_keys_by_prefix_interval(&self, key_prefix: &[u8], lower: Option<Vec<u8>>, upper: Option<Vec<u8>>) -> Result<Vec<Vec<u8>>, ViewError> {
         let kvsv = self.kvsv.read().await;
         kvsv.find_keys_by_prefix_interval(key_prefix, lower, upper).await
     }
