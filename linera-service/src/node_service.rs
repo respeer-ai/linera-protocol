@@ -1,8 +1,9 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, iter, net::SocketAddr, num::NonZeroU16, sync::Arc};
-
+use std::{
+    collections::BTreeMap, iter, net::{SocketAddr, IpAddr, Ipv4Addr}, num::NonZeroU16, sync::Arc,
+};
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -23,7 +24,7 @@ use linera_base::{
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
-use linera_chain::{data_types::HashedValue, ChainStateView};
+use linera_chain::{data_types::{HashedValue, IncomingMessage}, ChainStateView};
 use linera_core::{
     client::{ArcChainClient, ChainClient, ChainClientError},
     data_types::{ClientOutcome, RoundTimeout},
@@ -44,6 +45,7 @@ use thiserror::Error as ThisError;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info};
+use local_ip_address::local_ip;
 
 use crate::{
     chain_listener::{ChainListener, ChainListenerConfig, ClientContext},
@@ -762,6 +764,12 @@ where
     async fn version(&self) -> linera_version::VersionInfo {
         linera_version::VersionInfo::default()
     }
+
+    /// Returns the pending message of the chain
+    async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingMessage>, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        Ok(client.pending_messages().await?)
+    }
 }
 
 // What follows is a hack to add a chain_id field to `ChainStateView` based on
@@ -812,7 +820,8 @@ impl ApplicationOverview {
             id,
             description,
             link: format!(
-                "http://localhost:{}/chains/{}/applications/{}",
+                "http://{}:{}/chains/{}/applications/{}",
+                local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
                 port.get(),
                 chain_id,
                 id
@@ -959,13 +968,14 @@ where
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
 
-        info!("GraphiQL IDE: http://localhost:{}", port);
+        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
         ChainListener::new(self.config, self.clients.clone())
             .run(self.context.clone(), self.storage.clone())
             .await;
         let serve_fut = axum::serve(
-            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?,
+            tokio::net::TcpListener::bind(SocketAddr::from((ip_addr, port))).await?,
             app,
         );
         serve_fut.await?;

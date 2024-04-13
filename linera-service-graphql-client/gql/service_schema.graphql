@@ -689,6 +689,10 @@ type QueryRoot {
 	Returns the version information on this node service.
 	"""
 	version: VersionInfo!
+	"""
+	Returns the pending message of the chain
+	"""
+	pendingMessages(chainId: ChainId!): [IncomingMessage!]!
 }
 
 type QueueView_BlockHeight_f5d50b5f {
