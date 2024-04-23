@@ -82,6 +82,10 @@ impl chain_listener::ClientContext<NodeProvider> for ClientContext {
         &self.wallet_state
     }
 
+    fn wallet_state_mut(&mut self) -> &mut WalletState {
+        &mut self.wallet_state
+    }
+
     fn make_chain_client<S>(&self, storage: S, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
         self.make_chain_client(storage, chain_id)
     }
@@ -101,6 +105,14 @@ impl chain_listener::ClientContext<NodeProvider> for ClientContext {
         ViewError: From<S::ContextError>,
     {
         self.update_and_save_wallet(client).await;
+    }
+
+    async fn save_wallet(&mut self) {
+        self.save_wallet();
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        self.make_node_provider()
     }
 }
 

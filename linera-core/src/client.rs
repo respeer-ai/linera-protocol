@@ -354,7 +354,7 @@ where
     ///
     /// Messages known to be redundant are filtered out: A `RegisterApplications` message whose
     /// entries are already known never needs to be included in a block.
-    async fn pending_messages(&mut self) -> Result<Vec<IncomingMessage>, ChainClientError> {
+    pub async fn pending_messages(&mut self) -> Result<Vec<IncomingMessage>, ChainClientError> {
         if self.next_block_height != BlockHeight::ZERO && self.message_policy.is_ignore() {
             return Ok(Vec::new()); // OpenChain is already received, other are ignored.
         }

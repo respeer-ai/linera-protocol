@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
+    collections::HashMap,
     collections::BTreeMap, iter, net::{SocketAddr, IpAddr, Ipv4Addr}, num::NonZeroU16, sync::Arc,
 };
+use anyhow::{anyhow, ensure, Context};
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -20,22 +22,25 @@ use futures::{
 use linera_base::{
     crypto::{CryptoError, CryptoHash, PublicKey},
     data_types::{Amount, ApplicationPermissions, TimeDelta, Timestamp},
-    identifiers::{ApplicationId, BytecodeId, ChainId, Owner},
+    identifiers::{ApplicationId, BytecodeId, ChainId, Owner, MessageId},
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
-use linera_chain::{data_types::{HashedValue, IncomingMessage}, ChainStateView};
+use linera_chain::{data_types::{CertificateValue, HashedValue, IncomingMessage}, ChainStateView};
 use linera_core::{
     client::{ArcChainClient, ChainClient, ChainClientError},
-    data_types::{ClientOutcome, RoundTimeout},
-    node::{NotificationStream, ValidatorNode, ValidatorNodeProvider},
-    worker::{Notification, Reason},
+    data_types::{ChainInfoQuery, ClientOutcome, RoundTimeout},
+    node::{NotificationStream, ValidatorNode, ValidatorNodeProvider, LocalValidatorNodeProvider},
+    worker::{Notification, Reason, WorkerState},
+    local_node::LocalNodeClient,
+    notifier::Notifier,
 };
 use linera_execution::{
     committee::{Committee, Epoch},
     system::{AdminOperation, Recipient, SystemChannel, UserData},
     Bytecode, Operation, Query, Response, SystemOperation, UserApplicationDescription,
     UserApplicationId,
+    Message, SystemMessage,
 };
 use linera_storage::Storage;
 use linera_views::views::ViewError;
@@ -49,6 +54,7 @@ use local_ip_address::local_ip;
 
 use crate::{
     chain_listener::{ChainListener, ChainListenerConfig, ClientContext},
+    cli_wrappers,
     util,
 };
 
@@ -113,6 +119,7 @@ pub struct SubscriptionRoot<P, S> {
 
 /// Our root GraphQL mutation type.
 pub struct MutationRoot<P, S, C> {
+    storage: S,
     clients: ChainClients<P, S>,
     context: Arc<Mutex<C>>,
 }
@@ -145,6 +152,11 @@ enum NodeServiceError {
     UnknownChainId { chain_id: String },
     #[error("malformed chain ID")]
     InvalidChainId(CryptoError),
+
+    #[error("Unexpected certificate. Please make sure you are connecting to the right network and are using a current software version.")]
+    UnexpectedCertificate,
+    #[error("The message with the ID returned by the faucet is not OpenChain. please make sure you are connecting to a genuine faucet.")]
+    NotOpenChainMessage,
 }
 
 impl From<ServerError> for NodeServiceError {
@@ -677,6 +689,111 @@ where
             wait_for_next_round(&mut stream, timeout).await;
         }
     }
+
+    /// ResPeer::CheCko::Initialize offline wallet
+    async fn wallet_init_without_keypair(
+        &self,
+        public_key: PublicKey,
+        faucet_url: String,
+        chain_id: ChainId,
+        message_id: MessageId,
+        with_other_chains: Vec<ChainId>,
+    ) -> Result<ChainId, Error> {
+        let faucet = cli_wrappers::Faucet::new(faucet_url);
+        let validators = faucet.current_validators().await?;
+
+        let state = WorkerState::new("Local node".to_string(), None, self.storage)
+            .with_allow_inactive_chains(true)
+            .with_allow_messages_from_deprecated_epochs(true);
+        let mut node_client = LocalNodeClient::new(state, Arc::new(Notifier::default()));
+        let admin_chain_id = self.context.lock().await.wallet_state().genesis_admin_chain();
+
+        let query = ChainInfoQuery::new(admin_chain_id).with_committees();
+        let nodes = self.context.lock().await
+            .make_node_provider()
+            .make_nodes_from_list(validators)?;
+        let target_height = message_id.height.try_add_one()?;
+        node_client
+            .download_certificates(nodes, message_id.chain_id, target_height)
+            .await
+            .context("Failed to download parent chain")?;
+        let certificate = node_client
+            .certificate_for(&message_id)
+            .await
+            .context("could not find OpenChain message")?;
+        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
+            return Err(Error::UnexpectedCertificate);
+        };
+        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
+            .message_by_id(&message_id)
+            .map(|msg| &msg.message)
+        else {
+            return Err(Error::NotOpenChainMessage);
+        };
+        ensure!(
+            config.ownership.verify_owner(&Owner::from(public_key)) == Some(public_key),
+            "The chain with the ID returned by the faucet is not owned by you. \
+            Please make sure you are connecting to a genuine faucet."
+        );
+        self.context.lock().await
+            .wallet_state_mut()
+            .assign_new_chain_to_key(public_key, chain_id, executed_block.block.timestamp)
+            .context("could not assign the new chain")?;
+
+        let chains = with_other_chains
+            .into_iter()
+            .chain([admin_chain_id, chain_id]);
+
+
+        let mut chain_ids = HashMap::new();
+        for chain_id in chain_ids {
+            if chains.contains_key(&chain_id) {
+                continue;
+            }
+            chains.insert(chain_id, self.storage.load_chain(chain_id).await?);
+        }
+        let (peg_chain_id, _) = chains
+            .iter()
+            .filter_map(|(chain_id, chain)| {
+                let epoch = (*chain.execution_state.system.epoch.get())?;
+                let is_admin = Some(*chain_id) == *chain.execution_state.system.admin_id.get();
+                Some((*chain_id, (epoch, is_admin)))
+            })
+            .max_by_key(|(_, epoch)| *epoch)
+            .context("no active chain found")?;
+        let peg_chain = chains.remove(&peg_chain_id).unwrap();
+        let committees = peg_chain.execution_state.system.committees.get();
+        for (chain_id, chain) in &chains {
+            let Some(hash) = chain.tip_state.get().block_hash else {
+                continue;
+            };
+            let certificate = self.storage.read_certificate(hash).await?;
+            let committee = committees
+                .get(&certificate.value().epoch())
+                .ok_or_else(|| anyhow!("tip of chain {chain_id} is outdated."))?;
+            certificate.check(committee)?;
+        }
+        let config_hash = CryptoHash::new(self.context.lock().await.wallet_state().genesis_config());
+        let maybe_epoch = peg_chain.execution_state.system.epoch.get();
+        let epoch = maybe_epoch.context("missing epoch in peg chain")?.0;
+        info!(
+            "Initialized wallet based on data provided by the faucet.\n\
+            The current epoch is {epoch}.\n\
+            The genesis config hash is {config_hash}{}",
+            if let Some(peg_hash) = peg_chain.tip_state.get().block_hash {
+                format!("\nThe latest certificate on chain {peg_chain_id} is {peg_hash}.")
+            } else {
+                "".to_string()
+            }
+        );
+
+        self.context.lock().await
+            .wallet_state_mut()
+            .set_default_chain(chain_id)?;
+        self.context.lock().await.save_wallet();
+
+        Ok(chain_id)
+    }
 }
 
 #[Object]
@@ -939,6 +1056,7 @@ where
                 default_chain: self.default_chain,
             },
             MutationRoot {
+                storage: self.storage.clone(),
                 clients: self.clients.clone(),
                 context: self.context.clone(),
             },

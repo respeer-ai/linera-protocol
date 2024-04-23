@@ -10,6 +10,7 @@ use linera_base::{
     data_types::Timestamp,
     identifiers::{ChainId, Destination},
 };
+use linera_rpc::node_provider::NodeProvider;
 use linera_chain::data_types::OutgoingMessage;
 use linera_core::{
     client::{ArcChainClient, ChainClient},
@@ -38,6 +39,8 @@ pub struct ChainListenerConfig {
 pub trait ClientContext<P: ValidatorNodeProvider> {
     fn wallet_state(&self) -> &WalletState;
 
+    fn wallet_state_mut(&mut self) -> &mut WalletState;
+
     fn make_chain_client<S>(&self, storage: S, chain_id: ChainId) -> ChainClient<P, S>;
 
     fn update_wallet_for_new_chain(
@@ -51,6 +54,10 @@ pub trait ClientContext<P: ValidatorNodeProvider> {
     where
         S: Storage + Clone + Send + Sync + 'static,
         ViewError: From<S::ContextError>;
+
+    fn save_wallet(&mut self);
+
+    fn make_node_provider(&self) -> NodeProvider;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
