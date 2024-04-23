@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     collections::BTreeMap, iter, net::{SocketAddr, IpAddr, Ipv4Addr}, num::NonZeroU16, sync::Arc,
 };
-use anyhow::{anyhow, ensure, Context};
+use anyhow::{anyhow, Context};
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -29,7 +29,7 @@ use linera_base::{
 use linera_chain::{data_types::{CertificateValue, HashedValue, IncomingMessage}, ChainStateView};
 use linera_core::{
     client::{ArcChainClient, ChainClient, ChainClientError},
-    data_types::{ChainInfoQuery, ClientOutcome, RoundTimeout},
+    data_types::{ClientOutcome, RoundTimeout},
     node::{NotificationStream, ValidatorNode, ValidatorNodeProvider, LocalValidatorNodeProvider},
     worker::{Notification, Reason, WorkerState},
     local_node::LocalNodeClient,
@@ -201,6 +201,8 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
+            NodeServiceError::UnexpectedCertificate => (StatusCode::BAD_REQUEST, vec![self.to_string()]),
+            NodeServiceError::NotOpenChainMessage => (StatusCode::BAD_REQUEST, vec![self.to_string()]),
         };
         let tuple = (tuple.0, json!({"error": tuple.1}).to_string());
         tuple.into_response()
@@ -702,13 +704,12 @@ where
         let faucet = cli_wrappers::Faucet::new(faucet_url);
         let validators = faucet.current_validators().await?;
 
-        let state = WorkerState::new("Local node".to_string(), None, self.storage)
+        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
             .with_allow_inactive_chains(true)
             .with_allow_messages_from_deprecated_epochs(true);
         let mut node_client = LocalNodeClient::new(state, Arc::new(Notifier::default()));
         let admin_chain_id = self.context.lock().await.wallet_state().genesis_admin_chain();
 
-        let query = ChainInfoQuery::new(admin_chain_id).with_committees();
         let nodes = self.context.lock().await
             .make_node_provider()
             .make_nodes_from_list(validators)?;
@@ -722,30 +723,31 @@ where
             .await
             .context("could not find OpenChain message")?;
         let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
-            return Err(Error::UnexpectedCertificate);
+            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
         };
         let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
             .message_by_id(&message_id)
             .map(|msg| &msg.message)
         else {
-            return Err(Error::NotOpenChainMessage);
+            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
         };
-        ensure!(
-            config.ownership.verify_owner(&Owner::from(public_key)) == Some(public_key),
-            "The chain with the ID returned by the faucet is not owned by you. \
-            Please make sure you are connecting to a genuine faucet."
-        );
+        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
+            return Err(
+                anyhow!(
+                    "The chain with the ID returned by the faucet is not owned by you. \
+                    Please make sure you are connecting to a genuine faucet."
+                ).into())
+        }
         self.context.lock().await
             .wallet_state_mut()
             .assign_new_chain_to_key(public_key, chain_id, executed_block.block.timestamp)
             .context("could not assign the new chain")?;
 
-        let chains = with_other_chains
+        let chain_ids = with_other_chains
             .into_iter()
             .chain([admin_chain_id, chain_id]);
 
-
-        let mut chain_ids = HashMap::new();
+        let mut chains = HashMap::new();
         for chain_id in chain_ids {
             if chains.contains_key(&chain_id) {
                 continue;
