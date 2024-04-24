@@ -740,7 +740,7 @@ where
         }
         self.context.lock().await
             .wallet_state_mut()
-            .assign_new_chain_to_key(public_key, chain_id, executed_block.block.timestamp)
+            .assign_new_chain_to_public_key(public_key, chain_id, executed_block.block.timestamp)
             .context("could not assign the new chain")?;
 
         let chain_ids = with_other_chains

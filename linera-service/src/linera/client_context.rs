@@ -107,7 +107,7 @@ impl chain_listener::ClientContext<NodeProvider> for ClientContext {
         self.update_and_save_wallet(client).await;
     }
 
-    async fn save_wallet(&mut self) {
+    fn save_wallet(&mut self) {
         self.save_wallet();
     }
 

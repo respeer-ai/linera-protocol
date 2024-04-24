@@ -201,3 +201,8 @@ opt-level = 3
 version = "0.4.1"
 git = "https://github.com/Twey/rust-indexed-db"
 branch = "no-uuid-wasm-bindgen"
+
+[patch.crates-io.ed25519-dalek]
+version = "2.1.1"
+git = "https://github.com/respeer-ai/curve25519-dalek"
+branch = "respeer-pub-field-1efe6a93"

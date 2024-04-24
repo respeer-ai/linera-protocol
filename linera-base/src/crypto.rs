@@ -76,6 +76,11 @@ impl PublicKey {
         let addr = [name; dalek::PUBLIC_KEY_LENGTH];
         PublicKey(addr)
     }
+
+    /// Convert public key to dalek verifying key
+    pub fn to_verifying_key(&self) -> Result<dalek::VerifyingKey, dalek::SignatureError> {
+        dalek::VerifyingKey::from_bytes(&self.0)
+    }
 }
 
 #[cfg(with_getrandom)]
@@ -123,6 +128,14 @@ impl KeyPair {
     /// accidental copies of secret keys.
     pub fn copy(&self) -> KeyPair {
         KeyPair(self.0.clone())
+    }
+
+    /// Create key-pair only have public key field
+    pub fn from_public_key(public_key: PublicKey) -> Self {
+        KeyPair(dalek::SigningKey {
+            secret_key: [0u8; dalek::SECRET_KEY_LENGTH],
+            verifying_key: public_key.to_verifying_key().expect("invalid public key"),
+        })
     }
 }
 
