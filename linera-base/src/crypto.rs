@@ -25,6 +25,7 @@ use {
 };
 
 use crate::doc_scalar;
+use tracing::{info, warn};
 
 /// A signature key-pair.
 pub struct KeyPair(dalek::SigningKey);
@@ -80,6 +81,16 @@ impl PublicKey {
     /// Convert public key to dalek verifying key
     pub fn to_verifying_key(&self) -> Result<dalek::VerifyingKey, dalek::SignatureError> {
         dalek::VerifyingKey::from_bytes(&self.0)
+    }
+
+    /// Print public bytes
+    pub fn print_bytes(&self) {
+        info!("{:?}", self.0);
+    }
+
+    /// Get inner bytes
+    pub fn to_bytes(&self) -> [u8; dalek::PUBLIC_KEY_LENGTH] {
+        self.0
     }
 }
 
@@ -212,7 +223,11 @@ impl Serialize for KeyPair {
     {
         // This is only used for JSON configuration.
         assert!(serializer.is_human_readable());
-        serializer.serialize_str(&hex::encode(self.0.to_bytes()))
+        // serializer.serialize_str(&hex::encode(self.0.to_bytes()))
+        let mut key_buf = [0u8; dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH];
+        key_buf[..dalek::SECRET_KEY_LENGTH].copy_from_slice(&self.0.to_bytes());
+        key_buf[dalek::SECRET_KEY_LENGTH..].copy_from_slice(&self.public().to_bytes());
+        serializer.serialize_str(&hex::encode(key_buf))
     }
 }
 
@@ -225,8 +240,25 @@ impl<'de> Deserialize<'de> for KeyPair {
         assert!(deserializer.is_human_readable());
         let s = String::deserialize(deserializer)?;
         let value = hex::decode(s).map_err(serde::de::Error::custom)?;
-        let key =
-            dalek::SigningKey::from_bytes(value[..].try_into().map_err(serde::de::Error::custom)?);
+        // let key = dalek::SigningKey::from_bytes(value[..].try_into().map_err(serde::de::Error::custom)?);
+
+        if value.len() != dalek::SECRET_KEY_LENGTH && value.len() != dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH {
+            return Err(anyhow::anyhow!("detect invalid key-pair")).map_err(serde::de::Error::custom)?;
+        }
+
+        let key = if value.len() == dalek::SECRET_KEY_LENGTH {
+            if value[..dalek::SECRET_KEY_LENGTH] == [0u8; dalek::SECRET_KEY_LENGTH] {
+                warn!("detect empty key-pair");
+            }
+            dalek::SigningKey::from_bytes(value[..dalek::SECRET_KEY_LENGTH].try_into().map_err(serde::de::Error::custom)?)
+        } else {
+            let mut key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
+            key_buf.copy_from_slice(&value[dalek::SECRET_KEY_LENGTH..dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH]);
+            dalek::SigningKey {
+                secret_key: [0u8; dalek::SECRET_KEY_LENGTH],
+                verifying_key: PublicKey(key_buf).to_verifying_key().expect("invalid public key"),
+            }
+        };
         Ok(KeyPair(key))
     }
 }
