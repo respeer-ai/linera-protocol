@@ -139,7 +139,7 @@ where
             client
         };
         let (_listen_handle, mut local_stream) = client.listen().await?;
-        if let Err(error) = client.lock().await.process_inbox_if_owned().await {
+        if let Err(error) = client.lock().await.process_inbox_if_owned_without_block_proposal().await {
             warn!(%error, "Failed to process inbox after starting stream.");
         }
         while let Some(notification) = local_stream.next().await {
@@ -208,7 +208,7 @@ where
                 }
             }
             Reason::NewIncomingMessage { .. } => {
-                if let Err(e) = client.process_inbox_if_owned().await {
+                if let Err(e) = client.process_inbox_if_owned_without_block_proposal().await {
                     warn!(
                         "Failed to process inbox after receiving new message: {:?} \
                         with error: {:?}",
