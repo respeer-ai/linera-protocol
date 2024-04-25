@@ -1633,15 +1633,13 @@ checksum = "a74858bcfe44b22016cb49337d7b6f04618c58e5dbfdef61b06b8c434324a0bc"
 [[package]]
 name = "curve25519-dalek"
 version = "4.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a677b8922c94e01bdbb12126b0bc852f00447528dee1782229af9c720c3f348"
+source = "git+https://github.com/respeer-ai/curve25519-dalek?branch=respeer-pub-field-1efe6a93#7666164aedb9e08b822c5cb98df51c690d8e56d7"
 dependencies = [
  "cfg-if",
  "cpufeatures",
  "curve25519-dalek-derive",
  "digest 0.10.7",
  "fiat-crypto",
- "platforms",
  "rustc_version",
  "subtle",
  "zeroize",
@@ -1650,8 +1648,7 @@ dependencies = [
 [[package]]
 name = "curve25519-dalek-derive"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+source = "git+https://github.com/respeer-ai/curve25519-dalek?branch=respeer-pub-field-1efe6a93#7666164aedb9e08b822c5cb98df51c690d8e56d7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1872,8 +1869,7 @@ dependencies = [
 [[package]]
 name = "ed25519-dalek"
 version = "2.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a3daa8e81a3963a60642bcc1f90a670680bd4a77535faa384e9d1c79d620871"
+source = "git+https://github.com/respeer-ai/curve25519-dalek?branch=respeer-pub-field-1efe6a93#7666164aedb9e08b822c5cb98df51c690d8e56d7"
 dependencies = [
  "curve25519-dalek",
  "ed25519",
@@ -4550,12 +4546,6 @@ name = "pkg-config"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
-
-[[package]]
-name = "platforms"
-version = "3.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "626dec3cac7cc0e1577a2ec3fc496277ec2baa084bebad95bb6fdbfae235f84c"
 
 [[package]]
 name = "plotters"
