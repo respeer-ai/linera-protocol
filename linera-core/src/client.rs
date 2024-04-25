@@ -84,9 +84,6 @@ pub struct ChainClientBuilder<ValidatorNodeProvider> {
     delivery_notifiers: Arc<tokio::sync::Mutex<DeliveryNotifiers>>,
     /// References to clients waiting for chain notifications.
     notifier: Arc<Notifier<Notification>>,
-
-    /// Raw block proposal list waiting for sign
-    raw_block_proposals: Vec<RawBlockProposal>,
 }
 
 impl<ValidatorNodeProvider: Clone> ChainClientBuilder<ValidatorNodeProvider> {
@@ -156,6 +153,7 @@ impl<ValidatorNodeProvider: Clone> ChainClientBuilder<ValidatorNodeProvider> {
             next_block_height,
             pending_block,
             node_client,
+            raw_block_proposals: HashMap::new(),
         }
     }
 }
@@ -220,6 +218,9 @@ pub struct ChainClient<ValidatorNodeProvider, Storage> {
     /// Local node to manage the execution state and the local storage of the chains that we are
     /// tracking.
     node_client: LocalNodeClient<Storage>,
+
+    /// Raw block proposal list waiting for sign
+    raw_block_proposals: HashMap<HashedValue, RawBlockProposal>,
 }
 
 /// Error type for [`ChainClient`].
@@ -272,6 +273,9 @@ pub enum ChainClientError {
 
     #[error("Found several possible identities to interact with chain {0}")]
     FoundMultipleKeysForChain(ChainId),
+
+    #[error("Invalid raw block proposal")]
+    InvalidRawBlockProposal,
 }
 
 impl From<Infallible> for ChainClientError {
@@ -2117,27 +2121,36 @@ where
             .read_or_download_blobs(nodes, block.bytecode_locations())
             .await?;
         Ok(RawBlockProposal {
-            BlockAndRound {
+            content: BlockAndRound {
                 block: block.clone(),
                 round,
             },
-            owner: self.public_key().await?;
+            owner: self.public_key().await?.into(),
             blobs,
             validated,
+            value: hashed_value,
         })
     }
 
     pub async fn submit_extenal_signed_block_proposal(
         &mut self,
         proposal: BlockProposal,
+        hashed_value: HashedValue,
     ) -> Result<Certificate, ChainClientError> {
+        let raw_block_proposal = match self.raw_block_proposals.get(&hashed_value) {
+            Some(raw_block_proposal) => raw_block_proposal,
+            None => {
+                return Err(ChainClientError::InvalidRawBlockProposal)
+            }
+        };
         // Check the final block proposal. This will be cheaper after #1401.
         self.node_client
             .handle_block_proposal(proposal.clone())
             .await?;
         // Remember what we are trying to do before sending the proposal to the validators.
-        self.pending_block = Some(block);
+        self.pending_block = Some(raw_block_proposal.content.block.clone());
         // Send the query to validators.
+        let committee = self.local_committee().await?;
         let certificate = self
             .submit_block_proposal(&committee, proposal, hashed_value)
             .await?;
@@ -2195,7 +2208,7 @@ where
             if certificate.round == manager.current_round {
                 let committee = self.local_committee().await?;
                 match self.finalize_block(&committee, *certificate.clone()).await {
-                    Ok(certificate) => return Ok(ClientOutcome::Committed(None)),
+                    Ok(_) => return Ok(ClientOutcome::Committed(None)),
                     Err(ChainClientError::CommunicationError(_)) => {
                         // Communication errors in this case often mean that someone else already
                         // finalized the block.
@@ -2287,22 +2300,20 @@ where
         operations: Vec<Operation>,
     ) -> Result<Option<RoundTimeout>, ChainClientError> {
         match self.process_pending_block_without_prepare_without_block_proposal().await? {
-            ClientOutcome::Committed(Some(raw_block_proposal)) => {}
-            ClientOutcome::Committed(None) => {}
+            ClientOutcome::Committed(Some(_)) => {
+                return Ok(None)
+            }
+            ClientOutcome::Committed(None) => {},
             ClientOutcome::WaitForTimeout(timeout) => {
-                return Ok(Some(ExecuteBlockOutcome::WaitForTimeout(timeout)))
+                return Ok(Some(timeout))
             }
         }
-        let confirmed_value = self
+        let _ = self
             .set_pending_block(incoming_messages, operations)
             .await?;
-        match self.process_pending_block_without_prepare_without_proposal().await? {
-            ClientOutcome::Committed(Some(raw_block_proposal)) => Ok(())
-            // Should be unreachable: We did set a pending block.
-            ClientOutcome::Committed(None) => Ok(())
-            ClientOutcome::WaitForTimeout(timeout) => {
-                Ok(Some(ExecuteBlockOutcome::WaitForTimeout(timeout)))
-            }
+        match self.process_pending_block_without_prepare_without_block_proposal().await? {
+            ClientOutcome::WaitForTimeout(timeout) => Ok(Some(timeout)),
+            _ => Ok(None),
         }
     }
 
@@ -2316,13 +2327,13 @@ where
     pub async fn process_inbox_without_block_proposal(
         &mut self,
     ) -> Result<Option<RoundTimeout>, ChainClientError> {
-        self.prepare_chain().awalt?;
+        self.prepare_chain().await?;
         loop {
             let incoming_messages = self.pending_messages().await?;
-            if incomint_message.is_empty() {
+            if incoming_messages.is_empty() {
                 return Ok(None)
             }
-            self.execute_block_without_block_proposal(incoming_messages, vec![]).await
+            self.execute_block_without_block_proposal(incoming_messages, vec![]).await?;
         }
     }
 

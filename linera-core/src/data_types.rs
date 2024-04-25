@@ -339,4 +339,5 @@ pub struct RawBlockProposal {
     pub owner: Owner,
     pub blobs: Vec<HashedValue>,
     pub validated: Option<Certificate>,
+    pub value: HashedValue,
 }
