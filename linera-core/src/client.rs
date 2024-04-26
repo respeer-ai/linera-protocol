@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    collections::{hash_map, BTreeMap, HashMap},
+    collections::{hash_map, BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     iter,
     num::NonZeroUsize,
@@ -153,7 +153,7 @@ impl<ValidatorNodeProvider: Clone> ChainClientBuilder<ValidatorNodeProvider> {
             next_block_height,
             pending_block,
             node_client,
-            raw_block_proposals: HashMap::new(),
+            raw_block_proposals: VecDeque::new(),
         }
     }
 }
@@ -220,7 +220,7 @@ pub struct ChainClient<ValidatorNodeProvider, Storage> {
     node_client: LocalNodeClient<Storage>,
 
     /// Raw block proposal list waiting for sign
-    raw_block_proposals: HashMap<HashedValue, RawBlockProposal>,
+    raw_block_proposals: VecDeque<RawBlockProposal>,
 }
 
 /// Error type for [`ChainClient`].
@@ -2137,24 +2137,29 @@ where
         proposal: BlockProposal,
         hashed_value: HashedValue,
     ) -> Result<Certificate, ChainClientError> {
-        let raw_block_proposal = match self.raw_block_proposals.get(&hashed_value) {
+        let raw_block_proposal = match self.raw_block_proposals.front() {
             Some(raw_block_proposal) => raw_block_proposal,
             None => {
                 return Err(ChainClientError::InvalidRawBlockProposal)
             }
         };
+        ensure!(
+            raw_block_proposal.value != hashed_value,
+            ChainClientError::InvalidRawBlockProposal
+        );
         // Check the final block proposal. This will be cheaper after #1401.
         self.node_client
             .handle_block_proposal(proposal.clone())
             .await?;
         // Remember what we are trying to do before sending the proposal to the validators.
-        self.pending_block = Some(raw_block_proposal.content.block.clone());
+        // self.pending_block = Some(raw_block_proposal.content.block.clone());
         // Send the query to validators.
         let committee = self.local_committee().await?;
         let certificate = self
             .submit_block_proposal(&committee, proposal, hashed_value)
             .await?;
-        self.pending_block = None;
+        let _ = self.raw_block_proposals.pop_front();
+        // self.pending_block = None;
         // Communicate the new certificate now.
         self.communicate_chain_updates(
             &committee,
@@ -2300,7 +2305,8 @@ where
         operations: Vec<Operation>,
     ) -> Result<Option<RoundTimeout>, ChainClientError> {
         match self.process_pending_block_without_prepare_without_block_proposal().await? {
-            ClientOutcome::Committed(Some(_)) => {
+            ClientOutcome::Committed(Some(raw_block_proposal)) => {
+                self.raw_block_proposals.push_back(raw_block_proposal);
                 return Ok(None)
             }
             ClientOutcome::Committed(None) => {},
@@ -2312,8 +2318,12 @@ where
             .set_pending_block(incoming_messages, operations)
             .await?;
         match self.process_pending_block_without_prepare_without_block_proposal().await? {
+            ClientOutcome::Committed(Some(raw_block_proposal)) => {
+                self.raw_block_proposals.push_back(raw_block_proposal);
+                return Ok(None)
+            }
+            ClientOutcome::Committed(None) => Ok(None),
             ClientOutcome::WaitForTimeout(timeout) => Ok(Some(timeout)),
-            _ => Ok(None),
         }
     }
 
