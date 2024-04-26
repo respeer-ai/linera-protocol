@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    collections::{hash_map, BTreeMap, HashMap, VecDeque},
+    collections::{hash_map, BTreeMap, HashMap},
     convert::Infallible,
     iter,
     num::NonZeroUsize,
@@ -153,7 +153,7 @@ impl<ValidatorNodeProvider: Clone> ChainClientBuilder<ValidatorNodeProvider> {
             next_block_height,
             pending_block,
             node_client,
-            raw_block_proposals: VecDeque::new(),
+            pending_raw_block: None,
         }
     }
 }
@@ -220,7 +220,7 @@ pub struct ChainClient<ValidatorNodeProvider, Storage> {
     node_client: LocalNodeClient<Storage>,
 
     /// Raw block proposal list waiting for sign
-    raw_block_proposals: VecDeque<RawBlockProposal>,
+    pending_raw_block: Option<RawBlockProposal>,
 }
 
 /// Error type for [`ChainClient`].
@@ -2060,7 +2060,7 @@ where
         &mut self,
         block: Block,
         round: Round,
-    ) -> Result<RawBlockProposal, ChainClientError> {
+    ) -> Result<(), ChainClientError> {
         ensure!(
             block.height == self.next_block_height,
             ChainClientError::BlockProposalError("Unexpected block height")
@@ -2120,7 +2120,7 @@ where
             .node_client
             .read_or_download_blobs(nodes, block.bytecode_locations())
             .await?;
-        Ok(RawBlockProposal {
+        self.pending_raw_block = Some(RawBlockProposal {
             content: BlockAndRound {
                 block: block.clone(),
                 round,
@@ -2129,14 +2129,9 @@ where
             blobs,
             validated,
             value: hashed_value,
-        })
-    }
-
-    fn front_raw_block_proposal(&mut self) -> Result<RawBlockProposal, ChainClientError> {
-        match self.raw_block_proposals.front_mut() {
-            Some(raw_block_proposal) => Ok(raw_block_proposal.clone()),
-            None => Err(ChainClientError::InvalidRawBlockProposal),
-        }
+        });
+        self.pending_block = Some(block);
+        Ok(())
     }
 
     pub async fn submit_extenal_signed_block_proposal(
@@ -2144,9 +2139,12 @@ where
         proposal: BlockProposal,
         round: Round,
     ) -> Result<Certificate, ChainClientError> {
-        let raw_block_proposal = self.front_raw_block_proposal()?;
+        let raw_block = match &self.pending_raw_block {
+            Some(raw_block) => raw_block.clone(),
+            _ => return Err(ChainClientError::InvalidRawBlockProposal),
+        };
         ensure!(
-            raw_block_proposal.content.round != round,
+            raw_block.content.round != round,
             ChainClientError::InvalidRawBlockProposal
         );
         // Check the final block proposal. This will be cheaper after #1401.
@@ -2154,14 +2152,13 @@ where
             .handle_block_proposal(proposal.clone())
             .await?;
         // Remember what we are trying to do before sending the proposal to the validators.
-        // self.pending_block = Some(raw_block_proposal.content.block.clone());
         // Send the query to validators.
         let committee = self.local_committee().await?;
         let certificate = self
-            .submit_block_proposal(&committee, proposal, raw_block_proposal.value.clone())
+            .submit_block_proposal(&committee, proposal, raw_block.value.clone())
             .await?;
-        let _ = self.raw_block_proposals.pop_front();
-        // self.pending_block = None;
+        self.pending_raw_block = None;
+        self.clear_pending_block();
         // Communicate the new certificate now.
         self.communicate_chain_updates(
             &committee,
@@ -2192,7 +2189,7 @@ where
     /// executed_block to pending list, then let client to fetch
     async fn process_pending_block_without_prepare_without_block_proposal(
         &mut self,
-    ) -> Result<ClientOutcome<Option<RawBlockProposal>>, ChainClientError> {
+    ) -> Result<bool, ChainClientError> {
         let identity = self.identity().await?;
         let mut info = self.chain_info_with_manager_values().await?;
         // If the current round has timed out, we request a timeout certificate and retry in
@@ -2210,26 +2207,18 @@ where
                 self.pending_block = None;
             }
         }
+        if let Some(raw_block) = &self.pending_raw_block {
+            if raw_block.content.block.height == info.next_block_height {
+                return Ok(true)
+            }
+            self.pending_raw_block = None
+        }
         // If there is a validated block in the current round, finalize it.
         if let Some(certificate) = &manager.requested_locked {
             if certificate.round == manager.current_round {
                 let committee = self.local_committee().await?;
                 match self.finalize_block(&committee, *certificate.clone()).await {
-                    Ok(_) => return Ok(ClientOutcome::Committed(None)),
-                    Err(ChainClientError::CommunicationError(_)) => {
-                        // Communication errors in this case often mean that someone else already
-                        // finalized the block.
-                        let timestamp = manager.round_timeout.ok_or_else(|| {
-                            ChainClientError::BlockProposalError(
-                                "Cannot propose in the current round.",
-                            )
-                        })?;
-                        return Ok(ClientOutcome::WaitForTimeout(RoundTimeout {
-                            timestamp,
-                            current_round: manager.current_round,
-                            next_block_height: info.next_block_height,
-                        }));
-                    }
+                    Ok(_) => return Ok(false),
                     Err(error) => return Err(error),
                 }
             }
@@ -2245,7 +2234,7 @@ where
                 .map(|proposal| &proposal.content.block))
             .or(self.pending_block.as_ref());
         let Some(block) = maybe_block else {
-            return Ok(ClientOutcome::Committed(None)); // Nothing to propose.
+            return Ok(false); // Nothing to propose.
         };
         // If there is a conflicting proposal in the current round, we can only propose if the
         // next round can be started without a timeout, i.e. if we are in a multi-leader round.
@@ -2263,12 +2252,8 @@ where
             .filter(|_| manager.current_round.is_multi_leader())
         {
             round
-        } else if let Some(timestamp) = manager.round_timeout {
-            return Ok(ClientOutcome::WaitForTimeout(RoundTimeout {
-                timestamp,
-                current_round: manager.current_round,
-                next_block_height: info.next_block_height,
-            }));
+        } else if let Some(_) = manager.round_timeout {
+            return Ok(false);
         } else {
             return Err(ChainClientError::BlockProposalError(
                 "Conflicting proposal in the current round.",
@@ -2280,18 +2265,10 @@ where
             Round::SingleLeader(_) | Round::Validator(_) => manager.leader == Some(identity),
         };
         if can_propose {
-            let raw_block_proposal = self.propose_block_without_block_proposal(block.clone(), round).await?;
-            Ok(ClientOutcome::Committed(Some(raw_block_proposal)))
+            self.propose_block_without_block_proposal(block.clone(), round).await?;
+            Ok(true)
         } else {
-            // TODO(#1424): Local timeout might not match validators' exactly.
-            let timestamp = manager.round_timeout.ok_or_else(|| {
-                ChainClientError::BlockProposalError("Cannot propose in the current round.")
-            })?;
-            Ok(ClientOutcome::WaitForTimeout(RoundTimeout {
-                timestamp,
-                current_round: manager.current_round,
-                next_block_height: info.next_block_height,
-            }))
+            Ok(false)
         }
     }
 
@@ -2305,28 +2282,15 @@ where
         &mut self,
         incoming_messages: Vec<IncomingMessage>,
         operations: Vec<Operation>,
-    ) -> Result<Option<RoundTimeout>, ChainClientError> {
-        match self.process_pending_block_without_prepare_without_block_proposal().await? {
-            ClientOutcome::Committed(Some(raw_block_proposal)) => {
-                self.raw_block_proposals.push_back(raw_block_proposal);
-                return Ok(None)
-            }
-            ClientOutcome::Committed(None) => {},
-            ClientOutcome::WaitForTimeout(timeout) => {
-                return Ok(Some(timeout))
-            }
+    ) -> Result<(), ChainClientError> {
+        if self.process_pending_block_without_prepare_without_block_proposal().await? {
+            return Ok(())
         }
         let _ = self
             .set_pending_block(incoming_messages, operations)
             .await?;
-        match self.process_pending_block_without_prepare_without_block_proposal().await? {
-            ClientOutcome::Committed(Some(raw_block_proposal)) => {
-                self.raw_block_proposals.push_back(raw_block_proposal);
-                return Ok(None)
-            }
-            ClientOutcome::Committed(None) => Ok(None),
-            ClientOutcome::WaitForTimeout(timeout) => Ok(Some(timeout)),
-        }
+        self.process_pending_block_without_prepare_without_block_proposal().await?;
+        Ok(())
     }
 
     /// Creates an empty block to process all incoming messages. This may require several blocks.
@@ -2338,14 +2302,14 @@ where
     /// executed_block to pending list, then let client to fetch
     pub async fn process_inbox_without_block_proposal(
         &mut self,
-    ) -> Result<Option<RoundTimeout>, ChainClientError> {
+    ) -> Result<(), ChainClientError> {
         self.prepare_chain().await?;
         loop {
             let incoming_messages = self.pending_messages().await?;
             if incoming_messages.is_empty() {
-                return Ok(None)
+                return Ok(())
             }
-            self.execute_block_without_block_proposal(incoming_messages, vec![]).await?;
+            return self.execute_block_without_block_proposal(incoming_messages, vec![]).await;
         }
     }
 
@@ -2356,13 +2320,13 @@ where
     /// executed_block to pending list, then let client to fetch
     pub async fn process_inbox_if_owned_without_block_proposal(
         &mut self,
-    ) -> Result<Option<RoundTimeout>, ChainClientError> {
+    ) -> Result<(), ChainClientError> {
         self.process_inbox_without_block_proposal().await
     }
 
     pub async fn peek_candidate_block_and_round(&mut self) -> Option<BlockAndRound> {
-        match self.raw_block_proposals.front() {
-            Some(raw_block_proposal) => Some(raw_block_proposal.content.clone()),
+        match &self.pending_raw_block {
+            Some(raw_block) => Some(raw_block.content.clone()),
             _ => None,
         }
     }

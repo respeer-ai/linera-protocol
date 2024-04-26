@@ -887,7 +887,8 @@ where
     /// Returns the pending message of the chain
     async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingMessage>, Error> {
         let mut client = self.clients.try_client_lock(&chain_id).await?;
-        Ok(client.pending_messages().await?)
+        let messages = client.pending_messages().await?;
+        Ok(messages)
     }
 
     /// Returns the next raw block proposal
