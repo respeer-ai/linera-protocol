@@ -70,6 +70,14 @@ type Block {
 }
 
 """
+A block with a round number.
+"""
+type BlockAndRound {
+	block: Block!
+	round: Round!
+}
+
+"""
 A block height to identify blocks in a chain
 """
 scalar BlockHeight
@@ -702,6 +710,10 @@ type QueryRoot {
 	Returns the pending message of the chain
 	"""
 	pendingMessages(chainId: ChainId!): [IncomingMessage!]!
+	"""
+	Returns the next raw block proposal
+	"""
+	peekCandidateBlockAndRound(chainId: ChainId!): BlockAndRound
 }
 
 type QueueView_BlockHeight_f5d50b5f {
@@ -796,6 +808,11 @@ input ResourceControlPolicy {
 	"""
 	maximumBytesWrittenPerBlock: Int!
 }
+
+"""
+A number to identify successive attempts to decide a value in a consensus protocol.
+"""
+scalar Round
 
 
 type SubscriptionRoot {

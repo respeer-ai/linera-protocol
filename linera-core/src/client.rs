@@ -2132,19 +2132,21 @@ where
         })
     }
 
+    fn front_raw_block_proposal(&mut self) -> Result<RawBlockProposal, ChainClientError> {
+        match self.raw_block_proposals.front_mut() {
+            Some(raw_block_proposal) => Ok(raw_block_proposal.clone()),
+            None => Err(ChainClientError::InvalidRawBlockProposal),
+        }
+    }
+
     pub async fn submit_extenal_signed_block_proposal(
         &mut self,
         proposal: BlockProposal,
-        hashed_value: HashedValue,
+        round: Round,
     ) -> Result<Certificate, ChainClientError> {
-        let raw_block_proposal = match self.raw_block_proposals.front() {
-            Some(raw_block_proposal) => raw_block_proposal,
-            None => {
-                return Err(ChainClientError::InvalidRawBlockProposal)
-            }
-        };
+        let raw_block_proposal = self.front_raw_block_proposal()?;
         ensure!(
-            raw_block_proposal.value != hashed_value,
+            raw_block_proposal.content.round != round,
             ChainClientError::InvalidRawBlockProposal
         );
         // Check the final block proposal. This will be cheaper after #1401.
@@ -2156,7 +2158,7 @@ where
         // Send the query to validators.
         let committee = self.local_committee().await?;
         let certificate = self
-            .submit_block_proposal(&committee, proposal, hashed_value)
+            .submit_block_proposal(&committee, proposal, raw_block_proposal.value.clone())
             .await?;
         let _ = self.raw_block_proposals.pop_front();
         // self.pending_block = None;
@@ -2358,6 +2360,12 @@ where
         self.process_inbox_without_block_proposal().await
     }
 
+    pub async fn peek_candidate_block_and_round(&mut self) -> Option<BlockAndRound> {
+        match self.raw_block_proposals.front() {
+            Some(raw_block_proposal) => Some(raw_block_proposal.content.clone()),
+            _ => None,
+        }
+    }
 }
 
 /// The outcome of trying to commit a list of incoming messages and operations to the chain.

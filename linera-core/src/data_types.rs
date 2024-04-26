@@ -333,7 +333,7 @@ impl<T> ClientOutcome<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawBlockProposal {
     pub content: BlockAndRound,
     pub owner: Owner,
