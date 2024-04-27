@@ -96,7 +96,7 @@ where
         }
     }
 
-    fn run_with_chain_id<C>(
+    pub(crate) fn run_with_chain_id<C>(
         chain_id: ChainId,
         clients: ChainClients<P, S>,
         context: Arc<Mutex<C>>,

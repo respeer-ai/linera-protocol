@@ -18,7 +18,7 @@ use futures::{
 };
 use linera_base::{
     abi::Abi,
-    crypto::{CryptoHash, KeyPair, PublicKey},
+    crypto::{CryptoHash, KeyPair, PublicKey, Signature},
     data_types::{Amount, ApplicationPermissions, ArithmeticError, BlockHeight, Round, Timestamp},
     ensure,
     identifiers::{Account, ApplicationId, BytecodeId, ChainId, MessageId, Owner},
@@ -2136,17 +2136,24 @@ where
 
     pub async fn submit_extenal_signed_block_proposal(
         &mut self,
-        proposal: BlockProposal,
-        round: Round,
+        height: BlockHeight,
+        signature: Signature,
     ) -> Result<Certificate, ChainClientError> {
         let raw_block = match &self.pending_raw_block {
             Some(raw_block) => raw_block.clone(),
             _ => return Err(ChainClientError::InvalidRawBlockProposal),
         };
         ensure!(
-            raw_block.content.round != round,
+            raw_block.content.block.height == height,
             ChainClientError::InvalidRawBlockProposal
         );
+        let proposal = BlockProposal {
+            content: raw_block.content,
+            owner: raw_block.owner,
+            signature,
+            blobs: raw_block.blobs,
+            validated: raw_block.validated,
+        };
         // Check the final block proposal. This will be cheaper after #1401.
         self.node_client
             .handle_block_proposal(proposal.clone())

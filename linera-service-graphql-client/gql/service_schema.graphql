@@ -618,6 +618,10 @@ type MutationRoot {
 	ResPeer::CheCko::Initialize offline wallet
 	"""
 	walletInitWithoutKeypair(publicKey: PublicKey!, faucetUrl: String!, chainId: ChainId!, messageId: MessageId!, withOtherChains: [ChainId!]!): ChainId!
+	"""
+	Submit pending block proposal signature
+	"""
+	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): HashedValue!
 }
 
 """
@@ -813,6 +817,11 @@ input ResourceControlPolicy {
 A number to identify successive attempts to decide a value in a consensus protocol.
 """
 scalar Round
+
+"""
+A signature value
+"""
+scalar Signature
 
 
 type SubscriptionRoot {

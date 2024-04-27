@@ -20,8 +20,8 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{CryptoError, CryptoHash, PublicKey},
-    data_types::{Amount, ApplicationPermissions, TimeDelta, Timestamp},
+    crypto::{CryptoError, CryptoHash, PublicKey, Signature},
+    data_types::{Amount, ApplicationPermissions, TimeDelta, Timestamp, BlockHeight},
     identifiers::{ApplicationId, BytecodeId, ChainId, Owner, MessageId},
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
@@ -122,6 +122,7 @@ pub struct MutationRoot<P, S, C> {
     storage: S,
     clients: ChainClients<P, S>,
     context: Arc<Mutex<C>>,
+    config: ChainListenerConfig,
 }
 
 #[derive(Debug, ThisError)]
@@ -289,6 +290,7 @@ where
 impl<P, S, C> MutationRoot<P, S, C>
 where
     P: ValidatorNodeProvider + Send + Sync + 'static,
+    <<P as ValidatorNodeProvider>::Node as ValidatorNode>::NotificationStream: Send,
     S: Storage + Clone + Send + Sync + 'static,
     C: ClientContext<P> + Send + 'static,
     ViewError: From<S::ContextError>,
@@ -794,7 +796,21 @@ where
             .set_default_chain(chain_id)?;
         self.context.lock().await.save_wallet();
 
+        ChainListener::run_with_chain_id(
+            chain_id,
+            self.clients.clone(),
+            self.context.clone(),
+            self.storage.clone(),
+            self.config.clone(),
+        );
+
         Ok(chain_id)
+    }
+
+    /// Submit pending block proposal signature
+    async fn submit_block_signature(&self, chain_id: ChainId, height: BlockHeight, signature: Signature) -> Result<CryptoHash, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        Ok(client.submit_extenal_signed_block_proposal(height, signature).await?.value.hash())
     }
 }
 
@@ -887,8 +903,7 @@ where
     /// Returns the pending message of the chain
     async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingMessage>, Error> {
         let mut client = self.clients.try_client_lock(&chain_id).await?;
-        let messages = client.pending_messages().await?;
-        Ok(messages)
+        Ok(client.pending_messages().await?)
     }
 
     /// Returns the next raw block proposal
@@ -1068,6 +1083,7 @@ where
                 storage: self.storage.clone(),
                 clients: self.clients.clone(),
                 context: self.context.clone(),
+                config: self.config.clone(),
             },
             SubscriptionRoot {
                 clients: self.clients.clone(),
