@@ -20,13 +20,13 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{CryptoError, CryptoHash, PublicKey, Signature},
+    crypto::{CryptoError, CryptoHash, PublicKey, Signature, Hashable},
     data_types::{Amount, ApplicationPermissions, TimeDelta, Timestamp, BlockHeight},
     identifiers::{ApplicationId, BytecodeId, ChainId, Owner, MessageId},
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
-use linera_chain::{data_types::{CertificateValue, HashedValue, IncomingMessage, BlockAndRound}, ChainStateView};
+use linera_chain::{data_types::{CertificateValue, HashedValue, IncomingMessage}, ChainStateView};
 use linera_core::{
     client::{ArcChainClient, ChainClient, ChainClientError},
     data_types::{ClientOutcome, RoundTimeout},
@@ -103,6 +103,12 @@ impl<P, S> ChainClients<P, S> {
     pub(crate) async fn map_lock(&self) -> MutexGuard<ClientMapInner<P, S>> {
         self.0.lock().await
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct RawBlockAndRound {
+    pub height: BlockHeight,
+    pub block_bytes: Vec<u8>,
 }
 
 /// Our root GraphQL query type.
@@ -907,9 +913,19 @@ where
     }
 
     /// Returns the next raw block proposal
-    async fn peek_candidate_block_and_round(&self, chain_id: ChainId) -> Result<Option<BlockAndRound>, Error> {
+    async fn peek_candidate_block_and_round(&self, chain_id: ChainId) -> Result<Option<RawBlockAndRound>, Error> {
         let mut client = self.clients.try_client_lock(&chain_id).await?;
-        Ok(client.peek_candidate_block_and_round().await)
+        match client.peek_candidate_block_and_round().await {
+            Some(block_and_round) => {
+                let mut message = Vec::new();
+                block_and_round.write(&mut message);
+                Ok(Some(RawBlockAndRound {
+                    height: block_and_round.block.height,
+                    block_bytes: message,
+                }))
+            }
+            _ => Ok(None)
+        }
     }
 }
 

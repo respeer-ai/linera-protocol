@@ -70,14 +70,6 @@ type Block {
 }
 
 """
-A block with a round number.
-"""
-type BlockAndRound {
-	block: Block!
-	round: Round!
-}
-
-"""
 A block height to identify blocks in a chain
 """
 scalar BlockHeight
@@ -621,7 +613,7 @@ type MutationRoot {
 	"""
 	Submit pending block proposal signature
 	"""
-	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): HashedValue!
+	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): CryptoHash!
 }
 
 """
@@ -717,7 +709,7 @@ type QueryRoot {
 	"""
 	Returns the next raw block proposal
 	"""
-	peekCandidateBlockAndRound(chainId: ChainId!): BlockAndRound
+	peekCandidateBlockAndRound(chainId: ChainId!): RawBlockAndRound
 }
 
 type QueueView_BlockHeight_f5d50b5f {
@@ -730,6 +722,11 @@ type QueueView_Event_fd202526 {
 
 type QueueView_TimestampedInboxEntry_ce4d8b86 {
 	entries(count: Int): [TimestampedInboxEntry!]!
+}
+
+type RawBlockAndRound {
+	height: BlockHeight!
+	blockBytes: [Int!]!
 }
 
 """
@@ -812,11 +809,6 @@ input ResourceControlPolicy {
 	"""
 	maximumBytesWrittenPerBlock: Int!
 }
-
-"""
-A number to identify successive attempts to decide a value in a consensus protocol.
-"""
-scalar Round
 
 """
 A signature value
