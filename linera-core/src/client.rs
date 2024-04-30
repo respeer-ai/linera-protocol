@@ -2130,7 +2130,8 @@ where
             validated,
             value: hashed_value,
         });
-        self.pending_block = Some(block);
+        self.pending_block = Some(block.clone());
+        self.node_client.handle_new_raw_block(block.chain_id, block.height).await;
         Ok(())
     }
 
@@ -2482,6 +2483,16 @@ where
                     return;
                 };
                 if (info.next_block_height, info.manager.current_round) < (height, round) {
+                    error!("Fail to synchronize new block after notification");
+                }
+            }
+            Reason::NewRawBlock { height } => {
+                let chain_id = notification.chain_id;
+                if self
+                    .local_next_block_height(chain_id, &mut local_node)
+                    .await
+                    < Some(height)
+                {
                     error!("Fail to synchronize new block after notification");
                 }
             }

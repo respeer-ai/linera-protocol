@@ -710,6 +710,10 @@ type QueryRoot {
 	Returns the next raw block proposal
 	"""
 	peekCandidateBlockAndRound(chainId: ChainId!): RawBlockAndRound
+	"""
+	Returns the balance of given owner
+	"""
+	balance(chainId: ChainId!, publicKey: PublicKey): Amount!
 }
 
 type QueueView_BlockHeight_f5d50b5f {

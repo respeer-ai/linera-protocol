@@ -225,6 +225,7 @@ where
                     );
                 }
             }
+            Reason::NewRawBlock { .. } => {},
         }
     }
 }

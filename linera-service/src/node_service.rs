@@ -927,6 +927,15 @@ where
             _ => Ok(None)
         }
     }
+
+    /// Returns the balance of given owner
+    async fn balance(&self, chain_id: ChainId, public_key: Option<PublicKey>) -> Result<Amount, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        Ok(match public_key {
+            Some(public_key) => client.query_owner_balance(Owner::from(public_key)).await?,
+            _ => client.query_balance().await?,
+        })
+    }
 }
 
 // What follows is a hack to add a chain_id field to `ChainStateView` based on
@@ -1270,6 +1279,7 @@ pub async fn wait_for_next_round(stream: &mut NotificationStream, timeout: Round
         Reason::NewBlock { height, .. } => *height >= timeout.next_block_height,
         Reason::NewRound { round, .. } => *round > timeout.current_round,
         Reason::NewIncomingMessage { .. } => false,
+        Reason::NewRawBlock { height } => *height >= timeout.next_block_height,
     });
     future::select(
         Box::pin(stream.next()),
