@@ -276,6 +276,9 @@ pub enum ChainClientError {
 
     #[error("Invalid raw block proposal")]
     InvalidRawBlockProposal,
+
+    #[error("Mismatch block height {0} != {1}")]
+    MismatchBlockHeight(BlockHeight, BlockHeight),
 }
 
 impl From<Infallible> for ChainClientError {
@@ -2146,7 +2149,7 @@ where
         };
         ensure!(
             raw_block.content.block.height == height,
-            ChainClientError::InvalidRawBlockProposal
+            ChainClientError::MismatchBlockHeight(raw_block.content.block.height, height)
         );
         let proposal = BlockProposal {
             content: raw_block.content,
@@ -2337,6 +2340,28 @@ where
             Some(raw_block) => Some(raw_block.content.clone()),
             _ => None,
         }
+    }
+
+    /// Sends money.
+    pub async fn transfer_without_block_proposal(
+        &mut self,
+        owner: Option<Owner>,
+        amount: Amount,
+        recipient: Recipient,
+        user_data: UserData,
+    ) -> Result<(), ChainClientError> {
+        // TODO(#467): check the balance of `owner` before signing any block proposal.
+        self.prepare_chain().await?;
+        let incoming_messages = self.pending_messages().await?;
+        self.execute_block_without_block_proposal(
+            incoming_messages,
+            vec![Operation::System(SystemOperation::Transfer {
+                owner,
+                recipient,
+                amount,
+                user_data,
+            })]
+        ).await
     }
 }
 

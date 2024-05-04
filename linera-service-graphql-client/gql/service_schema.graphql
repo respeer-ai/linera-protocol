@@ -614,6 +614,12 @@ type MutationRoot {
 	Submit pending block proposal signature
 	"""
 	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): CryptoHash!
+	"""
+	Transfers `amount` units of value from the given owner's account to the recipient.
+	If no owner is given, try to take the units out of the unattributed account.
+	Different from transfer, node service won't sign block in transfer_without_block_proposal
+	"""
+	transferWithoutBlockProposal(fromChainId: ChainId!, fromPublicKey: PublicKey, toChainId: ChainId!, toPublicKey: PublicKey, amount: Amount!, userData: UserData): ChainId!
 }
 
 """

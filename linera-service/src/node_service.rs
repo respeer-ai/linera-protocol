@@ -22,7 +22,7 @@ use futures::{
 use linera_base::{
     crypto::{CryptoError, CryptoHash, PublicKey, Signature, Hashable},
     data_types::{Amount, ApplicationPermissions, TimeDelta, Timestamp, BlockHeight},
-    identifiers::{ApplicationId, BytecodeId, ChainId, Owner, MessageId},
+    identifiers::{ApplicationId, BytecodeId, ChainId, Owner, MessageId, Account},
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
@@ -817,6 +817,39 @@ where
     async fn submit_block_signature(&self, chain_id: ChainId, height: BlockHeight, signature: Signature) -> Result<CryptoHash, Error> {
         let mut client = self.clients.try_client_lock(&chain_id).await?;
         Ok(client.submit_extenal_signed_block_proposal(height, signature).await?.value.hash())
+    }
+
+    /// Transfers `amount` units of value from the given owner's account to the recipient.
+    /// If no owner is given, try to take the units out of the unattributed account.
+    /// Different from transfer, node service won't sign block in transfer_without_block_proposal
+    async fn transfer_without_block_proposal(
+        &self,
+        from_chain_id: ChainId,
+        from_public_key: Option<PublicKey>,
+        to_chain_id: ChainId,
+        to_public_key: Option<PublicKey>,
+        amount: Amount,
+        user_data: Option<UserData>,
+    ) -> Result<ChainId, Error> {
+        let from_owner = match from_public_key {
+            Some(public_key) => Some(Owner::from(public_key)),
+            _ => None,
+        };
+        let to_owner = match to_public_key {
+            Some(public_key) => Some(Owner::from(public_key)),
+            _ => None,
+        };
+        let mut client = self.clients.try_client_lock(&from_chain_id).await?;
+        client.transfer_without_block_proposal(
+            from_owner,
+            amount,
+            Recipient::Account(Account {
+                chain_id: to_chain_id,
+                owner: to_owner,
+            }),
+            user_data.unwrap_or_default(),
+        ).await?;
+        Ok(from_chain_id)
     }
 }
 
