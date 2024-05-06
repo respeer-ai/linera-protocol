@@ -111,6 +111,12 @@ pub struct RawBlockAndRound {
     pub block_bytes: Vec<u8>,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct ChainAccountBalances {
+    chain_balance: Amount,
+    account_balances: HashMap<PublicKey, Amount>,
+}
+
 /// Our root GraphQL query type.
 pub struct QueryRoot<P, S> {
     clients: ChainClients<P, S>,
@@ -968,6 +974,23 @@ where
             Some(public_key) => client.query_owner_balance(Owner::from(public_key)).await?,
             _ => client.query_balance().await?,
         })
+    }
+
+    /// Returns the balances of given owners
+    async fn balances(&self, chain_ids: Vec<ChainId>, public_keys: Vec<PublicKey>) -> Result<HashMap<ChainId, ChainAccountBalances>, Error> {
+        let mut chain_balances = HashMap::new();
+        for chain_id in &chain_ids {
+            let mut client = self.clients.try_client_lock(&chain_id).await?;
+            let mut account_balances = HashMap::new();
+            for public_key in &public_keys {
+                account_balances.insert(*public_key, client.query_owner_balance(Owner::from(public_key)).await?);
+            }
+            chain_balances.insert(*chain_id, ChainAccountBalances {
+                chain_balance: client.query_balance().await?,
+                account_balances,
+            });
+        }
+        Ok(chain_balances)
     }
 }
 
