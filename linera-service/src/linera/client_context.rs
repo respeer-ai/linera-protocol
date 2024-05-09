@@ -84,7 +84,7 @@ impl chain_listener::ClientContext<NodeProvider> for ClientContext {
     }
 
     fn wallet_mut(&mut self) -> &mut Wallet {
-        &mut self.wallet_state.inner()
+        self.wallet_state.inner_mut()
     }
 
     fn make_chain_client<S>(&self, storage: S, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
