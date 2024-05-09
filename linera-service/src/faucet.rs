@@ -1,7 +1,7 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{net::SocketAddr, num::NonZeroU16, sync::Arc};
+use std::{net::{SocketAddr, IpAddr, Ipv4Addr}, num::NonZeroU16, sync::Arc};
 
 use async_graphql::{EmptySubscription, Error, Object, Schema, SimpleObject};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
@@ -26,6 +26,7 @@ use serde_json::json;
 use thiserror::Error as ThisError;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
+use local_ip_address::local_ip;
 
 use crate::{chain_listener::ClientContext, config::GenesisConfig, util};
 
@@ -280,7 +281,8 @@ where
             .layer(Extension(self.clone()))
             .layer(CorsLayer::permissive());
 
-        info!("GraphiQL IDE: http://localhost:{}", port);
+        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
         axum::serve(
             tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?,

@@ -14,6 +14,7 @@ use linera_core::{
         ValidatorNode,
     },
 };
+use linera_rpc::node_provider::NodeProvider;
 use linera_execution::committee::Committee;
 use linera_service::{
     chain_listener::{ChainListenerConfig, ClientContext},
@@ -103,6 +104,10 @@ impl ClientContext<DummyValidatorNodeProvider> for DummyContext {
         unimplemented!()
     }
 
+    fn wallet_mut(&mut self) -> &mut Wallet {
+        unimplemented!()
+    }
+
     fn make_chain_client<S>(&self, _: S, _: ChainId) -> ChainClient<DummyValidatorNodeProvider, S> {
         unimplemented!()
     }
@@ -116,6 +121,14 @@ impl ClientContext<DummyValidatorNodeProvider> for DummyContext {
         S: Storage + Clone + Send + Sync + 'static,
         ViewError: From<S::ContextError>,
     {
+    }
+
+    fn save_wallet(&mut self) {
+        unimplemented!()
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        unimplemented!()
     }
 }
 

@@ -14,6 +14,7 @@ use linera_base::{
     data_types::Timestamp,
     identifiers::{ChainId, Destination},
 };
+use linera_rpc::node_provider::NodeProvider;
 use linera_chain::data_types::OutgoingMessage;
 use linera_core::{
     client::{ArcChainClient, ChainClient},
@@ -46,6 +47,8 @@ pub struct ChainListenerConfig {
 pub trait ClientContext<P: ValidatorNodeProvider> {
     fn wallet(&self) -> &Wallet;
 
+    fn wallet_mut(&mut self) -> &mut Wallet;
+
     fn make_chain_client<S>(&self, storage: S, chain_id: ChainId) -> ChainClient<P, S>;
 
     fn update_wallet_for_new_chain(
@@ -59,6 +62,10 @@ pub trait ClientContext<P: ValidatorNodeProvider> {
     where
         S: Storage + Clone + Send + Sync + 'static,
         ViewError: From<S::ContextError>;
+
+    fn save_wallet(&mut self);
+
+    fn make_node_provider(&self) -> NodeProvider;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
@@ -97,7 +104,7 @@ where
         }
     }
 
-    fn run_with_chain_id<C>(
+    pub(crate) fn run_with_chain_id<C>(
         chain_id: ChainId,
         clients: ChainClients<P, S>,
         context: Arc<Mutex<C>>,
@@ -147,10 +154,11 @@ where
                 Either::Left((Some(notification), _)) => notification,
                 Either::Left((None, _)) => break,
                 Either::Right(((), _)) => {
-                    match client.lock().await.process_inbox_if_owned().await {
+                    match client.lock().await.process_inbox_if_owned_without_block_proposal().await {
                         Err(error) => warn!(%error, "Failed to process inbox."),
-                        Ok((_, None)) => timeout = Timestamp::from(u64::MAX),
-                        Ok((_, Some(new_timeout))) => timeout = new_timeout.timestamp,
+                        // Ok((_, None)) => timeout = Timestamp::from(u64::MAX),
+                        // Ok((_, Some(new_timeout))) => timeout = new_timeout.timestamp,
+                        Ok(_) => {},
                     }
                     continue;
                 }
@@ -159,7 +167,7 @@ where
             Self::maybe_sleep(config.delay_before_ms).await;
             match &notification.reason {
                 Reason::NewIncomingMessage { .. } => timeout = storage.clock().current_time(),
-                Reason::NewBlock { .. } | Reason::NewRound { .. } => {
+                Reason::NewBlock { .. } | Reason::NewRound { .. } | Reason::NewRawBlock { .. } => {
                     if let Err(error) = client.lock().await.update_validators().await {
                         warn!(
                             "Failed to update validators about the local chain after \
