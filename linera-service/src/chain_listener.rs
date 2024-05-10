@@ -41,6 +41,12 @@ pub struct ChainListenerConfig {
     /// Wait after processing any notification (useful for rate limiting).
     #[arg(long = "listener-delay-after-ms", default_value = "0")]
     pub delay_after_ms: u64,
+
+    /*
+    /// Use external signing service.
+    #[arg(long = "external-signing", default_value = "true")]
+    pub external_signing: bool,
+    */
 }
 
 #[async_trait]
