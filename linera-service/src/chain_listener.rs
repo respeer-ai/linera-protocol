@@ -42,11 +42,9 @@ pub struct ChainListenerConfig {
     #[arg(long = "listener-delay-after-ms", default_value = "0")]
     pub delay_after_ms: u64,
 
-    /*
     /// Use external signing service.
     #[arg(long = "external-signing", default_value = "true")]
     pub external_signing: bool,
-    */
 }
 
 #[async_trait]
@@ -160,11 +158,15 @@ where
                 Either::Left((Some(notification), _)) => notification,
                 Either::Left((None, _)) => break,
                 Either::Right(((), _)) => {
-                    match client.lock().await.process_inbox_if_owned_without_block_proposal().await {
+                    let result = if config.external_signing {
+                        client.lock().await.process_inbox_if_owned_without_block_proposal().await
+                    } else {
+                        client.lock().await.process_inbox_if_owned().await
+                    };
+                    match result {
                         Err(error) => warn!(%error, "Failed to process inbox."),
-                        // Ok((_, None)) => timeout = Timestamp::from(u64::MAX),
-                        // Ok((_, Some(new_timeout))) => timeout = new_timeout.timestamp,
-                        Ok(_) => {},
+                        Ok((_, None)) => timeout = Timestamp::from(u64::MAX),
+                        Ok((_, Some(new_timeout))) => timeout = new_timeout.timestamp,
                     }
                     continue;
                 }

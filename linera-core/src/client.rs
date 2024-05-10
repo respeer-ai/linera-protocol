@@ -2211,7 +2211,7 @@ where
     /// executed_block to pending list, then let client to fetch
     async fn process_pending_block_without_prepare_without_block_proposal(
         &mut self,
-    ) -> Result<bool, ChainClientError> {
+    ) -> Result<ClientOutcome<bool>, ChainClientError> {
         let identity = self.identity().await?;
         let mut info = self.chain_info_with_manager_values().await?;
         // If the current round has timed out, we request a timeout certificate and retry in
@@ -2231,7 +2231,7 @@ where
         }
         if let Some(raw_block) = &self.pending_raw_block {
             if raw_block.content.block.height == info.next_block_height {
-                return Ok(true)
+                return Ok(ClientOutcome::Committed(true))
             }
             self.pending_raw_block = None
         }
@@ -2240,7 +2240,21 @@ where
             if certificate.round == manager.current_round {
                 let committee = self.local_committee().await?;
                 match self.finalize_block(&committee, *certificate.clone()).await {
-                    Ok(_) => return Ok(false),
+                    Ok(_) => return Ok(ClientOutcome::Committed(false)),
+                    Err(ChainClientError::CommunicationError(_)) => {
+                        // Communication errors in this case often mean that someone else already
+                        // finalized the block.
+                        let timestamp = manager.round_timeout.ok_or_else(|| {
+                            ChainClientError::BlockProposalError(
+                                "Cannot propose in the current round.",
+                            )
+                        })?;
+                        return Ok(ClientOutcome::WaitForTimeout(RoundTimeout {
+                            timestamp,
+                            current_round: manager.current_round,
+                            next_block_height: info.next_block_height,
+                        }));
+                    }
                     Err(error) => return Err(error),
                 }
             }
@@ -2256,7 +2270,7 @@ where
                 .map(|proposal| &proposal.content.block))
             .or(self.pending_block.as_ref());
         let Some(block) = maybe_block else {
-            return Ok(false); // Nothing to propose.
+            return Ok(ClientOutcome::Committed(false)); // Nothing to propose.
         };
         // If there is a conflicting proposal in the current round, we can only propose if the
         // next round can be started without a timeout, i.e. if we are in a multi-leader round.
@@ -2275,7 +2289,7 @@ where
         {
             round
         } else if let Some(_) = manager.round_timeout {
-            return Ok(false);
+            return Ok(ClientOutcome::Committed(false));
         } else {
             return Err(ChainClientError::BlockProposalError(
                 "Conflicting proposal in the current round.",
@@ -2288,9 +2302,9 @@ where
         };
         if can_propose {
             self.propose_block_without_block_proposal(block.clone(), round).await?;
-            Ok(true)
+            Ok(ClientOutcome::Committed(true))
         } else {
-            Ok(false)
+            Ok(ClientOutcome::Committed(false))
         }
     }
 
@@ -2304,15 +2318,27 @@ where
         &mut self,
         incoming_messages: Vec<IncomingMessage>,
         operations: Vec<Operation>,
-    ) -> Result<(), ChainClientError> {
-        if self.process_pending_block_without_prepare_without_block_proposal().await? {
-            return Ok(())
+    ) -> Result<Option<RoundTimeout>, ChainClientError> {
+        match self.process_pending_block_without_prepare_without_block_proposal().await? {
+            ClientOutcome::Committed(true) => {
+                return Ok(None)
+            }
+            ClientOutcome::Committed(false) => {}
+            ClientOutcome::WaitForTimeout(timeout) => {
+                return Ok(Some(timeout))
+            }
         }
         let _ = self
             .set_pending_block(incoming_messages, operations)
             .await?;
-        self.process_pending_block_without_prepare_without_block_proposal().await?;
-        Ok(())
+        match self.process_pending_block_without_prepare_without_block_proposal().await? {
+            ClientOutcome::Committed(true) => Ok(None),
+            // Should be unreachable: We did set a pending block.
+            ClientOutcome::Committed(false) => Err(ChainClientError::BlockProposalError(
+                "Unexpected block proposal error",
+            )),
+            ClientOutcome::WaitForTimeout(timeout) => Ok(Some(timeout)),
+        }
     }
 
     /// Creates an empty block to process all incoming messages. This may require several blocks.
@@ -2324,15 +2350,13 @@ where
     /// executed_block to pending list, then let client to fetch
     pub async fn process_inbox_without_block_proposal(
         &mut self,
-    ) -> Result<(), ChainClientError> {
+    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
         self.prepare_chain().await?;
-        loop {
-            let incoming_messages = self.pending_messages().await?;
-            if incoming_messages.is_empty() {
-                return Ok(())
-            }
-            return self.execute_block_without_block_proposal(incoming_messages, vec![]).await;
+        let incoming_messages = self.pending_messages().await?;
+        if incoming_messages.is_empty() {
+            return Ok((Vec::new(), None))
         }
+        return Ok((Vec::new(), self.execute_block_without_block_proposal(incoming_messages, vec![]).await?));
     }
 
     /// Creates an empty block to process all incoming messages. This may require several blocks.
@@ -2342,7 +2366,7 @@ where
     /// executed_block to pending list, then let client to fetch
     pub async fn process_inbox_if_owned_without_block_proposal(
         &mut self,
-    ) -> Result<(), ChainClientError> {
+    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
         self.process_inbox_without_block_proposal().await
     }
 
@@ -2369,7 +2393,8 @@ where
                 amount,
                 user_data,
             })]
-        ).await
+        ).await?;
+        Ok(())
     }
 }
 

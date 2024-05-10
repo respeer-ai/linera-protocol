@@ -144,7 +144,7 @@ async fn main() -> std::io::Result<()> {
     let config = ChainListenerConfig {
         delay_before_ms: 0,
         delay_after_ms: 0,
-        // external_signing: true,
+        external_signing: true,
     };
     let context = DummyContext;
     let service = NodeService::<DummyValidatorNodeProvider, _, _>::new(
