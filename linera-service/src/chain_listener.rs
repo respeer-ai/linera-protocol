@@ -43,7 +43,7 @@ pub struct ChainListenerConfig {
     pub delay_after_ms: u64,
 
     /// Use external signing service.
-    #[arg(long = "external-signing", default_value = "true")]
+    #[arg(long = "external-signing", action = clap::ArgAction::Set, default_value_t = true)]
     pub external_signing: bool,
 }
 

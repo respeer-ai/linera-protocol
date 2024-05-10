@@ -252,11 +252,13 @@ impl<'de> Deserialize<'de> for KeyPair {
             }
             dalek::SigningKey::from_bytes(value[..dalek::SECRET_KEY_LENGTH].try_into().map_err(serde::de::Error::custom)?)
         } else {
-            let mut key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
-            key_buf.copy_from_slice(&value[dalek::SECRET_KEY_LENGTH..dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH]);
+            let mut secret_key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
+            let mut public_key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
+            secret_key_buf.copy_from_slice(&value[0..dalek::SECRET_KEY_LENGTH]);
+            public_key_buf.copy_from_slice(&value[dalek::SECRET_KEY_LENGTH..dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH]);
             dalek::SigningKey {
-                secret_key: [0u8; dalek::SECRET_KEY_LENGTH],
-                verifying_key: PublicKey(key_buf).to_verifying_key().expect("invalid public key"),
+                secret_key: secret_key_buf,
+                verifying_key: PublicKey(public_key_buf).to_verifying_key().expect("invalid public key"),
             }
         };
         Ok(KeyPair(key))
