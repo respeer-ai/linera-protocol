@@ -141,7 +141,7 @@ impl Wallet {
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
-        ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), anyhow::Error> {
         let user_chain = UserChain {
             chain_id,
             key_pair: Some(KeyPair::from_public_key(key)),

@@ -14,8 +14,8 @@ use linera_core::{
         ValidatorNode,
     },
 };
-use linera_rpc::node_provider::NodeProvider;
 use linera_execution::committee::Committee;
+use linera_rpc::node_provider::NodeProvider;
 use linera_service::{
     chain_listener::{ChainListenerConfig, ClientContext},
     node_service::NodeService,

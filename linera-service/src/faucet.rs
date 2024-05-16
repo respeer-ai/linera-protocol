@@ -1,7 +1,11 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{net::{SocketAddr, IpAddr, Ipv4Addr}, num::NonZeroU16, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::NonZeroU16,
+    sync::Arc,
+};
 
 use async_graphql::{EmptySubscription, Error, Object, Schema, SimpleObject};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
@@ -21,12 +25,12 @@ use linera_core::{
 use linera_execution::committee::ValidatorName;
 use linera_storage::Storage;
 use linera_views::views::ViewError;
+use local_ip_address::local_ip;
 use serde::Deserialize;
 use serde_json::json;
 use thiserror::Error as ThisError;
 use tower_http::cors::CorsLayer;
 use tracing::{error, info};
-use local_ip_address::local_ip;
 
 use crate::{chain_listener::ClientContext, config::GenesisConfig, util};
 

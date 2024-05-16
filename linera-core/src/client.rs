@@ -49,7 +49,8 @@ use tracing::{debug, error, info};
 
 use crate::{
     data_types::{
-        BlockHeightRange, ChainInfo, ChainInfoQuery, ChainInfoResponse, ClientOutcome, RoundTimeout, RawBlockProposal,
+        BlockHeightRange, ChainInfo, ChainInfoQuery, ChainInfoResponse, ClientOutcome,
+        RawBlockProposal, RoundTimeout,
     },
     local_node::{LocalNodeClient, LocalNodeError},
     node::{
@@ -2145,7 +2146,9 @@ where
             value: hashed_value,
         });
         self.pending_block = Some(block.clone());
-        self.node_client.handle_new_raw_block(block.chain_id, block.height).await;
+        self.node_client
+            .handle_new_raw_block(block.chain_id, block.height)
+            .await;
         Ok(())
     }
 
@@ -2231,7 +2234,7 @@ where
         }
         if let Some(raw_block) = &self.pending_raw_block {
             if raw_block.content.block.height == info.next_block_height {
-                return Ok(ClientOutcome::Committed(true))
+                return Ok(ClientOutcome::Committed(true));
             }
             self.pending_raw_block = None
         }
@@ -2301,7 +2304,8 @@ where
             Round::SingleLeader(_) | Round::Validator(_) => manager.leader == Some(identity),
         };
         if can_propose {
-            self.propose_block_without_block_proposal(block.clone(), round).await?;
+            self.propose_block_without_block_proposal(block.clone(), round)
+                .await?;
             Ok(ClientOutcome::Committed(true))
         } else {
             Ok(ClientOutcome::Committed(false))
@@ -2319,19 +2323,21 @@ where
         incoming_messages: Vec<IncomingMessage>,
         operations: Vec<Operation>,
     ) -> Result<Option<RoundTimeout>, ChainClientError> {
-        match self.process_pending_block_without_prepare_without_block_proposal().await? {
-            ClientOutcome::Committed(true) => {
-                return Ok(None)
-            }
+        match self
+            .process_pending_block_without_prepare_without_block_proposal()
+            .await?
+        {
+            ClientOutcome::Committed(true) => return Ok(None),
             ClientOutcome::Committed(false) => {}
-            ClientOutcome::WaitForTimeout(timeout) => {
-                return Ok(Some(timeout))
-            }
+            ClientOutcome::WaitForTimeout(timeout) => return Ok(Some(timeout)),
         }
         let _ = self
             .set_pending_block(incoming_messages, operations)
             .await?;
-        match self.process_pending_block_without_prepare_without_block_proposal().await? {
+        match self
+            .process_pending_block_without_prepare_without_block_proposal()
+            .await?
+        {
             ClientOutcome::Committed(true) => Ok(None),
             // Should be unreachable: We did set a pending block.
             ClientOutcome::Committed(false) => Err(ChainClientError::BlockProposalError(
@@ -2354,9 +2360,13 @@ where
         self.prepare_chain().await?;
         let incoming_messages = self.pending_messages().await?;
         if incoming_messages.is_empty() {
-            return Ok((Vec::new(), None))
+            return Ok((Vec::new(), None));
         }
-        return Ok((Vec::new(), self.execute_block_without_block_proposal(incoming_messages, vec![]).await?));
+        return Ok((
+            Vec::new(),
+            self.execute_block_without_block_proposal(incoming_messages, vec![])
+                .await?,
+        ));
     }
 
     /// Creates an empty block to process all incoming messages. This may require several blocks.
@@ -2392,8 +2402,9 @@ where
                 recipient,
                 amount,
                 user_data,
-            })]
-        ).await?;
+            })],
+        )
+        .await?;
         Ok(())
     }
 }

@@ -11,7 +11,8 @@ use linera_base::{
 };
 use linera_chain::{
     data_types::{
-        Certificate, ChainAndHeight, HashedCertificateValue, IncomingMessage, Medium, MessageBundle, BlockAndRound,
+        BlockAndRound, Certificate, ChainAndHeight, HashedCertificateValue, IncomingMessage,
+        Medium, MessageBundle,
     },
     manager::ChainManagerInfo,
     ChainStateView,

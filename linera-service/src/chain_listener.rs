@@ -14,7 +14,6 @@ use linera_base::{
     data_types::Timestamp,
     identifiers::{ChainId, Destination},
 };
-use linera_rpc::node_provider::NodeProvider;
 use linera_chain::data_types::OutgoingMessage;
 use linera_core::{
     client::{ArcChainClient, ChainClient},
@@ -22,6 +21,7 @@ use linera_core::{
     worker::Reason,
 };
 use linera_execution::{Message, SystemMessage};
+use linera_rpc::node_provider::NodeProvider;
 use linera_storage::Storage;
 use linera_views::views::ViewError;
 use tracing::{error, info, warn};
@@ -159,7 +159,11 @@ where
                 Either::Left((None, _)) => break,
                 Either::Right(((), _)) => {
                     let result = if config.external_signing {
-                        client.lock().await.process_inbox_if_owned_without_block_proposal().await
+                        client
+                            .lock()
+                            .await
+                            .process_inbox_if_owned_without_block_proposal()
+                            .await
                     } else {
                         client.lock().await.process_inbox_if_owned().await
                     };

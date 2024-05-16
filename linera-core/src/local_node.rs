@@ -26,7 +26,7 @@ use crate::{
     data_types::{BlockHeightRange, ChainInfo, ChainInfoQuery, ChainInfoResponse},
     node::{LocalValidatorNode, NotificationStream},
     notifier::Notifier,
-    worker::{Notification, ValidatorWorker, WorkerError, WorkerState, Reason},
+    worker::{Notification, Reason, ValidatorWorker, WorkerError, WorkerState},
 };
 
 /// A local node with a single worker, typically used by clients.
