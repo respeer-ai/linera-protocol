@@ -620,7 +620,7 @@ type MutationRoot {
 	"""
 	ResPeer::CheCko::Initialize offline wallet
 	"""
-	walletInitWithoutKeypair(publicKey: PublicKey!, faucetUrl: String!, messageId: MessageId!, withOtherChains: [ChainId!]!): ChainId!
+	walletInitWithoutKeypair(publicKey: PublicKey!, faucetUrl: String!, chainId: ChainId!, messageId: MessageId!, withOtherChains: [ChainId!]!): ChainId!
 	"""
 	Submit pending block proposal signature
 	"""

@@ -715,12 +715,12 @@ where
         &self,
         public_key: PublicKey,
         faucet_url: String,
+        chain_id: ChainId,
         message_id: MessageId,
         with_other_chains: Vec<ChainId>,
     ) -> Result<ChainId, Error> {
         let faucet = cli_wrappers::Faucet::new(faucet_url);
         let validators = faucet.current_validators().await?;
-        let chain_id = message_id.chain_id;
 
         let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
             .with_allow_inactive_chains(true)
@@ -733,7 +733,7 @@ where
             .make_nodes_from_list(validators)?;
         let target_height = message_id.height.try_add_one()?;
         node_client
-            .download_certificates(nodes, chain_id, target_height)
+            .download_certificates(nodes, message_id.chain_id, target_height)
             .await
             .context("Failed to download parent chain")?;
         let certificate = node_client
