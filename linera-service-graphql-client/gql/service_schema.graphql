@@ -749,7 +749,7 @@ type QueryRoot {
 	"""
 	Returns the balances of given owners
 	"""
-	balances(chainIds: [ChainId!]!, publicKeys: [PublicKey!]!): JSONObject!
+	balances(chainPublicKeys: JSONObject!): JSONObject!
 }
 
 type QueueView_BlockHeight_f5d50b5f {
