@@ -1,8 +1,12 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, iter, net::SocketAddr, num::NonZeroU16, sync::Arc};
-
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    collections::BTreeMap, iter, net::{SocketAddr, IpAddr, Ipv4Addr}, num::NonZeroU16, sync::Arc,
+};
+use anyhow::{anyhow, Context};
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -17,24 +21,30 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{CryptoError, CryptoHash, PublicKey},
-    data_types::{Amount, ApplicationPermissions, Blob, TimeDelta, Timestamp},
-    identifiers::{ApplicationId, BlobId, BytecodeId, ChainId, Owner},
+    crypto::{CryptoError, CryptoHash, PublicKey, Signature, Hashable},
+    data_types::{Amount, ApplicationPermissions, Blob, TimeDelta, Timestamp, BlockHeight},
+    identifiers::{ApplicationId, BlobId, BytecodeId, ChainId, Owner, MessageId, Account},
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
-use linera_chain::{data_types::HashedCertificateValue, ChainStateView};
+use linera_chain::{
+    data_types::{CertificateValue, HashedCertificateValue, IncomingMessage, ProposalPayload},
+    ChainStateView,
+};
 use linera_core::{
     client::{ArcChainClient, ChainClient, ChainClientError},
     data_types::{ClientOutcome, RoundTimeout},
-    node::{NotificationStream, ValidatorNode, ValidatorNodeProvider},
-    worker::{Notification, Reason},
+    node::{NotificationStream, ValidatorNode, ValidatorNodeProvider, LocalValidatorNodeProvider},
+    worker::{Notification, Reason, WorkerState},
+    local_node::LocalNodeClient,
+    notifier::Notifier,
 };
 use linera_execution::{
     committee::{Committee, Epoch},
     system::{AdminOperation, Recipient, SystemChannel, UserData},
     Bytecode, Operation, Query, Response, SystemOperation, UserApplicationDescription,
     UserApplicationId,
+    Message, SystemMessage,
 };
 use linera_storage::Storage;
 use linera_views::views::ViewError;
@@ -44,9 +54,11 @@ use thiserror::Error as ThisError;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info};
+use local_ip_address::local_ip;
 
 use crate::{
     chain_listener::{ChainListener, ChainListenerConfig, ClientContext},
+    cli_wrappers,
     util,
 };
 
@@ -97,6 +109,18 @@ impl<P, S> ChainClients<P, S> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct RawBlockProposalPayload {
+    pub height: BlockHeight,
+    pub payload_bytes: Vec<u8>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct ChainAccountBalances {
+    chain_balance: Amount,
+    account_balances: HashMap<PublicKey, Amount>,
+}
+
 /// Our root GraphQL query type.
 pub struct QueryRoot<P, S> {
     clients: ChainClients<P, S>,
@@ -111,8 +135,10 @@ pub struct SubscriptionRoot<P, S> {
 
 /// Our root GraphQL mutation type.
 pub struct MutationRoot<P, S, C> {
+    storage: S,
     clients: ChainClients<P, S>,
     context: Arc<Mutex<C>>,
+    config: ChainListenerConfig,
 }
 
 #[derive(Debug, ThisError)]
@@ -143,6 +169,11 @@ enum NodeServiceError {
     UnknownChainId { chain_id: String },
     #[error("malformed chain ID")]
     InvalidChainId(CryptoError),
+
+    #[error("Unexpected certificate. Please make sure you are connecting to the right network and are using a current software version.")]
+    UnexpectedCertificate,
+    #[error("The message with the ID returned by the faucet is not OpenChain. please make sure you are connecting to a genuine faucet.")]
+    NotOpenChainMessage,
 }
 
 impl From<ServerError> for NodeServiceError {
@@ -187,6 +218,8 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
+            NodeServiceError::UnexpectedCertificate => (StatusCode::BAD_REQUEST, vec![self.to_string()]),
+            NodeServiceError::NotOpenChainMessage => (StatusCode::BAD_REQUEST, vec![self.to_string()]),
         };
         let tuple = (tuple.0, json!({"error": tuple.1}).to_string());
         tuple.into_response()
@@ -273,6 +306,7 @@ where
 impl<P, S, C> MutationRoot<P, S, C>
 where
     P: ValidatorNodeProvider + Send + Sync + 'static,
+    <<P as ValidatorNodeProvider>::Node as ValidatorNode>::NotificationStream: Send,
     S: Storage + Clone + Send + Sync + 'static,
     C: ClientContext<P> + Send + 'static,
     ViewError: From<S::ContextError>,
@@ -691,6 +725,158 @@ where
             wait_for_next_round(&mut stream, timeout).await;
         }
     }
+
+    /// ResPeer::CheCko::Initialize offline wallet
+    async fn wallet_init_without_keypair(
+        &self,
+        public_key: PublicKey,
+        faucet_url: String,
+        chain_id: ChainId,
+        message_id: MessageId,
+        with_other_chains: Vec<ChainId>,
+    ) -> Result<ChainId, Error> {
+        let faucet = cli_wrappers::Faucet::new(faucet_url);
+        let validators = faucet.current_validators().await?;
+
+        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
+            .with_allow_inactive_chains(true)
+            .with_allow_messages_from_deprecated_epochs(true);
+        let mut node_client = LocalNodeClient::new(state, Arc::new(Notifier::default()));
+        let admin_chain_id = self.context.lock().await.wallet().genesis_admin_chain();
+
+        let nodes = self.context.lock().await
+            .make_node_provider()
+            .make_nodes_from_list(validators)?;
+        let target_height = message_id.height.try_add_one()?;
+        node_client
+            .download_certificates(nodes, message_id.chain_id, target_height)
+            .await
+            .context("Failed to download parent chain")?;
+        let certificate = node_client
+            .certificate_for(&message_id)
+            .await
+            .context("could not find OpenChain message")?;
+        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
+            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
+        };
+        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
+            .message_by_id(&message_id)
+            .map(|msg| &msg.message)
+        else {
+            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
+        };
+        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
+            return Err(
+                anyhow!(
+                    "The chain with the ID returned by the faucet is not owned by you. \
+                    Please make sure you are connecting to a genuine faucet."
+                ).into())
+        }
+        self.context.lock().await
+            .wallet_mut()
+            .assign_new_chain_to_public_key(public_key, chain_id, executed_block.block.timestamp)
+            .context("could not assign the new chain")?;
+
+        let chain_ids = with_other_chains
+            .into_iter()
+            .chain([admin_chain_id, chain_id]);
+
+        let mut chains = HashMap::new();
+        for chain_id in chain_ids {
+            if chains.contains_key(&chain_id) {
+                continue;
+            }
+            chains.insert(chain_id, self.storage.load_chain(chain_id).await?);
+        }
+        let (peg_chain_id, _) = chains
+            .iter()
+            .filter_map(|(chain_id, chain)| {
+                let epoch = (*chain.execution_state.system.epoch.get())?;
+                let is_admin = Some(*chain_id) == *chain.execution_state.system.admin_id.get();
+                Some((*chain_id, (epoch, is_admin)))
+            })
+            .max_by_key(|(_, epoch)| *epoch)
+            .context("no active chain found")?;
+        let peg_chain = chains.remove(&peg_chain_id).unwrap();
+        let committees = peg_chain.execution_state.system.committees.get();
+        for (chain_id, chain) in &chains {
+            let Some(hash) = chain.tip_state.get().block_hash else {
+                continue;
+            };
+            let certificate = self.storage.read_certificate(hash).await?;
+            let committee = committees
+                .get(&certificate.value().epoch())
+                .ok_or_else(|| anyhow!("tip of chain {chain_id} is outdated."))?;
+            certificate.check(committee)?;
+        }
+        let config_hash = CryptoHash::new(self.context.lock().await.wallet().genesis_config());
+        let maybe_epoch = peg_chain.execution_state.system.epoch.get();
+        let epoch = maybe_epoch.context("missing epoch in peg chain")?.0;
+        info!(
+            "Initialized wallet based on data provided by the faucet.\n\
+            The current epoch is {epoch}.\n\
+            The genesis config hash is {config_hash}{}",
+            if let Some(peg_hash) = peg_chain.tip_state.get().block_hash {
+                format!("\nThe latest certificate on chain {peg_chain_id} is {peg_hash}.")
+            } else {
+                "".to_string()
+            }
+        );
+
+        self.context.lock().await
+            .wallet_mut()
+            .set_default_chain(chain_id)?;
+        self.context.lock().await.save_wallet();
+
+        ChainListener::run_with_chain_id(
+            chain_id,
+            self.clients.clone(),
+            self.context.clone(),
+            self.storage.clone(),
+            self.config.clone(),
+        );
+
+        Ok(chain_id)
+    }
+
+    /// Submit pending block proposal signature
+    async fn submit_block_signature(&self, chain_id: ChainId, height: BlockHeight, signature: Signature) -> Result<CryptoHash, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        Ok(client.submit_extenal_signed_block_proposal(height, signature).await?.value.hash())
+    }
+
+    /// Transfers `amount` units of value from the given owner's account to the recipient.
+    /// If no owner is given, try to take the units out of the unattributed account.
+    /// Different from transfer, node service won't sign block in transfer_without_block_proposal
+    async fn transfer_without_block_proposal(
+        &self,
+        from_chain_id: ChainId,
+        from_public_key: Option<PublicKey>,
+        to_chain_id: ChainId,
+        to_public_key: Option<PublicKey>,
+        amount: Amount,
+        user_data: Option<UserData>,
+    ) -> Result<ChainId, Error> {
+        let from_owner = match from_public_key {
+            Some(public_key) => Some(Owner::from(public_key)),
+            _ => None,
+        };
+        let to_owner = match to_public_key {
+            Some(public_key) => Some(Owner::from(public_key)),
+            _ => None,
+        };
+        let mut client = self.clients.try_client_lock(&from_chain_id).await?;
+        client.transfer_without_block_proposal(
+            from_owner,
+            amount,
+            Recipient::Account(Account {
+                chain_id: to_chain_id,
+                owner: to_owner,
+            }),
+            user_data.unwrap_or_default(),
+        ).await?;
+        Ok(from_chain_id)
+    }
 }
 
 #[Object]
@@ -780,6 +966,62 @@ where
     async fn version(&self) -> linera_version::VersionInfo {
         linera_version::VersionInfo::default()
     }
+
+    /// Returns the pending message of the chain
+    async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingMessage>, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        Ok(client.pending_messages().await?)
+    }
+
+    /// Returns the next raw block proposal
+    async fn peek_candidate_raw_block_payload(&self, chain_id: ChainId) -> Result<Option<RawBlockProposalPayload>, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        match client.peek_candidate_block_proposal().await {
+            Some(raw_block_proposal) => {
+                let mut message = Vec::new();
+                let outcome = raw_block_proposal.validated
+                    .as_ref()
+                    .and_then(|certificate| certificate.value().executed_block())
+                    .map(|executed_block| Cow::Borrowed(&executed_block.outcome));
+                let proposal_payload = &ProposalPayload {
+                    content: Cow::Borrowed(&raw_block_proposal.content),
+                    outcome,
+                };
+                proposal_payload.write(&mut message);
+                Ok(Some(RawBlockProposalPayload {
+                    height: raw_block_proposal.content.block.height,
+                    payload_bytes: message,
+                }))
+            }
+            _ => Ok(None)
+        }
+    }
+
+    /// Returns the balance of given owner
+    async fn balance(&self, chain_id: ChainId, public_key: Option<PublicKey>) -> Result<Amount, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        Ok(match public_key {
+            Some(public_key) => client.query_owner_balance(Owner::from(public_key)).await?,
+            _ => client.query_balance().await?,
+        })
+    }
+
+    /// Returns the balances of given owners
+    async fn balances(&self, chain_ids: Vec<ChainId>, public_keys: Vec<PublicKey>) -> Result<HashMap<ChainId, ChainAccountBalances>, Error> {
+        let mut chain_balances = HashMap::new();
+        for chain_id in &chain_ids {
+            let mut client = self.clients.try_client_lock(&chain_id).await?;
+            let mut account_balances = HashMap::new();
+            for public_key in &public_keys {
+                account_balances.insert(*public_key, client.query_owner_balance(Owner::from(public_key)).await?);
+            }
+            chain_balances.insert(*chain_id, ChainAccountBalances {
+                chain_balance: client.query_balance().await?,
+                account_balances,
+            });
+        }
+        Ok(chain_balances)
+    }
 }
 
 // What follows is a hack to add a chain_id field to `ChainStateView` based on
@@ -830,7 +1072,8 @@ impl ApplicationOverview {
             id,
             description,
             link: format!(
-                "http://localhost:{}/chains/{}/applications/{}",
+                "http://{}:{}/chains/{}/applications/{}",
+                local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
                 port.get(),
                 chain_id,
                 id
@@ -948,8 +1191,10 @@ where
                 default_chain: self.default_chain,
             },
             MutationRoot {
+                storage: self.storage.clone(),
                 clients: self.clients.clone(),
                 context: self.context.clone(),
+                config: self.config.clone(),
             },
             SubscriptionRoot {
                 clients: self.clients.clone(),
@@ -977,13 +1222,14 @@ where
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
 
-        info!("GraphiQL IDE: http://localhost:{}", port);
+        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
         ChainListener::new(self.config, self.clients.clone())
             .run(self.context.clone(), self.storage.clone())
             .await;
         let serve_fut = axum::serve(
-            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?,
+            tokio::net::TcpListener::bind(SocketAddr::from((ip_addr, port))).await?,
             app,
         );
         serve_fut.await?;
@@ -1119,6 +1365,7 @@ pub async fn wait_for_next_round(stream: &mut NotificationStream, timeout: Round
         Reason::NewBlock { height, .. } => *height >= timeout.next_block_height,
         Reason::NewRound { round, .. } => *round > timeout.current_round,
         Reason::NewIncomingMessage { .. } => false,
+        Reason::NewRawBlock { height } => *height >= timeout.next_block_height,
     });
     future::select(
         Box::pin(stream.next()),

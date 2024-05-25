@@ -27,7 +27,7 @@ use crate::{
     node::{LocalValidatorNode, NotificationStream},
     notifier::Notifier,
     value_cache::ValueCache,
-    worker::{Notification, ValidatorWorker, WorkerError, WorkerState},
+    worker::{Notification, Reason, ValidatorWorker, WorkerError, WorkerState},
 };
 
 /// A local node with a single worker, typically used by clients.
@@ -137,6 +137,16 @@ where
         // In local nodes, we can trust fully_handle_certificate to carry all actions eventually.
         let (response, _actions) = node.state.handle_chain_info_query(query).await?;
         Ok(response)
+    }
+
+    pub async fn handle_new_raw_block(&mut self, chain_id: ChainId, height: BlockHeight) {
+        let node = self.node.lock().await;
+        let mut notifications = Vec::new();
+        notifications.push(Notification {
+            chain_id,
+            reason: Reason::NewRawBlock { height },
+        });
+        node.notifier.handle_notifications(&notifications);
     }
 
     pub async fn subscribe(

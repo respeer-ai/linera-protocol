@@ -109,7 +109,7 @@ pub struct ChainAndHeight {
 }
 
 /// A block with a round number.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct BlockAndRound {
     pub block: Block,
     pub round: Round,

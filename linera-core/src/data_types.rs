@@ -11,7 +11,8 @@ use linera_base::{
 };
 use linera_chain::{
     data_types::{
-        Certificate, ChainAndHeight, HashedCertificateValue, IncomingMessage, Medium, MessageBundle,
+        BlockAndRound, Certificate, ChainAndHeight, HashedCertificateValue, IncomingMessage,
+        Medium, MessageBundle,
     },
     manager::ChainManagerInfo,
     ChainStateView,
@@ -342,4 +343,14 @@ impl<T> ClientOutcome<T> {
             ClientOutcome::WaitForTimeout(timeout) => Ok(ClientOutcome::WaitForTimeout(timeout)),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawBlockProposal {
+    pub content: BlockAndRound,
+    pub owner: Owner,
+    pub hashed_certificate_values: Vec<HashedCertificateValue>,
+    pub hashed_blobs: Vec<HashedBlob>,
+    pub validated: Option<Certificate>,
+    pub hashed_value: HashedCertificateValue,
 }
