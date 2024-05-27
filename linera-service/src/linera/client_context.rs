@@ -174,11 +174,8 @@ impl ClientContext {
         };
         let node_provider = NodeProvider::new(node_options);
         let delivery = CrossChainMessageDelivery::new(options.wait_for_outgoing_messages);
-        let chain_client_builder = ChainClientBuilder::new(
-            node_provider,
-            options.max_pending_messages,
-            delivery,
-        );
+        let chain_client_builder =
+            ChainClientBuilder::new(node_provider, options.max_pending_messages, delivery);
         ClientContext {
             chain_client_builder,
             wallet_state,
