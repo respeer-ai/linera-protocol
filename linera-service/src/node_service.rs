@@ -901,6 +901,22 @@ where
             .await?;
         Ok(from_chain_id)
     }
+
+    /// Requests a `RegisterApplications` message from another chain so the application can be used
+    /// on this one.
+    async fn request_application_without_block_proposal(
+        &self,
+        chain_id: ChainId,
+        application_id: UserApplicationId,
+        target_chain_id: Option<ChainId>,
+    ) -> Result<UserApplicationId, Error> {
+        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        client
+            .request_application_without_block_proposal(application_id, target_chain_id)
+            .await?;
+        self.context.lock().await.update_wallet(&mut *client).await;
+        Ok(application_id)
+    }
 }
 
 #[Object]

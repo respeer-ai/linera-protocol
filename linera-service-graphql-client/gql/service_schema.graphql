@@ -645,6 +645,11 @@ type MutationRoot {
 	Different from transfer, node service won't sign block in transfer_without_block_proposal
 	"""
 	transferWithoutBlockProposal(fromChainId: ChainId!, fromPublicKey: PublicKey, toChainId: ChainId!, toPublicKey: PublicKey, amount: Amount!, userData: UserData): ChainId!
+	"""
+	Requests a `RegisterApplications` message from another chain so the application can be used
+	on this one.
+	"""
+	requestApplicationWithoutBlockProposal(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): ApplicationId!
 }
 
 """

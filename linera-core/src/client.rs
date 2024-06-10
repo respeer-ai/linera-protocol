@@ -2447,6 +2447,33 @@ where
         }
     }
 
+    /// Executes a list of operations.
+    pub async fn execute_operations_without_block_proposal(
+        &mut self,
+        operations: Vec<Operation>,
+    ) -> Result<(), ChainClientError> {
+        self.prepare_chain().await?;
+        self.execute_with_messages_without_block_proposal(operations).await
+    }
+
+    /// Executes a list of operations, without calling `prepare_chain`.
+    pub async fn execute_with_messages_without_block_proposal(
+        &mut self,
+        operations: Vec<Operation>,
+    ) -> Result<(), ChainClientError> {
+        let messages = self.pending_messages().await?;
+        self.execute_block_without_block_proposal(messages, operations.clone()).await?;
+        Ok(())
+    }
+
+    /// Executes an operation.
+    pub async fn execute_operation_without_block_proposal(
+        &mut self,
+        operation: Operation,
+    ) -> Result<(), ChainClientError> {
+        self.execute_operations_without_block_proposal(vec![operation]).await
+    }
+
     /// Executes a new block.
     ///
     /// This must be preceded by a call to `prepare_chain()`.
@@ -2541,6 +2568,21 @@ where
         )
         .await?;
         Ok(())
+    }
+
+    /// Requests a `RegisterApplications` message from another chain so the application can be used
+    /// on this one.
+    pub async fn request_application_without_block_proposal(
+        &mut self,
+        application_id: UserApplicationId,
+        chain_id: Option<ChainId>,
+    ) -> Result<(), ChainClientError> {
+        let chain_id = chain_id.unwrap_or(application_id.creation.chain_id);
+        self.execute_operation_without_block_proposal(Operation::System(SystemOperation::RequestApplication {
+            application_id,
+            chain_id,
+        }))
+        .await
     }
 }
 
