@@ -860,11 +860,13 @@ where
         signature: Signature,
     ) -> Result<CryptoHash, Error> {
         let mut client = self.clients.try_client_lock(&chain_id).await?;
-        Ok(client
+        let hash = client
             .submit_extenal_signed_block_proposal(height, signature)
             .await?
             .value
-            .hash())
+            .hash();
+        self.context.lock().await.update_wallet(&mut *client).await;
+        Ok(hash)
     }
 
     /// Transfers `amount` units of value from the given owner's account to the recipient.
@@ -914,7 +916,6 @@ where
         client
             .request_application_without_block_proposal(application_id, target_chain_id)
             .await?;
-        self.context.lock().await.update_wallet(&mut *client).await;
         Ok(application_id)
     }
 }
@@ -1267,12 +1268,18 @@ where
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
         let application_handler =
             axum::routing::get(util::graphiql).post(Self::application_handler);
+        let application_handler_without_block_proposal =
+            axum::routing::get(util::graphiql).post(Self::application_handler_without_block_proposal);
 
         let app = Router::new()
             .route("/", index_handler)
             .route(
                 "/chains/:chain_id/applications/:application_id",
                 application_handler,
+            )
+            .route(
+                "/checko/chains/:chain_id/applications/:application_id",
+                application_handler_without_block_proposal,
             )
             .route("/ready", axum::routing::get(|| async { "ready!" }))
             .route_service("/ws", GraphQLSubscription::new(self.schema()))
@@ -1408,6 +1415,82 @@ where
                 service
                     .0
                     .user_application_mutation(application_id, &request, chain_id)
+                    .await?
+            }
+            OperationType::Subscription => return Err(NodeServiceError::UnsupportedQueryType),
+        };
+
+        Ok(response.into())
+    }
+
+    /// Handles mutations for user applications.
+    async fn user_application_mutation_without_block_proposal(
+        &self,
+        application_id: UserApplicationId,
+        request: &Request,
+        chain_id: ChainId,
+    ) -> Result<async_graphql::Response, NodeServiceError> {
+        debug!("Request: {:?}", &request);
+        let graphql_response = self
+            .user_application_query(application_id, request, chain_id)
+            .await?;
+        if graphql_response.is_err() {
+            let errors = graphql_response
+                .errors
+                .iter()
+                .map(|e| e.to_string())
+                .collect();
+            return Err(NodeServiceError::ApplicationServiceError { errors });
+        }
+        debug!("Response: {:?}", &graphql_response);
+        let bcs_bytes_list = bytes_from_response(graphql_response.data);
+        if bcs_bytes_list.is_empty() {
+            return Err(NodeServiceError::MalformedApplicationResponse);
+        }
+        let operations = bcs_bytes_list
+            .into_iter()
+            .map(|bytes| Operation::User {
+                application_id,
+                bytes,
+            })
+            .collect::<Vec<_>>();
+
+        let Some(mut client) = self.clients.client_lock(&chain_id).await else {
+            return Err(NodeServiceError::UnknownChainId {
+                chain_id: chain_id.to_string(),
+            });
+        };
+        client.execute_operations_without_block_proposal(operations.clone()).await?;
+        Ok(async_graphql::Response::new(application_id.to_value()))
+    }
+
+    /// Executes a GraphQL query against an application.
+    /// Pattern matches on the `OperationType` of the query and routes the query
+    /// accordingly.
+    async fn application_handler_without_block_proposal(
+        Path((chain_id, application_id)): Path<(String, String)>,
+        service: Extension<Self>,
+        request: GraphQLRequest,
+    ) -> Result<GraphQLResponse, NodeServiceError> {
+        let mut request = request.into_inner();
+
+        let parsed_query = request.parsed_query()?;
+        let operation_type = operation_type(parsed_query)?;
+
+        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
+        let application_id: UserApplicationId = application_id.parse()?;
+
+        let response = match operation_type {
+            OperationType::Query => {
+                service
+                    .0
+                    .user_application_query(application_id, &request, chain_id)
+                    .await?
+            }
+            OperationType::Mutation => {
+                service
+                    .0
+                    .user_application_mutation_without_block_proposal(application_id, &request, chain_id)
                     .await?
             }
             OperationType::Subscription => return Err(NodeServiceError::UnsupportedQueryType),
