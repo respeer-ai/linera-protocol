@@ -19,6 +19,7 @@ use linera_core::{
     },
 };
 use linera_execution::committee::Committee;
+use linera_rpc::node_provider::NodeProvider;
 use linera_service::{
     chain_listener::{ChainListenerConfig, ClientContext},
     node_service::NodeService,
@@ -134,6 +135,10 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
         unimplemented!()
     }
 
+    fn wallet_mut(&mut self) -> &mut Wallet {
+        unimplemented!()
+    }
+
     fn make_chain_client(&self, _: ChainId) -> ChainClient<P, S>
     where
         ViewError: From<S::ContextError>,
@@ -147,6 +152,14 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
     where
         ViewError: From<S::ContextError>,
     {
+    }
+
+    fn save_wallet(&mut self) {
+        unimplemented!()
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        unimplemented!()
     }
 }
 
@@ -162,6 +175,7 @@ async fn main() -> std::io::Result<()> {
     let config = ChainListenerConfig {
         delay_before_ms: 0,
         delay_after_ms: 0,
+        external_signing: true,
     };
     let context = DummyContext {
         _phantom: std::marker::PhantomData,

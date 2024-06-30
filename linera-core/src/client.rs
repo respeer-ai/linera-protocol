@@ -17,7 +17,7 @@ use futures::{
 };
 use linera_base::{
     abi::Abi,
-    crypto::{CryptoHash, KeyPair, PublicKey},
+    crypto::{CryptoHash, KeyPair, PublicKey, Signature},
     data_types::{
         Amount, ApplicationPermissions, ArithmeticError, BlockHeight, HashedBlob, Round, Timestamp,
     },
@@ -28,7 +28,7 @@ use linera_base::{
 use linera_chain::{
     data_types::{
         Block, BlockProposal, Certificate, CertificateValue, ExecutedBlock, HashedCertificateValue,
-        IncomingMessage, LiteCertificate, LiteVote, MessageAction,
+        IncomingMessage, LiteCertificate, LiteVote, MessageAction, ProposalContent,
     },
     manager::ChainManagerInfo,
     ChainError, ChainExecutionContext, ChainStateView,
@@ -52,7 +52,8 @@ use tracing::{debug, error, info};
 
 use crate::{
     data_types::{
-        BlockHeightRange, ChainInfo, ChainInfoQuery, ChainInfoResponse, ClientOutcome, RoundTimeout,
+        BlockHeightRange, ChainInfo, ChainInfoQuery, ChainInfoResponse, ClientOutcome,
+        RawBlockProposal, RoundTimeout,
     },
     local_node::{LocalNodeClient, LocalNodeError},
     node::{
@@ -174,6 +175,7 @@ where
             pending_block,
             pending_blobs,
             notifier: self.notifier.clone(),
+            pending_raw_block: None,
         }
     }
 }
@@ -247,6 +249,9 @@ where
 
     /// A notifier to receive notifications for this chain.
     notifier: Arc<Notifier<Notification>>,
+
+    /// Raw block proposal list waiting for sign
+    pending_raw_block: Option<RawBlockProposal>,
 }
 
 /// Error type for [`ChainClient`].
@@ -302,6 +307,12 @@ pub enum ChainClientError {
 
     #[error(transparent)]
     ViewError(#[from] ViewError),
+
+    #[error("Invalid raw block proposal")]
+    InvalidRawBlockProposal,
+
+    #[error("Mismatch block height {0} != {1}")]
+    MismatchBlockHeight(BlockHeight, BlockHeight),
 }
 
 impl From<Infallible> for ChainClientError {
@@ -404,7 +415,7 @@ where
     ///
     /// Messages known to be redundant are filtered out: A `RegisterApplications` message whose
     /// entries are already known never needs to be included in a block.
-    async fn pending_messages(&mut self) -> Result<Vec<IncomingMessage>, ChainClientError> {
+    pub async fn pending_messages(&mut self) -> Result<Vec<IncomingMessage>, ChainClientError> {
         if self.next_block_height != BlockHeight::ZERO && self.message_policy.is_ignore() {
             return Ok(Vec::new()); // OpenChain is already received, other are ignored.
         }
@@ -2258,6 +2269,432 @@ where
     pub fn into_arc(self) -> ArcChainClient<P, S> {
         ArcChainClient::new(self)
     }
+
+    /// Executes (or retries) a regular block proposal. Updates local balance.
+    ///
+    /// Different from propose_block, we don't submit proposal here, and just put
+    /// executed_block to pending list, then let client to fetch
+    async fn propose_block_without_block_proposal(
+        &mut self,
+        block: Block,
+        round: Round,
+        manager: ChainManagerInfo,
+    ) -> Result<(), ChainClientError> {
+        ensure!(
+            block.height == self.next_block_height,
+            ChainClientError::BlockProposalError("Unexpected block height")
+        );
+        ensure!(
+            block.previous_block_hash == self.block_hash,
+            ChainClientError::BlockProposalError("Unexpected previous block hash")
+        );
+        // In the fast round, we must never make any conflicting proposals.
+        if round.is_fast() {
+            if let Some(pending) = &self.pending_block {
+                ensure!(
+                    pending == &block,
+                    ChainClientError::BlockProposalError(
+                        "Client state has a different pending block; \
+                         use the `linera retry-pending-block` command to commit that first"
+                    )
+                );
+            }
+        }
+        // Make sure that we follow the steps in the multi-round protocol.
+        let executed_block = if let Some(validated_block_certificate) = &manager.requested_locked {
+            ensure!(
+                validated_block_certificate.value().block() == Some(&block),
+                ChainClientError::BlockProposalError(
+                    "A different block has already been validated at this height"
+                    )
+                );
+            validated_block_certificate
+                .value()
+                .executed_block()
+                .unwrap()
+                .clone()
+        } else {
+            self.stage_block_execution_and_discard_failing_messages(block)
+                .await?
+                .0
+        };
+        let mut block = executed_block.block.clone();
+        if let Some(proposal) = manager.requested_proposed {
+            if proposal.content.round.is_fast() {
+                ensure!(
+                    proposal.content.block == block,
+                    ChainClientError::BlockProposalError(
+                        "Chain manager has a different pending block in the fast round"
+                        )
+                    );
+            }
+        }
+        let hashed_value = if round.is_fast() {
+            HashedCertificateValue::new_confirmed(executed_block)
+        } else {
+            HashedCertificateValue::new_validated(executed_block)
+        };
+        // Collect the blobs required for execution.
+        let committee = self.local_committee().await?;
+        let nodes = self.validator_node_provider.make_nodes(&committee)?;
+        let values = self
+            .client
+            .local_node
+            .read_or_download_hashed_certificate_values(nodes, block.bytecode_locations())
+            .await?;
+        let hashed_blobs = self.read_local_blobs(block.blob_ids()).await?;
+
+        if let Some(ref cert) = manager.requested_locked {
+            if let CertificateValue::ValidatedBlock { executed_block } = cert.clone().value.into_inner() {
+                block = executed_block.block.clone();
+            } else {
+                panic!("called new_retry with a certificate without a validated block");
+            }
+        };
+
+        self.pending_raw_block = Some(RawBlockProposal {
+            content: ProposalContent {
+                block: block.clone(),
+                round,
+                forced_oracle_records: match manager.requested_locked {
+                    Some(ref cert) => {
+                        if let CertificateValue::ValidatedBlock { executed_block } = cert.clone().value.into_inner() {
+                            Some(executed_block.outcome.oracle_records)
+                        } else {
+                            panic!("called new_retry with a certificate without a validated block");
+                        }
+                    }
+                    _ => None,
+                },
+            },
+            owner: self.public_key().await?.into(),
+            hashed_certificate_values: values,
+            hashed_blobs,
+            validated_block_certificate: match manager.requested_locked {
+                Some(ref cert) => Some(cert.lite_certificate().cloned()),
+                _ => None,
+            },
+            hashed_value,
+        });
+        self.pending_block = Some(block.clone());
+
+        let mut notifications = Vec::new();
+        notifications.push(Notification {
+            chain_id: self.chain_id,
+            reason: Reason::NewRawBlock {
+                height: block.height
+            },
+        });
+        self.notifier.handle_notifications(&notifications);
+
+        Ok(())
+    }
+
+    pub async fn submit_extenal_signed_block_proposal(
+        &mut self,
+        height: BlockHeight,
+        signature: Signature,
+    ) -> Result<Certificate, ChainClientError> {
+        let raw_block = match &self.pending_raw_block {
+            Some(raw_block) => raw_block.clone(),
+            _ => return Err(ChainClientError::InvalidRawBlockProposal),
+        };
+        ensure!(
+            raw_block.content.block.height == height,
+            ChainClientError::MismatchBlockHeight(raw_block.content.block.height, height)
+        );
+        let proposal = BlockProposal {
+            content: raw_block.content,
+            owner: raw_block.owner,
+            signature,
+            hashed_certificate_values: raw_block.hashed_certificate_values,
+            hashed_blobs: raw_block.hashed_blobs,
+            validated_block_certificate: raw_block.validated_block_certificate,
+        };
+        // Check the final block proposal. This will be cheaper after #1401.
+        self.client
+            .local_node
+            .handle_block_proposal(proposal.clone())
+            .await?;
+        // Remember what we are trying to do before sending the proposal to the validators.
+        // Send the query to validators.
+        let committee = self.local_committee().await?;
+        let certificate = self
+            .submit_block_proposal(&committee, proposal, raw_block.hashed_value.clone())
+            .await?;
+        self.pending_raw_block = None;
+        self.clear_pending_block();
+        // Communicate the new certificate now.
+        self.communicate_chain_updates(
+            &committee,
+            self.chain_id,
+            self.next_block_height,
+            self.cross_chain_message_delivery,
+        )
+        .await?;
+        if let Ok(new_committee) = self.local_committee().await {
+            if new_committee != committee {
+                // If the configuration just changed, communicate to the new committee as well.
+                // (This is actually more important that updating the previous committee.)
+                self.communicate_chain_updates(
+                    &new_committee,
+                    self.chain_id,
+                    self.next_block_height,
+                    self.cross_chain_message_delivery,
+                )
+                .await?;
+            }
+        }
+        Ok(certificate)
+    }
+
+    /// Processes the last pending block. Assumes that the local chain is up to date.
+    ///
+    /// Different from process_pending_block_without_prepare, we don't submit proposal here, and just put
+    /// executed_block to pending list, then let client to fetch
+    async fn process_pending_block_without_prepare_without_block_proposal(
+        &mut self,
+    ) -> Result<ClientOutcome<bool>, ChainClientError> {
+        let identity = self.identity().await?;
+        let mut info = self.chain_info_with_manager_values().await?;
+        // If the current round has timed out, we request a timeout certificate and retry in
+        // the next round.
+        if let Some(round_timeout) = info.manager.round_timeout {
+            if round_timeout <= self.storage_client().clock().current_time() {
+                self.request_leader_timeout().await?;
+                info = self.chain_info_with_manager_values().await?;
+            }
+        }
+        let manager = *info.manager;
+        // Drop the pending block if it is outdated.
+        if let Some(block) = &self.pending_block {
+            if block.height != info.next_block_height {
+                self.pending_block = None;
+            }
+        }
+        if let Some(raw_block) = &self.pending_raw_block {
+            if raw_block.content.block.height == info.next_block_height {
+                return Ok(ClientOutcome::Committed(true));
+            }
+            self.pending_raw_block = None
+        }
+        // If there is a validated block in the current round, finalize it.
+        if let Some(certificate) = &manager.requested_locked {
+            if certificate.round == manager.current_round {
+                let committee = self.local_committee().await?;
+                match self.finalize_block(&committee, *certificate.clone()).await {
+                    Ok(_) => return Ok(ClientOutcome::Committed(false)),
+                    Err(ChainClientError::CommunicationError(_)) => {
+                        // Communication errors in this case often mean that someone else already
+                        // finalized the block.
+                        let timestamp = manager.round_timeout.ok_or_else(|| {
+                            ChainClientError::BlockProposalError(
+                                "Cannot propose in the current round.",
+                            )
+                        })?;
+                        return Ok(ClientOutcome::WaitForTimeout(RoundTimeout {
+                            timestamp,
+                            current_round: manager.current_round,
+                            next_block_height: info.next_block_height,
+                        }));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        // The block we want to propose is either the highest validated, or our pending one.
+        let maybe_block = manager
+            .requested_locked
+            .as_ref()
+            .and_then(|certificate| certificate.value().block())
+            .or(manager
+                .requested_proposed
+                .as_ref()
+                .filter(|proposal| proposal.content.round.is_fast())
+                .map(|proposal| &proposal.content.block))
+            .or(self.pending_block.as_ref());
+        let Some(block) = maybe_block else {
+            return Ok(ClientOutcome::Committed(false)); // Nothing to propose.
+        };
+        // If there is a conflicting proposal in the current round, we can only propose if the
+        // next round can be started without a timeout, i.e. if we are in a multi-leader round.
+        let conflicting_proposal = manager
+            .requested_proposed
+            .as_ref()
+            .map_or(false, |proposal| {
+                proposal.content.round == manager.current_round && proposal.content.block != *block
+            });
+        let round = if !conflicting_proposal {
+            manager.current_round
+        } else if let Some(round) = manager
+            .ownership
+            .next_round(manager.current_round)
+            .filter(|_| manager.current_round.is_multi_leader())
+        {
+            round
+        } else if let Some(_) = manager.round_timeout {
+            return Ok(ClientOutcome::Committed(false));
+        } else {
+            return Err(ChainClientError::BlockProposalError(
+                "Conflicting proposal in the current round.",
+            ));
+        };
+        let can_propose = match round {
+            Round::Fast => manager.ownership.super_owners.contains_key(&identity),
+            Round::MultiLeader(_) => true,
+            Round::SingleLeader(_) | Round::Validator(_) => manager.leader == Some(identity),
+        };
+        if can_propose {
+            self.propose_block_without_block_proposal(block.clone(), round, manager)
+                .await?;
+            Ok(ClientOutcome::Committed(true))
+        } else {
+            Ok(ClientOutcome::Committed(false))
+        }
+    }
+
+    /// Executes a list of operations.
+    pub async fn execute_operations_without_block_proposal(
+        &mut self,
+        operations: Vec<Operation>,
+    ) -> Result<(), ChainClientError> {
+        self.prepare_chain().await?;
+        self.execute_with_messages_without_block_proposal(operations)
+            .await
+    }
+
+    /// Executes a list of operations, without calling `prepare_chain`.
+    pub async fn execute_with_messages_without_block_proposal(
+        &mut self,
+        operations: Vec<Operation>,
+    ) -> Result<(), ChainClientError> {
+        let messages = self.pending_messages().await?;
+        self.execute_block_without_block_proposal(messages, operations.clone())
+            .await?;
+        Ok(())
+    }
+
+    /// Executes an operation.
+    pub async fn execute_operation_without_block_proposal(
+        &mut self,
+        operation: Operation,
+    ) -> Result<(), ChainClientError> {
+        self.execute_operations_without_block_proposal(vec![operation])
+            .await
+    }
+
+    /// Executes a new block.
+    ///
+    /// This must be preceded by a call to `prepare_chain()`.
+    ///
+    /// Different from ececute_block, we don't submit proposal here, and just put
+    /// executed_block to pending list, then let client to fetch
+    async fn execute_block_without_block_proposal(
+        &mut self,
+        incoming_messages: Vec<IncomingMessage>,
+        operations: Vec<Operation>,
+    ) -> Result<Option<RoundTimeout>, ChainClientError> {
+        match self
+            .process_pending_block_without_prepare_without_block_proposal()
+            .await?
+        {
+            ClientOutcome::Committed(true) => return Ok(None),
+            ClientOutcome::Committed(false) => {}
+            ClientOutcome::WaitForTimeout(timeout) => return Ok(Some(timeout)),
+        }
+        let _ = self
+            .set_pending_block(incoming_messages, operations)
+            .await?;
+        match self
+            .process_pending_block_without_prepare_without_block_proposal()
+            .await?
+        {
+            ClientOutcome::Committed(true) => Ok(None),
+            // Should be unreachable: We did set a pending block.
+            ClientOutcome::Committed(false) => Err(ChainClientError::BlockProposalError(
+                "Unexpected block proposal error",
+            )),
+            ClientOutcome::WaitForTimeout(timeout) => Ok(Some(timeout)),
+        }
+    }
+
+    /// Creates an empty block to process all incoming messages. This may require several blocks.
+    ///
+    /// If not all certificates could be processed due to a timeout, the timestamp for when to retry
+    /// is returned, too.
+    ///
+    /// Different from process_inbox, we don't submit proposal here, and just put
+    /// executed_block to pending list, then let client to fetch
+    pub async fn process_inbox_without_block_proposal(
+        &mut self,
+    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
+        self.prepare_chain().await?;
+        let incoming_messages = self.pending_messages().await?;
+        if incoming_messages.is_empty() {
+            return Ok((Vec::new(), None));
+        }
+        return Ok((
+            Vec::new(),
+            self.execute_block_without_block_proposal(incoming_messages, vec![])
+                .await?,
+        ));
+    }
+
+    /// Creates an empty block to process all incoming messages. This may require several blocks.
+    /// If we are not a chain owner, this doesn't fail, and just returns an empty list.
+    ///
+    /// Different from process_inbox_if_owned, we don't submit proposal here, and just put
+    /// executed_block to pending list, then let client to fetch
+    pub async fn process_inbox_if_owned_without_block_proposal(
+        &mut self,
+    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
+        self.process_inbox_without_block_proposal().await
+    }
+
+    pub async fn peek_candidate_block_proposal(&mut self) -> &Option<RawBlockProposal> {
+        &self.pending_raw_block
+    }
+
+    /// Sends money.
+    pub async fn transfer_without_block_proposal(
+        &mut self,
+        owner: Option<Owner>,
+        amount: Amount,
+        recipient: Recipient,
+        user_data: UserData,
+    ) -> Result<(), ChainClientError> {
+        // TODO(#467): check the balance of `owner` before signing any block proposal.
+        self.prepare_chain().await?;
+        let incoming_messages = self.pending_messages().await?;
+        self.execute_block_without_block_proposal(
+            incoming_messages,
+            vec![Operation::System(SystemOperation::Transfer {
+                owner,
+                recipient,
+                amount,
+                user_data,
+            })],
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Requests a `RegisterApplications` message from another chain so the application can be used
+    /// on this one.
+    pub async fn request_application_without_block_proposal(
+        &mut self,
+        application_id: UserApplicationId,
+        chain_id: Option<ChainId>,
+    ) -> Result<(), ChainClientError> {
+        let chain_id = chain_id.unwrap_or(application_id.creation.chain_id);
+        self.execute_operation_without_block_proposal(Operation::System(
+            SystemOperation::RequestApplication {
+                application_id,
+                chain_id,
+            },
+        ))
+        .await
+    }
 }
 
 /// The outcome of trying to commit a list of incoming messages and operations to the chain.
@@ -2417,6 +2854,16 @@ where
                     return;
                 };
                 if (info.next_block_height, info.manager.current_round) < (height, round) {
+                    error!("Fail to synchronize new block after notification");
+                }
+            }
+            Reason::NewRawBlock { height } => {
+                let chain_id = notification.chain_id;
+                if self
+                    .local_next_block_height(chain_id, &mut local_node)
+                    .await
+                    < Some(height)
+                {
                     error!("Fail to synchronize new block after notification");
                 }
             }

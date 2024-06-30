@@ -155,6 +155,25 @@ impl Wallet {
         Ok(())
     }
 
+    pub fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), anyhow::Error> {
+        let user_chain = UserChain {
+            chain_id,
+            key_pair: Some(KeyPair::from_public_key(key)),
+            block_hash: None,
+            timestamp,
+            next_block_height: BlockHeight(0),
+            pending_block: None,
+            pending_blobs: BTreeMap::new(),
+        };
+        self.insert(user_chain);
+        Ok(())
+    }
+
     pub fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error> {
         anyhow::ensure!(
             self.chains.contains_key(&chain_id),
