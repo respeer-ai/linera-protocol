@@ -2589,7 +2589,7 @@ where
     ///
     /// Different from ececute_block, we don't submit proposal here, and just put
     /// executed_block to pending list, then let client to fetch
-    async fn execute_block_without_block_proposal(
+    pub async fn execute_block_without_block_proposal(
         &mut self,
         incoming_messages: Vec<IncomingMessage>,
         operations: Vec<Operation>,
