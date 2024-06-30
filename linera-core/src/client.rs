@@ -2453,7 +2453,8 @@ where
         operations: Vec<Operation>,
     ) -> Result<(), ChainClientError> {
         self.prepare_chain().await?;
-        self.execute_with_messages_without_block_proposal(operations).await
+        self.execute_with_messages_without_block_proposal(operations)
+            .await
     }
 
     /// Executes a list of operations, without calling `prepare_chain`.
@@ -2462,7 +2463,8 @@ where
         operations: Vec<Operation>,
     ) -> Result<(), ChainClientError> {
         let messages = self.pending_messages().await?;
-        self.execute_block_without_block_proposal(messages, operations.clone()).await?;
+        self.execute_block_without_block_proposal(messages, operations.clone())
+            .await?;
         Ok(())
     }
 
@@ -2471,7 +2473,8 @@ where
         &mut self,
         operation: Operation,
     ) -> Result<(), ChainClientError> {
-        self.execute_operations_without_block_proposal(vec![operation]).await
+        self.execute_operations_without_block_proposal(vec![operation])
+            .await
     }
 
     /// Executes a new block.
@@ -2578,10 +2581,12 @@ where
         chain_id: Option<ChainId>,
     ) -> Result<(), ChainClientError> {
         let chain_id = chain_id.unwrap_or(application_id.creation.chain_id);
-        self.execute_operation_without_block_proposal(Operation::System(SystemOperation::RequestApplication {
-            application_id,
-            chain_id,
-        }))
+        self.execute_operation_without_block_proposal(Operation::System(
+            SystemOperation::RequestApplication {
+                application_id,
+                chain_id,
+            },
+        ))
         .await
     }
 }

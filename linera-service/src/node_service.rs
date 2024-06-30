@@ -1268,8 +1268,8 @@ where
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
         let application_handler =
             axum::routing::get(util::graphiql).post(Self::application_handler);
-        let application_handler_without_block_proposal =
-            axum::routing::get(util::graphiql).post(Self::application_handler_without_block_proposal);
+        let application_handler_without_block_proposal = axum::routing::get(util::graphiql)
+            .post(Self::application_handler_without_block_proposal);
 
         let app = Router::new()
             .route("/", index_handler)
@@ -1460,7 +1460,9 @@ where
                 chain_id: chain_id.to_string(),
             });
         };
-        client.execute_operations_without_block_proposal(operations.clone()).await?;
+        client
+            .execute_operations_without_block_proposal(operations.clone())
+            .await?;
         Ok(async_graphql::Response::new(application_id.to_value()))
     }
 
@@ -1490,7 +1492,11 @@ where
             OperationType::Mutation => {
                 service
                     .0
-                    .user_application_mutation_without_block_proposal(application_id, &request, chain_id)
+                    .user_application_mutation_without_block_proposal(
+                        application_id,
+                        &request,
+                        chain_id,
+                    )
                     .await?
             }
             OperationType::Subscription => return Err(NodeServiceError::UnsupportedQueryType),
