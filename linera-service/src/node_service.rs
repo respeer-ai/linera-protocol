@@ -40,7 +40,7 @@ use linera_core::{
     worker::{Notification, Reason, WorkerState},
 };
 use linera_execution::{
-    committee::{Committee, Epoch},
+    committee::{Committee, Epoch, ValidatorName},
     system::{AdminOperation, Recipient, SystemChannel, UserData},
     Bytecode, Message, Operation, Query, Response, SystemMessage, SystemOperation,
     UserApplicationDescription, UserApplicationId,
@@ -329,6 +329,105 @@ where
             drop(client);
             wait_for_next_round(&mut stream, timeout).await;
         }
+    }
+
+    async fn assign_new_chain_to_public_key(
+        &self,
+        chain_id: ChainId,
+        public_key: PublicKey,
+        message_id: MessageId,
+        validators: Vec<(ValidatorName, String)>,
+    ) -> Result<(), Error> {
+        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
+            .with_allow_inactive_chains(true)
+            .with_allow_messages_from_deprecated_epochs(true);
+        let node_client = LocalNodeClient::new(state);
+
+        let nodes = self
+            .context
+            .lock()
+            .await
+            .make_node_provider()
+            .make_nodes_from_list(validators)?;
+        let target_height = message_id.height.try_add_one()?;
+        node_client
+            .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
+            .await
+            .context("Failed to download parent chain")?;
+        let certificate = node_client
+            .certificate_for(&message_id)
+            .await
+            .context("could not find OpenChain message")?;
+        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
+            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
+        };
+        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
+            .message_by_id(&message_id)
+            .map(|msg| &msg.message)
+        else {
+            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
+        };
+        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
+            return Err(anyhow!(
+                    "The chain with the ID returned by the faucet is not owned by you. \
+            Please make sure you are connecting to a genuine faucet."
+            )
+            .into());
+        }
+        self.context
+            .lock()
+            .await
+            .wallet_mut()
+            .assign_new_chain_to_public_key(public_key, chain_id, executed_block.block.timestamp)
+            .context("could not assign the new chain")?;
+        Ok(())
+    }
+
+    async fn print_peg_certificate_hash(
+        &self,
+        chain_ids: impl IntoIterator<Item = ChainId>,
+    ) -> Result<(), Error> {
+        let mut chains = HashMap::new();
+        for chain_id in chain_ids {
+            if chains.contains_key(&chain_id) {
+                continue;
+            }
+            chains.insert(chain_id, self.storage.load_chain(chain_id).await?);
+        }
+        let (peg_chain_id, _) = chains
+            .iter()
+            .filter_map(|(chain_id, chain)| {
+                let epoch = (*chain.execution_state.system.epoch.get())?;
+                let is_admin = Some(*chain_id) == *chain.execution_state.system.admin_id.get();
+                Some((*chain_id, (epoch, is_admin)))
+            })
+        .max_by_key(|(_, epoch)| *epoch)
+            .context("no active chain found")?;
+        let peg_chain = chains.remove(&peg_chain_id).unwrap();
+        let committees = peg_chain.execution_state.system.committees.get();
+        for (chain_id, chain) in &chains {
+            let Some(hash) = chain.tip_state.get().block_hash else {
+                continue;
+            };
+            let certificate = self.storage.read_certificate(hash).await?;
+            let committee = committees
+                .get(&certificate.value().epoch())
+                .ok_or_else(|| anyhow!("tip of chain {chain_id} is outdated."))?;
+            certificate.check(committee)?;
+        }
+        let config_hash = CryptoHash::new(self.context.lock().await.wallet().genesis_config());
+        let maybe_epoch = peg_chain.execution_state.system.epoch.get();
+        let epoch = maybe_epoch.context("missing epoch in peg chain")?.0;
+        info!(
+            "Initialized wallet based on data provided by the faucet.\n\
+        The current epoch is {epoch}.\n\
+        The genesis config hash is {config_hash}{}",
+        if let Some(peg_hash) = peg_chain.tip_state.get().block_hash {
+            format!("\nThe latest certificate on chain {peg_chain_id} is {peg_hash}.")
+        } else {
+            "".to_string()
+        });
+        Ok(())
     }
 }
 
@@ -769,98 +868,17 @@ where
         message_id: MessageId,
         with_other_chains: Vec<ChainId>,
     ) -> Result<ChainId, Error> {
-        let faucet = cli_wrappers::Faucet::new(faucet_url);
+        let faucet = cli_wrappers::Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
-
-        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
-            .with_allow_inactive_chains(true)
-            .with_allow_messages_from_deprecated_epochs(true);
-        let node_client = LocalNodeClient::new(state);
         let admin_chain_id = self.context.lock().await.wallet().genesis_admin_chain();
 
-        let nodes = self
-            .context
-            .lock()
-            .await
-            .make_node_provider()
-            .make_nodes_from_list(validators)?;
-        let target_height = message_id.height.try_add_one()?;
-        node_client
-            .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
-            .await
-            .context("Failed to download parent chain")?;
-        let certificate = node_client
-            .certificate_for(&message_id)
-            .await
-            .context("could not find OpenChain message")?;
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
-            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
-        };
-        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
-            .message_by_id(&message_id)
-            .map(|msg| &msg.message)
-        else {
-            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
-        };
-        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
-            return Err(anyhow!(
-                "The chain with the ID returned by the faucet is not owned by you. \
-                    Please make sure you are connecting to a genuine faucet."
-            )
-            .into());
-        }
-        self.context
-            .lock()
-            .await
-            .wallet_mut()
-            .assign_new_chain_to_public_key(public_key, chain_id, executed_block.block.timestamp)
-            .context("could not assign the new chain")?;
+        self.assign_new_chain_to_public_key(chain_id, public_key, message_id, validators).await?;
 
         let chain_ids = with_other_chains
             .into_iter()
             .chain([admin_chain_id, chain_id]);
 
-        let mut chains = HashMap::new();
-        for chain_id in chain_ids {
-            if chains.contains_key(&chain_id) {
-                continue;
-            }
-            chains.insert(chain_id, self.storage.load_chain(chain_id).await?);
-        }
-        let (peg_chain_id, _) = chains
-            .iter()
-            .filter_map(|(chain_id, chain)| {
-                let epoch = (*chain.execution_state.system.epoch.get())?;
-                let is_admin = Some(*chain_id) == *chain.execution_state.system.admin_id.get();
-                Some((*chain_id, (epoch, is_admin)))
-            })
-            .max_by_key(|(_, epoch)| *epoch)
-            .context("no active chain found")?;
-        let peg_chain = chains.remove(&peg_chain_id).unwrap();
-        let committees = peg_chain.execution_state.system.committees.get();
-        for (chain_id, chain) in &chains {
-            let Some(hash) = chain.tip_state.get().block_hash else {
-                continue;
-            };
-            let certificate = self.storage.read_certificate(hash).await?;
-            let committee = committees
-                .get(&certificate.value().epoch())
-                .ok_or_else(|| anyhow!("tip of chain {chain_id} is outdated."))?;
-            certificate.check(committee)?;
-        }
-        let config_hash = CryptoHash::new(self.context.lock().await.wallet().genesis_config());
-        let maybe_epoch = peg_chain.execution_state.system.epoch.get();
-        let epoch = maybe_epoch.context("missing epoch in peg chain")?.0;
-        info!(
-            "Initialized wallet based on data provided by the faucet.\n\
-            The current epoch is {epoch}.\n\
-            The genesis config hash is {config_hash}{}",
-            if let Some(peg_hash) = peg_chain.tip_state.get().block_hash {
-                format!("\nThe latest certificate on chain {peg_chain_id} is {peg_hash}.")
-            } else {
-                "".to_string()
-            }
-        );
+        self.print_peg_certificate_hash(chain_ids).await?;
 
         self.context
             .lock()
