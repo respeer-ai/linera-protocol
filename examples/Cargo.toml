@@ -39,6 +39,7 @@ serde_json = "1.0.93"
 sha3 = "0.10.8"
 tokenizers = { git = "https://github.com/christos-h/tokenizers", default-features = false, features = ["unstable_wasm"] }
 tokio = { version = "1.25.0", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1.40"
 
 counter = { path = "./counter" }
 crowd-funding = { path = "./crowd-funding" }
@@ -57,3 +58,8 @@ strip = 'debuginfo'
 
 [profile.bench]
 debug = true
+
+[patch.crates-io.ed25519-dalek]
+version = "2.1.1"
+git = "https://github.com/respeer-ai/curve25519-dalek"
+branch = "respeer-pub-field-1efe6a93"

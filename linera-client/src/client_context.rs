@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use colored::Colorize;
 use futures::Future;
 use linera_base::{
-    crypto::KeyPair,
+    crypto::{KeyPair, PublicKey},
     data_types::{BlockHeight, HashedBlob, Timestamp},
     identifiers::{Account, BlobId, BytecodeId, ChainId},
     ownership::ChainOwnership,
@@ -111,6 +111,27 @@ where
 
     async fn update_wallet(&mut self, client: &ChainClient<NodeProvider, S>) {
         self.update_and_save_wallet(client).await;
+    }
+
+    fn save_wallet(&mut self) {
+        self.save_wallet();
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        self.make_node_provider()
+    }
+
+    fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), anyhow::Error> {
+        self.assign_new_chain_to_public_key(key, chain_id, timestamp)
+    }
+
+    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error> {
+        self.set_default_chain(chain_id)
     }
 }
 
@@ -414,6 +435,19 @@ where
         debug!("{:?}", certificate);
         Ok(())
     }
+
+    pub fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), anyhow::Error> {
+        self.wallet_mut().assign_new_chain_to_public_key(key, chain_id, timestamp)
+    }
+
+    pub fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error> {
+        self.wallet_mut().set_default_chain(chain_id)
+    }
 }
 
 #[cfg(feature = "benchmark")]
@@ -495,9 +529,15 @@ where
                     .context("failed to create new chain")?;
                 let chain_id = ChainId::child(message_id);
                 key_pairs.insert(chain_id, key_pair.copy());
+                self.chain_client_builder.track_chain(chain_id);
                 self.update_wallet_for_new_chain(chain_id, Some(key_pair.copy()), timestamp);
             }
         }
+        let mut updated_chain_client = self.make_chain_client(storage.clone(), default_chain_id);
+        updated_chain_client
+            .retry_pending_outgoing_messages()
+            .await
+            .context("outgoing messages to create the new chains should be delivered")?;
 
         for chain_id in key_pairs.keys() {
             let child_client = self.make_chain_client(*chain_id);

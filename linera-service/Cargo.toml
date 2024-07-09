@@ -86,6 +86,7 @@ linera-storage = { workspace = true, features = ["metrics", "wasmer"] }
 linera-storage-service.workspace = true
 linera-version.workspace = true
 linera-views = { workspace = true, features = ["metrics"] }
+local-ip-address = "0.6.1"
 pathdiff = { workspace = true, optional = true }
 port-selector.workspace = true
 prometheus = { workspace = true, optional = true }

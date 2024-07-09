@@ -10,7 +10,7 @@ use futures::{
     StreamExt,
 };
 use linera_base::{
-    crypto::KeyPair,
+    crypto::{KeyPair, PublicKey},
     data_types::Timestamp,
     identifiers::{ChainId, Destination},
 };
@@ -21,6 +21,7 @@ use linera_core::{
     worker::Reason,
 };
 use linera_execution::{Message, SystemMessage};
+use linera_rpc::node_provider::NodeProvider;
 use linera_storage::Storage;
 use linera_views::views::ViewError;
 use tracing::{error, info, warn};
@@ -40,6 +41,10 @@ pub struct ChainListenerConfig {
     /// Wait after processing any notification (useful for rate limiting).
     #[arg(long = "listener-delay-after-ms", default_value = "0")]
     pub delay_after_ms: u64,
+
+    /// Use external signing service.
+    #[arg(long = "external-signing", action = clap::ArgAction::Set, default_value_t = true)]
+    pub external_signing: bool,
 }
 
 #[async_trait]
@@ -68,6 +73,19 @@ pub trait ClientContext {
         client: &ChainClient<Self::ValidatorNodeProvider, Self::Storage>,
     ) where
         ViewError: From<<Self::Storage as Storage>::StoreError>;
+
+    fn save_wallet(&mut self);
+
+    fn make_node_provider(&self) -> NodeProvider;
+
+    fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), anyhow::Error>;
+
+    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
@@ -110,7 +128,7 @@ where
         }
     }
 
-    fn run_with_chain_id<C>(
+    pub fn run_with_chain_id<C>(
         chain_id: ChainId,
         clients: ChainClients<P, S>,
         context: Arc<Mutex<C>>,
@@ -138,7 +156,7 @@ where
     where
         C: ClientContext<ValidatorNodeProvider = P, Storage = S> + Send + 'static,
     {
-        let client = {
+        let mut client = {
             let mut map_guard = clients.map_lock().await;
             let context_guard = context.lock().await;
             let btree_map::Entry::Vacant(entry) = map_guard.entry(chain_id) else {
@@ -161,7 +179,14 @@ where
                 Either::Left((Some(notification), _)) => notification,
                 Either::Left((None, _)) => break,
                 Either::Right(((), _)) => {
-                    match client.process_inbox_if_owned().await {
+                    let result = if config.external_signing {
+                        client
+                            .process_inbox_if_owned_without_block_proposal()
+                            .await
+                    } else {
+                        client.process_inbox_if_owned().await
+                    };
+                    match result {
                         Err(error) => {
                             warn!(%error, "Failed to process inbox.");
                             timeout = Timestamp::from(u64::MAX);
@@ -177,7 +202,7 @@ where
             Self::maybe_sleep(config.delay_before_ms).await;
             match &notification.reason {
                 Reason::NewIncomingMessage { .. } => timeout = storage.clock().current_time(),
-                Reason::NewBlock { .. } | Reason::NewRound { .. } => {
+                Reason::NewBlock { .. } | Reason::NewRound { .. } | Reason::NewRawBlock { .. } => {
                     if let Err(error) = client.update_validators().await {
                         warn!(
                             "Failed to update validators about the local chain after \

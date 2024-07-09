@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 use linera_base::{
-    crypto::{CryptoHash, KeyPair},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{Blob, HashedBlob, Timestamp},
     identifiers::{BlobId, ChainId},
 };
@@ -22,6 +22,7 @@ use linera_core::{
         ValidatorNode,
     },
 };
+use linera_rpc::node_provider::NodeProvider;
 use linera_execution::committee::Committee;
 use linera_service::node_service::NodeService;
 use linera_storage::{MemoryStorage, Storage};
@@ -148,6 +149,27 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
         ViewError: From<S::StoreError>,
     {
     }
+
+    fn save_wallet(&mut self) {
+        unimplemented!()
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        unimplemented!()
+    }
+
+    fn assign_new_chain_to_public_key(
+        &mut self,
+        _key: PublicKey,
+        _chain_id: ChainId,
+        _timestamp: Timestamp,
+    ) -> Result<(), anyhow::Error> {
+        unimplemented!()
+    }
+
+    fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), anyhow::Error> {
+        unimplemented!()
+    }
 }
 
 #[tokio::main]
@@ -162,6 +184,7 @@ async fn main() -> std::io::Result<()> {
     let config = ChainListenerConfig {
         delay_before_ms: 0,
         delay_after_ms: 0,
+        external_signing: true,
     };
     let context = DummyContext {
         _phantom: std::marker::PhantomData,
