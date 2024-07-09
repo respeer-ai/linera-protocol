@@ -111,6 +111,11 @@ impl ChainGuards {
     pub(crate) fn active_guards(&self) -> usize {
         self.guards.len()
     }
+
+    /// Check if chain already guarded
+    pub fn contains(&self, chain_id: ChainId) -> bool {
+        self.guards.contains_key(&chain_id)
+    }
 }
 
 /// A guard for a specific chain.

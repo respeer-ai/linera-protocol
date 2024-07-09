@@ -91,6 +91,8 @@ pub trait Storage: Sized {
     where
         ViewError: From<Self::StoreError>;
 
+    async fn contains_chain(&self, chain_id: ChainId) -> bool;
+
     /// Tests existence of a hashed certificate value with the given hash.
     async fn contains_hashed_certificate_value(&self, hash: CryptoHash) -> Result<bool, ViewError>;
 

@@ -29,7 +29,7 @@ use linera_base::{
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{CertificateValue, HashedCertificateValue, IncomingMessage},
+    data_types::{HashedCertificateValue, IncomingMessage},
     ChainStateView,
 };
 use linera_client::{
@@ -46,7 +46,7 @@ use linera_core::{
 use linera_execution::{
     committee::{Committee, Epoch, ValidatorName},
     system::{AdminOperation, Recipient, SystemChannel, UserData},
-    Bytecode, Message, Operation, Query, Response, SystemMessage, SystemOperation,
+    Bytecode, Operation, Query, Response, SystemOperation,
     UserApplicationDescription, UserApplicationId,
 };
 use linera_storage::Storage;
@@ -140,11 +140,6 @@ enum NodeServiceError {
     UnknownChainId { chain_id: String },
     #[error("malformed chain ID")]
     InvalidChainId(CryptoError),
-
-    #[error("Unexpected certificate. Please make sure you are connecting to the right network and are using a current software version.")]
-    UnexpectedCertificate,
-    #[error("The message with the ID returned by the faucet is not OpenChain. please make sure you are connecting to a genuine faucet.")]
-    NotOpenChainMessage,
 }
 
 impl From<ServerError> for NodeServiceError {
@@ -189,12 +184,6 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
-            NodeServiceError::UnexpectedCertificate => {
-                (StatusCode::BAD_REQUEST, vec![self.to_string()])
-            }
-            NodeServiceError::NotOpenChainMessage => {
-                (StatusCode::BAD_REQUEST, vec![self.to_string()])
-            }
         };
         let tuple = (tuple.0, json!({"error": tuple.1}).to_string());
         tuple.into_response()
@@ -278,46 +267,51 @@ where
         message_id: MessageId,
         validators: Vec<(ValidatorName, String)>,
     ) -> Result<(), Error> {
-        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
-            .with_allow_inactive_chains(true)
-            .with_allow_messages_from_deprecated_epochs(true);
-        let node_client = LocalNodeClient::new(state);
+        if self.storage.contains_chain(message_id.chain_id).await {
+            let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
+                .with_allow_inactive_chains(true)
+                .with_allow_messages_from_deprecated_epochs(true);
+            let node_client = LocalNodeClient::new(state);
 
-        let nodes = self
-            .context
-            .lock()
-            .await
-            .make_node_provider()
-            .make_nodes_from_list(validators)?;
-        let target_height = message_id.height.try_add_one()?;
-        node_client
-            .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
-            .await
-            .context("Failed to download parent chain")?;
-        let certificate = node_client
-            .certificate_for(&message_id)
-            .await
-            .context("could not find OpenChain message")?;
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
-            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
-        };
-        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
-            .message_by_id(&message_id)
-            .map(|msg| &msg.message)
-        else {
-            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
-        };
-        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
-            return Err(anyhow!(
+            let nodes = self
+                .context
+                .lock()
+                .await
+                .make_node_provider()
+                .make_nodes_from_list(validators)?;
+            let target_height = message_id.height.try_add_one()?;
+            node_client
+                .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
+                .await
+                .context("Failed to download parent chain")?;
+            // TODO: we should verify owner here, but the chain guard will dead lock
+            //       we need to see if ChainStateView could help us
+            /*
+            let certificate = node_client
+                .certificate_for(&message_id)
+                .await
+                .context("could not find OpenChain message")?;
+            let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
+                return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
+            };
+            let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
+                .message_by_id(&message_id)
+                .map(|msg| &msg.message)
+            else {
+                return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
+            };
+            if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
+                return Err(anyhow!(
                     "The chain with the ID returned by the faucet is not owned by you. \
-            Please make sure you are connecting to a genuine faucet."
-            )
-            .into());
+                    Please make sure you are connecting to a genuine faucet."
+                ).into());
+            }
+            */
         }
         self.context
             .lock()
             .await
-            .assign_new_chain_to_public_key(public_key, chain_id, executed_block.block.timestamp)
+            .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
             .context("could not assign the new chain")?;
         Ok(())
     }
@@ -331,7 +325,9 @@ where
             if chains.contains_key(&chain_id) {
                 continue;
             }
-            chains.insert(chain_id, self.storage.load_chain(chain_id).await?);
+            let client = self.clients.try_client_lock(&chain_id).await?;
+            let view = client.chain_state_view().await?;
+            chains.insert(chain_id, view);
         }
         let (peg_chain_id, _) = chains
             .iter()
@@ -807,6 +803,10 @@ where
         message_id: MessageId,
         with_other_chains: Vec<ChainId>,
     ) -> Result<ChainId, Error> {
+        if self.storage.contains_chain(chain_id).await {
+            return Ok(chain_id);
+        }
+
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
         let admin_chain_id = self.context.lock().await.wallet().genesis_admin_chain();

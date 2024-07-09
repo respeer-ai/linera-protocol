@@ -422,6 +422,10 @@ where
         ChainStateView::load(context).await
     }
 
+    async fn contains_chain(&self, chain_id: ChainId) -> bool {
+        self.client.guards.contains(chain_id)
+    }
+
     async fn contains_hashed_certificate_value(&self, hash: CryptoHash) -> Result<bool, ViewError> {
         let value_key = bcs::to_bytes(&BaseKey::Value(hash))?;
         let test = self.client.client.contains_key(&value_key).await?;
