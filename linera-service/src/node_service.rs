@@ -260,59 +260,58 @@ where
         }
     }
 
-    async fn assign_new_chain_to_public_key(
+    async fn prepare_parent_chain(
         &self,
-        chain_id: ChainId,
-        public_key: PublicKey,
+        _public_key: PublicKey,
         message_id: MessageId,
         validators: Vec<(ValidatorName, String)>,
     ) -> Result<(), Error> {
         if self.storage.contains_chain(message_id.chain_id).await {
-            let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
-                .with_allow_inactive_chains(true)
-                .with_allow_messages_from_deprecated_epochs(true);
-            let node_client = LocalNodeClient::new(state);
-
-            let nodes = self
-                .context
-                .lock()
-                .await
-                .make_node_provider()
-                .make_nodes_from_list(validators)?;
-            let target_height = message_id.height.try_add_one()?;
-            node_client
-                .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
-                .await
-                .context("Failed to download parent chain")?;
-            // TODO: we should verify owner here, but the chain guard will dead lock
-            //       we need to see if ChainStateView could help us
-            /*
-            let certificate = node_client
-                .certificate_for(&message_id)
-                .await
-                .context("could not find OpenChain message")?;
-            let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
-                return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
-            };
-            let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
-                .message_by_id(&message_id)
-                .map(|msg| &msg.message)
-            else {
-                return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
-            };
-            if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
-                return Err(anyhow!(
-                    "The chain with the ID returned by the faucet is not owned by you. \
-                    Please make sure you are connecting to a genuine faucet."
-                ).into());
-            }
-            */
+            return Ok(());
         }
-        self.context
+
+        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
+            .with_allow_inactive_chains(true)
+            .with_allow_messages_from_deprecated_epochs(true);
+        let node_client = LocalNodeClient::new(state);
+
+        let nodes = self
+            .context
             .lock()
             .await
-            .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
-            .context("could not assign the new chain")?;
+            .make_node_provider()
+            .make_nodes_from_list(validators)?;
+        let target_height = message_id.height.try_add_one()?;
+        node_client
+            .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
+            .await
+            .context("Failed to download parent chain")?;
+
+        // TODO: we should verify owner here, but the chain guard will dead lock
+        //       we need to see if ChainStateView could help us
+
+        /*
+        let certificate = node_client
+            .certificate_for(&message_id)
+            .await
+            .context("could not find OpenChain message")?;
+        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
+            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
+        };
+        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
+            .message_by_id(&message_id)
+            .map(|msg| &msg.message)
+        else {
+            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
+        };
+        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
+            return Err(anyhow!(
+                "The chain with the ID returned by the faucet is not owned by you. \
+                Please make sure you are connecting to a genuine faucet."
+            ).into());
+        }
+        */
+
         Ok(())
     }
 
@@ -321,12 +320,14 @@ where
         chain_ids: impl IntoIterator<Item = ChainId>,
     ) -> Result<(), Error> {
         let mut chains = HashMap::new();
+        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
+            .with_allow_inactive_chains(true)
+            .with_allow_messages_from_deprecated_epochs(true);
         for chain_id in chain_ids {
             if chains.contains_key(&chain_id) {
                 continue;
             }
-            let client = self.clients.try_client_lock(&chain_id).await?;
-            let view = client.chain_state_view().await?;
+            let view = state.chain_state_view(chain_id).await?;
             chains.insert(chain_id, view);
         }
         let (peg_chain_id, _) = chains
@@ -336,7 +337,7 @@ where
                 let is_admin = Some(*chain_id) == *chain.execution_state.system.admin_id.get();
                 Some((*chain_id, (epoch, is_admin)))
             })
-        .max_by_key(|(_, epoch)| *epoch)
+            .max_by_key(|(_, epoch)| *epoch)
             .context("no active chain found")?;
         let peg_chain = chains.remove(&peg_chain_id).unwrap();
         let committees = peg_chain.execution_state.system.committees.get();
@@ -811,7 +812,12 @@ where
         let validators = faucet.current_validators().await?;
         let admin_chain_id = self.context.lock().await.wallet().genesis_admin_chain();
 
-        self.assign_new_chain_to_public_key(chain_id, public_key, message_id, validators).await?;
+        self.prepare_parent_chain(public_key, message_id, validators).await?;
+        self.context
+            .lock()
+            .await
+            .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
+            .context("could not assign the new chain")?;
 
         let chain_ids = with_other_chains
             .into_iter()
