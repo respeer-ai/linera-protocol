@@ -6,7 +6,7 @@ use std::{
     collections::HashMap, net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -267,6 +267,7 @@ where
         validators: Vec<(ValidatorName, String)>,
     ) -> Result<(), Error> {
         if self.storage.contains_chain(message_id.chain_id).await {
+            info!("Parent chain {} already exists", message_id.chain_id);
             return Ok(());
         }
 
@@ -312,57 +313,6 @@ where
         }
         */
 
-        Ok(())
-    }
-
-    async fn print_peg_certificate_hash(
-        &self,
-        chain_ids: impl IntoIterator<Item = ChainId>,
-    ) -> Result<(), Error> {
-        let mut chains = HashMap::new();
-        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
-            .with_allow_inactive_chains(true)
-            .with_allow_messages_from_deprecated_epochs(true);
-        for chain_id in chain_ids {
-            if chains.contains_key(&chain_id) {
-                continue;
-            }
-            let view = state.chain_state_view(chain_id).await?;
-            chains.insert(chain_id, view);
-        }
-        let (peg_chain_id, _) = chains
-            .iter()
-            .filter_map(|(chain_id, chain)| {
-                let epoch = (*chain.execution_state.system.epoch.get())?;
-                let is_admin = Some(*chain_id) == *chain.execution_state.system.admin_id.get();
-                Some((*chain_id, (epoch, is_admin)))
-            })
-            .max_by_key(|(_, epoch)| *epoch)
-            .context("no active chain found")?;
-        let peg_chain = chains.remove(&peg_chain_id).unwrap();
-        let committees = peg_chain.execution_state.system.committees.get();
-        for (chain_id, chain) in &chains {
-            let Some(hash) = chain.tip_state.get().block_hash else {
-                continue;
-            };
-            let certificate = self.storage.read_certificate(hash).await?;
-            let committee = committees
-                .get(&certificate.value().epoch())
-                .ok_or_else(|| anyhow!("tip of chain {chain_id} is outdated."))?;
-            certificate.check(committee)?;
-        }
-        let config_hash = CryptoHash::new(self.context.lock().await.wallet().genesis_config());
-        let maybe_epoch = peg_chain.execution_state.system.epoch.get();
-        let epoch = maybe_epoch.context("missing epoch in peg chain")?.0;
-        info!(
-            "Initialized wallet based on data provided by the faucet.\n\
-        The current epoch is {epoch}.\n\
-        The genesis config hash is {config_hash}{}",
-        if let Some(peg_hash) = peg_chain.tip_state.get().block_hash {
-            format!("\nThe latest certificate on chain {peg_chain_id} is {peg_hash}.")
-        } else {
-            "".to_string()
-        });
         Ok(())
     }
 }
@@ -802,15 +752,14 @@ where
         faucet_url: String,
         chain_id: ChainId,
         message_id: MessageId,
-        with_other_chains: Vec<ChainId>,
     ) -> Result<ChainId, Error> {
         if self.storage.contains_chain(chain_id).await {
+            info!("Chain {} already exists", chain_id);
             return Ok(chain_id);
         }
 
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
-        let admin_chain_id = self.context.lock().await.wallet().genesis_admin_chain();
 
         self.prepare_parent_chain(public_key, message_id, validators).await?;
         self.context
@@ -818,12 +767,6 @@ where
             .await
             .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
             .context("could not assign the new chain")?;
-
-        let chain_ids = with_other_chains
-            .into_iter()
-            .chain([admin_chain_id, chain_id]);
-
-        self.print_peg_certificate_hash(chain_ids).await?;
 
         self.context
             .lock()
@@ -838,6 +781,8 @@ where
             self.storage.clone(),
             self.config.clone(),
         );
+
+        info!("Chain {} is initialized", chain_id);
 
         Ok(chain_id)
     }
