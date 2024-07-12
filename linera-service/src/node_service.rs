@@ -285,8 +285,7 @@ where
         let target_height = message_id.height.try_add_one()?;
         node_client
             .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
-            .await
-            .context("Failed to download parent chain")?;
+            .await?;
 
         // TODO: we should verify owner here, but the chain guard will dead lock
         //       we need to see if ChainStateView could help us
