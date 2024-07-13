@@ -22,7 +22,7 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{CryptoError, CryptoHash, Hashable, PublicKey, Signature},
+    crypto::{CryptoError, CryptoHash, Hashable, PublicKey, Signature, BcsSignable},
     data_types::{Amount, ApplicationPermissions, Blob, BlockHeight, TimeDelta, Timestamp},
     identifiers::{Account, ApplicationId, BlobId, BytecodeId, ChainId, MessageId, Owner},
     ownership::{ChainOwnership, TimeoutConfig},
@@ -772,7 +772,7 @@ where
     async fn wallet_init_without_keypair(
         &self,
         public_key: PublicKey,
-        // signature: Signature,
+        signature: Signature,
         faucet_url: String,
         chain_id: ChainId,
         message_id: MessageId,
@@ -783,8 +783,12 @@ where
             return Ok(chain_id);
         }
 
-        // TODO: verify signature
-        // TODO: get chain height and download chain certificate
+        #[derive(Debug, Serialize, Deserialize)]
+        struct Nonce(String);
+        impl BcsSignable for Nonce {}
+
+        let nonce = Nonce(certificate_hash.to_string());
+        signature.check(&nonce, public_key)?;
 
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
