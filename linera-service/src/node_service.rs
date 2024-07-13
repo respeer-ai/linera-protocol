@@ -264,6 +264,7 @@ where
         &self,
         _public_key: PublicKey,
         message_id: MessageId,
+        _certificate_hash: CryptoHash,
         validators: Vec<(ValidatorName, String)>,
     ) -> Result<(), Error> {
         if self.storage.contains_chain(message_id.chain_id).await {
@@ -751,6 +752,7 @@ where
         faucet_url: String,
         chain_id: ChainId,
         message_id: MessageId,
+        certificate_hash: CryptoHash,
     ) -> Result<ChainId, Error> {
         if self.storage.contains_chain(chain_id).await {
             info!("Chain {} already exists", chain_id);
@@ -760,7 +762,7 @@ where
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
-        self.prepare_parent_chain(public_key, message_id, validators).await?;
+        self.prepare_parent_chain(public_key, message_id, certificate_hash, validators).await?;
         self.context
             .lock()
             .await

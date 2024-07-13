@@ -206,6 +206,7 @@ where
             chain.next_block_height,
             chain.pending_block.clone(),
             chain.pending_blobs.clone(),
+            chain.pending_raw_block.clone(),
         );
         chain_client.options_mut().message_policy = self.options.message_policy;
         chain_client
@@ -253,6 +254,7 @@ where
                 next_block_height: BlockHeight::ZERO,
                 pending_block: None,
                 pending_blobs: BTreeMap::new(),
+                pending_raw_block: None,
             });
         }
     }

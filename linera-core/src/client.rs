@@ -148,6 +148,7 @@ where
         next_block_height: BlockHeight,
         pending_block: Option<Block>,
         pending_blobs: BTreeMap<BlobId, HashedBlob>,
+        pending_raw_block: Option<RawBlockProposal>,
     ) -> ChainClient<P, S>
     where
         ViewError: From<S::StoreError>,
@@ -170,6 +171,7 @@ where
             pending_blobs,
             received_certificate_trackers: HashMap::new(),
             preparing_block: Arc::default(),
+            pending_raw_block: pending_raw_block,
         });
 
         ChainClient {
@@ -180,7 +182,6 @@ where
                 message_policy: self.message_policy,
                 cross_chain_message_delivery: self.cross_chain_message_delivery,
             },
-            pending_raw_block: None,
         }
     }
 }
@@ -234,6 +235,9 @@ pub struct ChainState {
     /// A mutex that is held whilst we are preparing the next block, to ensure that no
     /// other client can begin preparing a block.
     preparing_block: Arc<Mutex<()>>,
+
+    /// Raw block proposal list waiting for sign
+    pub pending_raw_block: Option<RawBlockProposal>,
 }
 
 #[non_exhaustive]
@@ -263,9 +267,6 @@ where
     chain_id: ChainId,
     /// The client options.
     options: ChainClientOptions,
-
-    /// Raw block proposal list waiting for sign
-    pending_raw_block: Option<RawBlockProposal>,
 }
 
 impl<P, S> Clone for ChainClient<P, S>
@@ -278,7 +279,6 @@ where
             client: self.client.clone(),
             chain_id: self.chain_id,
             options: self.options.clone(),
-            pending_raw_block: None,
         }
     }
 }
@@ -2755,7 +2755,7 @@ where
             }
         };
 
-        self.pending_raw_block = Some(RawBlockProposal {
+        self.state_mut().pending_raw_block = Some(RawBlockProposal {
             content: ProposalContent {
                 block: block.clone(),
                 round,
@@ -2798,7 +2798,7 @@ where
         height: BlockHeight,
         signature: Signature,
     ) -> Result<Certificate, ChainClientError> {
-        let raw_block = match &self.pending_raw_block {
+        let raw_block = match &self.state().pending_raw_block {
             Some(raw_block) => raw_block.clone(),
             _ => return Err(ChainClientError::InvalidRawBlockProposal),
         };
@@ -2825,7 +2825,7 @@ where
         let certificate = self
             .submit_block_proposal(&committee, proposal, raw_block.hashed_value.clone())
             .await?;
-        self.pending_raw_block = None;
+        self.state_mut().pending_raw_block = None;
         self.clear_pending_block();
         // Communicate the new certificate now.
         self.communicate_chain_updates(
@@ -2875,11 +2875,11 @@ where
                 self.state_mut().pending_block = None;
             }
         }
-        if let Some(raw_block) = &self.pending_raw_block {
+        if let Some(raw_block) = &self.state().pending_raw_block {
             if raw_block.content.block.height == info.next_block_height {
                 return Ok(ClientOutcome::Committed(true));
             }
-            self.pending_raw_block = None
+            self.state_mut().pending_raw_block = None
         }
         // If there is a validated block in the current round, finalize it.
         if let Some(certificate) = &manager.requested_locked {
@@ -2915,6 +2915,7 @@ where
         else {
             return Ok(ClientOutcome::Committed(false)); // Nothing to propose.
         };
+
 
         // If there is a conflicting proposal in the current round, we can only propose if the
         // next round can be started without a timeout, i.e. if we are in a multi-leader round.
@@ -3048,8 +3049,8 @@ where
         self.process_inbox_without_block_proposal().await
     }
 
-    pub async fn peek_candidate_block_proposal(&mut self) -> &Option<RawBlockProposal> {
-        &self.pending_raw_block
+    pub async fn peek_candidate_block_proposal(&mut self) -> Option<RawBlockProposal> {
+        self.state().pending_raw_block.clone()
     }
 
     /// Sends money.
