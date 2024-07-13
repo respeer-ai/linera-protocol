@@ -6,7 +6,7 @@ use std::{
     collections::HashMap, net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -29,7 +29,7 @@ use linera_base::{
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{HashedCertificateValue, IncomingMessage},
+    data_types::{CertificateValue, HashedCertificateValue, IncomingMessage},
     ChainStateView,
 };
 use linera_client::{
@@ -44,6 +44,7 @@ use linera_core::{
     worker::{Notification, Reason, WorkerState},
 };
 use linera_execution::{
+    SystemMessage, Message,
     committee::{Committee, Epoch, ValidatorName},
     system::{AdminOperation, Recipient, SystemChannel, UserData},
     Bytecode, Operation, Query, Response, SystemOperation,
@@ -140,6 +141,11 @@ enum NodeServiceError {
     UnknownChainId { chain_id: String },
     #[error("malformed chain ID")]
     InvalidChainId(CryptoError),
+
+    #[error("Unexpected certificate. Please make sure you are connecting to the right network and are using a current software version.")]
+    UnexpectedCertificate,
+    #[error("The message with the ID returned by the faucet is not OpenChain. please make sure you are connecting to a genuine faucet.")]
+    NotOpenChainMessage,
 }
 
 impl From<ServerError> for NodeServiceError {
@@ -184,6 +190,12 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
+            NodeServiceError::UnexpectedCertificate => {
+                (StatusCode::BAD_REQUEST, vec![self.to_string()])
+            }
+            NodeServiceError::NotOpenChainMessage => {
+                (StatusCode::BAD_REQUEST, vec![self.to_string()])
+            }
         };
         let tuple = (tuple.0, json!({"error": tuple.1}).to_string());
         tuple.into_response()
@@ -260,11 +272,30 @@ where
         }
     }
 
+    async fn synchronize_chain_state(
+        &self,
+        chain_id: ChainId,
+        validators: Vec<(ValidatorName, String)>,
+    ) -> Result<(), Error> {
+        let state = WorkerState::new("Local node".to_string(), None, self.storage.clone())
+            .with_allow_inactive_chains(true)
+            .with_allow_messages_from_deprecated_epochs(true);
+        let node_client = LocalNodeClient::new(state);
+        let nodes = self
+            .context
+            .lock()
+            .await
+            .make_node_provider()
+            .make_nodes_from_list(validators)?;
+        node_client.synchronize_chain_state(nodes, chain_id, &mut vec![]).await?;
+        Ok(())
+    }
+
     async fn prepare_parent_chain(
         &self,
-        _public_key: PublicKey,
+        public_key: PublicKey,
         message_id: MessageId,
-        _certificate_hash: CryptoHash,
+        certificate_hash: CryptoHash,
         validators: Vec<(ValidatorName, String)>,
     ) -> Result<(), Error> {
         if self.storage.contains_chain(message_id.chain_id).await {
@@ -288,15 +319,8 @@ where
             .download_certificates(nodes, message_id.chain_id, target_height, &mut vec![])
             .await?;
 
-        // TODO: we should verify owner here, but the chain guard will dead lock
-        //       we need to see if ChainStateView could help us
-
-        /*
-        let certificate = node_client
-            .certificate_for(&message_id)
-            .await
-            .context("could not find OpenChain message")?;
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
+        let certificate = self.storage.read_hashed_certificate_value(certificate_hash).await?;
+        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.inner() else {
             return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
         };
         let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
@@ -311,7 +335,6 @@ where
                 Please make sure you are connecting to a genuine faucet."
             ).into());
         }
-        */
 
         Ok(())
     }
@@ -749,6 +772,7 @@ where
     async fn wallet_init_without_keypair(
         &self,
         public_key: PublicKey,
+        // signature: Signature,
         faucet_url: String,
         chain_id: ChainId,
         message_id: MessageId,
@@ -759,10 +783,13 @@ where
             return Ok(chain_id);
         }
 
+        // TODO: verify signature
+        // TODO: get chain height and download chain certificate
+
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
-        self.prepare_parent_chain(public_key, message_id, certificate_hash, validators).await?;
+        self.prepare_parent_chain(public_key, message_id, certificate_hash, validators.clone()).await?;
         self.context
             .lock()
             .await
@@ -774,6 +801,7 @@ where
             .await
             .set_default_chain(chain_id)?;
         self.context.lock().await.save_wallet();
+        self.synchronize_chain_state(chain_id, validators).await?;
 
         ChainListener::run_with_chain_id(
             chain_id,
