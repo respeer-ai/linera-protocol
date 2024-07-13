@@ -784,10 +784,10 @@ where
         }
 
         #[derive(Debug, Serialize, Deserialize)]
-        struct Nonce(String);
+        struct Nonce(CryptoHash);
         impl BcsSignable for Nonce {}
 
-        let nonce = Nonce(certificate_hash.to_string());
+        let nonce = Nonce(certificate_hash);
         signature.check(&nonce, public_key)?;
 
         let faucet = Faucet::new(faucet_url.clone());
