@@ -1711,6 +1711,7 @@ where
         &self,
         owner: Option<Owner>,
     ) -> Result<(Amount, Option<Amount>), ChainClientError> {
+        let _chain = self.chain_state_view().await?;
         let incoming_messages = self.pending_messages().await?;
         let timestamp = self.next_timestamp(&incoming_messages).await;
         let block = Block {
@@ -2540,7 +2541,7 @@ where
         let notifications = self.subscribe().await?;
         let (abortable_notifications, abort) = stream::abortable(self.subscribe().await?);
         if let Err(error) = self.synchronize_from_validators().await {
-            error!("Failed to synchronize from validators: {}", error);
+            error!("Failed to synchronize chain {} from validators: {}", self.chain_id, error);
         }
 
         // Beware: if this future ceases to make progress, notification processing will

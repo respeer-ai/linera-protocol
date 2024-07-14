@@ -288,6 +288,7 @@ where
             .make_node_provider()
             .make_nodes_from_list(validators)?;
         node_client.synchronize_chain_state(nodes, chain_id, &mut vec![]).await?;
+        let _view = node_client.chain_state_view(chain_id).await?;
         Ok(())
     }
 
