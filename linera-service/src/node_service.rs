@@ -299,7 +299,7 @@ where
         validators: Vec<(ValidatorName, String)>,
     ) -> Result<(), Error> {
         if self.storage.contains_chain(message_id.chain_id).await {
-            info!("Parent chain {} already exists", message_id.chain_id);
+            tracing::info!("Parent chain {} already initialized", message_id.chain_id);
             return Ok(());
         }
 
@@ -779,7 +779,7 @@ where
         certificate_hash: CryptoHash,
     ) -> Result<ChainId, Error> {
         if self.storage.contains_chain(chain_id).await {
-            info!("Chain {} already exists", chain_id);
+            tracing::info!("Chain {} already initialized", chain_id);
             return Ok(chain_id);
         }
 
@@ -807,15 +807,16 @@ where
         self.context.lock().await.save_wallet();
         self.synchronize_chain_state(chain_id, validators).await?;
 
-        ChainListener::run_with_chain_id(
+        ChainListener::run_with_chain_id_retry(
             chain_id,
             self.clients.clone(),
             self.context.clone(),
             self.storage.clone(),
             self.config.clone(),
+            5,
         );
 
-        info!("Chain {} is initialized", chain_id);
+        tracing::info!("Chain {} is initialized", chain_id);
 
         Ok(chain_id)
     }

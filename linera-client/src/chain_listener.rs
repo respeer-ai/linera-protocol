@@ -146,6 +146,30 @@ where
         });
     }
 
+    pub fn run_with_chain_id_retry<C>(
+        chain_id: ChainId,
+        clients: ChainClients<P, S>,
+        context: Arc<Mutex<C>>,
+        storage: S,
+        config: ChainListenerConfig,
+        retries: usize,
+    ) where
+        C: ClientContext<ValidatorNodeProvider = P, Storage = S> + Send + 'static,
+    {
+        let _handle = tokio::task::spawn(async move {
+            for _ in 1..retries {
+                if let Err(err) =
+                    Self::run_client_stream(chain_id, clients.clone(), context.clone(), storage.clone(), config.clone()).await
+                {
+                    error!("Stream for chain {} failed: {}", chain_id, err);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                    continue
+                }
+                return
+            }
+        });
+    }
+
     async fn run_client_stream<C>(
         chain_id: ChainId,
         clients: ChainClients<P, S>,
