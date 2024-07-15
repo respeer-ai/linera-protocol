@@ -142,6 +142,10 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
         unimplemented!()
     }
 
+    fn destroy_chain_client(&self, _: ChainId) {
+        unimplemented!()
+    }
+
     fn update_wallet_for_new_chain(&mut self, _: ChainId, _: Option<KeyPair>, _: Timestamp) {}
 
     async fn update_wallet(&mut self, _: &ChainClient<P, S>)

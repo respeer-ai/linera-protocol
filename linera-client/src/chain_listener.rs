@@ -61,6 +61,8 @@ pub trait ClientContext {
     where
         ViewError: From<<Self::Storage as Storage>::StoreError>;
 
+    fn destroy_chain_client(&self, chain_id: ChainId);
+
     fn update_wallet_for_new_chain(
         &mut self,
         chain_id: ChainId,
@@ -157,15 +159,18 @@ where
         C: ClientContext<ValidatorNodeProvider = P, Storage = S> + Send + 'static,
     {
         let _handle = tokio::task::spawn(async move {
-            for _ in 1..retries {
+            for i in 1..retries {
                 if let Err(err) =
                     Self::run_client_stream(chain_id, clients.clone(), context.clone(), storage.clone(), config.clone()).await
                 {
-                    error!("Stream for chain {} failed: {}", chain_id, err);
+                    error!("Stream for chain {} failed [{}]: {}", chain_id, i, err);
+                    let mut map_guard = clients.map_lock().await;
+                    if let btree_map::Entry::Occupied(entry) = map_guard.entry(chain_id) {
+                        entry.remove();
+                    }
+                    context.clone().lock().await.destroy_chain_client(chain_id);
                     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-                    continue
                 }
-                return
             }
         });
     }

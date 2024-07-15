@@ -184,6 +184,12 @@ where
             },
         }
     }
+
+    pub fn destroy_chain(self: &Arc<Self>, chain_id: ChainId) {
+        if let dashmap::mapref::entry::Entry::Occupied(entry) = self.chains.entry(chain_id) {
+            entry.remove();
+        }
+    }
 }
 
 /// Policies for automatically handling incoming messages.
@@ -1711,7 +1717,6 @@ where
         &self,
         owner: Option<Owner>,
     ) -> Result<(Amount, Option<Amount>), ChainClientError> {
-        let _chain = self.chain_state_view().await?;
         let incoming_messages = self.pending_messages().await?;
         let timestamp = self.next_timestamp(&incoming_messages).await;
         let block = Block {

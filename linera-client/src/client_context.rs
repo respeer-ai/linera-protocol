@@ -99,6 +99,10 @@ where
         self.make_chain_client(chain_id)
     }
 
+    fn destroy_chain_client(&self, chain_id: ChainId) {
+        self.destroy_chain_client(chain_id);
+    }
+
     fn update_wallet_for_new_chain(
         &mut self,
         chain_id: ChainId,
@@ -210,6 +214,10 @@ where
         );
         chain_client.options_mut().message_policy = self.options.message_policy;
         chain_client
+    }
+
+    fn destroy_chain_client(&self, chain_id: ChainId) {
+        self.client.destroy_chain(chain_id);
     }
 
     pub fn make_node_provider(&self) -> NodeProvider {
