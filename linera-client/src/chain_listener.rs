@@ -10,7 +10,7 @@ use futures::{
     StreamExt,
 };
 use linera_base::{
-    crypto::KeyPair,
+    crypto::{KeyPair, PublicKey},
     data_types::Timestamp,
     identifiers::{ChainId, Destination},
 };
@@ -21,6 +21,7 @@ use linera_core::{
     worker::Reason,
 };
 use linera_execution::{Message, SystemMessage};
+use linera_rpc::node_provider::NodeProvider;
 use linera_storage::Storage;
 use linera_views::views::ViewError;
 use tracing::{debug, error, info, warn, Instrument as _};
@@ -56,6 +57,10 @@ pub struct ChainListenerConfig {
         env = "LINERA_LISTENER_DELAY_AFTER"
     )]
     pub delay_after_ms: u64,
+
+    /// Use external signing service.
+    #[arg(long = "external-signing", action = clap::ArgAction::Set, default_value_t = true)]
+    pub external_signing: bool,
 }
 
 #[async_trait]
@@ -72,6 +77,8 @@ pub trait ClientContext {
     where
         ViewError: From<<Self::Storage as Storage>::StoreError>;
 
+    fn destroy_chain_client(&self, chain_id: ChainId);
+
     fn update_wallet_for_new_chain(
         &mut self,
         chain_id: ChainId,
@@ -84,6 +91,19 @@ pub trait ClientContext {
         client: &ChainClient<Self::ValidatorNodeProvider, Self::Storage>,
     ) where
         ViewError: From<<Self::Storage as Storage>::StoreError>;
+
+    fn save_wallet(&mut self);
+
+    fn make_node_provider(&self) -> NodeProvider;
+
+    fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), anyhow::Error>;
+
+    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
@@ -127,7 +147,7 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
-    fn run_with_chain_id<C>(
+    pub fn run_with_chain_id<C>(
         chain_id: ChainId,
         clients: ChainClients<P, S>,
         context: Arc<Mutex<C>>,
@@ -149,6 +169,34 @@ where
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
+    pub fn run_with_chain_id_retry<C>(
+        chain_id: ChainId,
+        clients: ChainClients<P, S>,
+        context: Arc<Mutex<C>>,
+        storage: S,
+        config: ChainListenerConfig,
+        retries: usize,
+    ) where
+        C: ClientContext<ValidatorNodeProvider = P, Storage = S> + Send + 'static,
+    {
+        let _handle = tokio::task::spawn(async move {
+            for i in 1..retries {
+                if let Err(err) =
+                    Self::run_client_stream(chain_id, clients.clone(), context.clone(), storage.clone(), config.clone()).await
+                {
+                    error!("Stream for chain {} failed [{}]: {}", chain_id, i, err);
+                    let mut map_guard = clients.map_lock().await;
+                    if let btree_map::Entry::Occupied(entry) = map_guard.entry(chain_id) {
+                        entry.remove();
+                    }
+                    context.clone().lock().await.destroy_chain_client(chain_id);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                }
+            }
+        });
+    }
+
+    #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
     async fn run_client_stream<C>(
         chain_id: ChainId,
         clients: ChainClients<P, S>,
@@ -159,7 +207,7 @@ where
     where
         C: ClientContext<ValidatorNodeProvider = P, Storage = S> + Send + 'static,
     {
-        let client = {
+        let mut client = {
             let mut map_guard = clients.map_lock().await;
             let context_guard = context.lock().await;
             let btree_map::Entry::Vacant(entry) = map_guard.entry(chain_id) else {
@@ -188,7 +236,14 @@ where
                         continue;
                     }
                     debug!("Processing inbox");
-                    match client.process_inbox_if_owned().await {
+                    let result = if config.external_signing {
+                        client
+                            .process_inbox_if_owned_without_block_proposal()
+                            .await
+                    } else {
+                        client.process_inbox_if_owned().await
+                    };
+                    match result {
                         Err(error) => {
                             warn!(%error, "Failed to process inbox.");
                             timeout = Timestamp::from(u64::MAX);
@@ -211,7 +266,7 @@ where
             Self::maybe_sleep(config.delay_before_ms).await;
             match &notification.reason {
                 Reason::NewIncomingMessage { .. } => timeout = storage.clock().current_time(),
-                Reason::NewBlock { .. } | Reason::NewRound { .. } => {
+                Reason::NewBlock { .. } | Reason::NewRound { .. } | Reason::NewRawBlock { .. } => {
                     if let Err(error) = client.update_validators().await {
                         warn!(
                             "Failed to update validators about the local chain after \

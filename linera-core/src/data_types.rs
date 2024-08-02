@@ -6,11 +6,14 @@ use std::collections::BTreeMap;
 
 use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, KeyPair, Signature},
-    data_types::{Amount, BlockHeight, Round, Timestamp},
+    data_types::{Amount, BlockHeight, HashedBlob, Round, Timestamp},
     identifiers::{ChainDescription, ChainId, Owner},
 };
 use linera_chain::{
-    data_types::{ChainAndHeight, IncomingMessage, Medium, MessageBundle},
+    data_types::{
+        ProposalContent, ChainAndHeight, HashedCertificateValue, IncomingMessage,
+        Medium, MessageBundle, LiteCertificate,
+    },
     manager::ChainManagerInfo,
     ChainStateView,
 };
@@ -324,4 +327,14 @@ impl<T> ClientOutcome<T> {
             ClientOutcome::WaitForTimeout(timeout) => Ok(ClientOutcome::WaitForTimeout(timeout)),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawBlockProposal {
+    pub content: ProposalContent,
+    pub owner: Owner,
+    pub hashed_certificate_values: Vec<HashedCertificateValue>,
+    pub hashed_blobs: Vec<HashedBlob>,
+    pub validated_block_certificate: Option<LiteCertificate<'static>>,
+    pub hashed_value: HashedCertificateValue,
 }
