@@ -14,6 +14,7 @@ use linera_witty::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::{info, warn};
 #[cfg(with_testing)]
 use {
     proptest::{
@@ -25,7 +26,6 @@ use {
 };
 
 use crate::doc_scalar;
-use tracing::{info, warn};
 
 /// A signature key-pair.
 pub struct KeyPair(dalek::SigningKey);

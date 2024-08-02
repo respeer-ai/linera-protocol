@@ -181,8 +181,14 @@ where
     {
         let _handle = tokio::task::spawn(async move {
             for i in 1..retries {
-                if let Err(err) =
-                    Self::run_client_stream(chain_id, clients.clone(), context.clone(), storage.clone(), config.clone()).await
+                if let Err(err) = Self::run_client_stream(
+                    chain_id,
+                    clients.clone(),
+                    context.clone(),
+                    storage.clone(),
+                    config.clone(),
+                )
+                .await
                 {
                     error!("Stream for chain {} failed [{}]: {}", chain_id, i, err);
                     let mut map_guard = clients.map_lock().await;
@@ -237,9 +243,7 @@ where
                     }
                     debug!("Processing inbox");
                     let result = if config.external_signing {
-                        client
-                            .process_inbox_if_owned_without_block_proposal()
-                            .await
+                        client.process_inbox_if_owned_without_block_proposal().await
                     } else {
                         client.process_inbox_if_owned().await
                     };

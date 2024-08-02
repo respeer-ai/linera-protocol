@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    borrow::Cow, iter, num::NonZeroU16, sync::Arc,
-    collections::HashMap, net::{IpAddr, Ipv4Addr, SocketAddr},
+    borrow::Cow,
+    collections::HashMap,
+    iter,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::NonZeroU16,
+    sync::Arc,
 };
 
 use anyhow::{anyhow, Context};
@@ -22,7 +26,7 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{CryptoError, CryptoHash, Hashable, PublicKey, Signature, BcsSignable},
+    crypto::{BcsSignable, CryptoError, CryptoHash, Hashable, PublicKey, Signature},
     data_types::{Amount, ApplicationPermissions, Blob, BlockHeight, TimeDelta, Timestamp},
     identifiers::{Account, ApplicationId, BlobId, BytecodeId, ChainId, MessageId, Owner},
     ownership::{ChainOwnership, TimeoutConfig},
@@ -44,10 +48,9 @@ use linera_core::{
     worker::{Notification, Reason, WorkerState},
 };
 use linera_execution::{
-    SystemMessage, Message,
     committee::{Committee, Epoch, ValidatorName},
     system::{AdminOperation, Recipient, SystemChannel, UserData},
-    Bytecode, Operation, Query, Response, SystemOperation,
+    Bytecode, Message, Operation, Query, Response, SystemMessage, SystemOperation,
     UserApplicationDescription, UserApplicationId,
 };
 use linera_storage::Storage;
@@ -61,7 +64,7 @@ use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info};
 
-use crate::{util, cli_wrappers::Faucet};
+use crate::{cli_wrappers::Faucet, util};
 
 #[derive(SimpleObject, Serialize, Deserialize, Clone)]
 pub struct Chains {
@@ -296,7 +299,10 @@ where
             .download_certificates(&nodes, message_id.chain_id, target_height, &mut vec![])
             .await?;
 
-        let certificate = self.storage.read_hashed_certificate_value(certificate_hash).await?;
+        let certificate = self
+            .storage
+            .read_hashed_certificate_value(certificate_hash)
+            .await?;
         let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.inner() else {
             return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
         };
@@ -310,7 +316,8 @@ where
             return Err(anyhow!(
                 "The chain with the ID returned by the faucet is not owned by you. \
                 Please make sure you are connecting to a genuine faucet."
-            ).into());
+            )
+            .into());
         }
 
         Ok(())
@@ -767,17 +774,15 @@ where
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
-        self.prepare_parent_chain(public_key, message_id, certificate_hash, validators.clone()).await?;
+        self.prepare_parent_chain(public_key, message_id, certificate_hash, validators.clone())
+            .await?;
         self.context
             .lock()
             .await
             .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
             .context("could not assign the new chain")?;
 
-        self.context
-            .lock()
-            .await
-            .set_default_chain(chain_id)?;
+        self.context.lock().await.set_default_chain(chain_id)?;
         self.context.lock().await.save_wallet();
 
         ChainListener::run_with_chain_id_retry(
@@ -799,7 +804,9 @@ where
             .make_node_provider()
             .make_nodes_from_list(validators)?
             .collect();
-        client.synchronize_chain_state(&nodes, chain_id, &mut Vec::new()).await?;
+        client
+            .synchronize_chain_state(&nodes, chain_id, &mut Vec::new())
+            .await?;
 
         tracing::info!("Chain {} is initialized", chain_id);
 

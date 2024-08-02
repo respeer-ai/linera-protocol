@@ -3005,7 +3005,10 @@ where
         let notifications = self.subscribe().await?;
         let (abortable_notifications, abort) = stream::abortable(self.subscribe().await?);
         if let Err(error) = self.synchronize_from_validators().await {
-            error!("Failed to synchronize chain {} from validators: {}", self.chain_id, error);
+            error!(
+                "Failed to synchronize chain {} from validators: {}",
+                self.chain_id, error
+            );
         }
 
         // Beware: if this future ceases to make progress, notification processing will
@@ -3180,8 +3183,8 @@ where
                 validated_block_certificate.value().block() == Some(&block),
                 ChainClientError::BlockProposalError(
                     "A different block has already been validated at this height"
-                    )
-                );
+                )
+            );
             validated_block_certificate
                 .value()
                 .executed_block()
@@ -3199,8 +3202,8 @@ where
                     proposal.content.block == block,
                     ChainClientError::BlockProposalError(
                         "Chain manager has a different pending block in the fast round"
-                        )
-                    );
+                    )
+                );
             }
         }
         let hashed_value = if round.is_fast() {
@@ -3210,7 +3213,11 @@ where
         };
         // Collect the blobs required for execution.
         let committee = self.local_committee().await?;
-        let nodes: Vec<_> = self.client.validator_node_provider.make_nodes(&committee)?.collect();
+        let nodes: Vec<_> = self
+            .client
+            .validator_node_provider
+            .make_nodes(&committee)?
+            .collect();
         let values = self
             .client
             .local_node
@@ -3224,7 +3231,9 @@ where
                 round,
                 forced_oracle_responses: match manager.requested_locked {
                     Some(ref cert) => {
-                        if let CertificateValue::ValidatedBlock { executed_block } = cert.clone().value.into_inner() {
+                        if let CertificateValue::ValidatedBlock { executed_block } =
+                            cert.clone().value.into_inner()
+                        {
                             Some(executed_block.outcome.oracle_responses)
                         } else {
                             panic!("called new_retry with a certificate without a validated block");
@@ -3248,7 +3257,7 @@ where
         notifications.push(Notification {
             chain_id: self.chain_id,
             reason: Reason::NewRawBlock {
-                height: block.height
+                height: block.height,
             },
         });
         self.handle_notifications(&mut notifications);
@@ -3369,7 +3378,6 @@ where
             }
         }
 
-
         // The block we want to propose is either the highest validated, or our pending one.
         let Some(block) = manager
             .highest_validated_block()
@@ -3378,7 +3386,6 @@ where
         else {
             return Ok(ClientOutcome::Committed(false)); // Nothing to propose.
         };
-
 
         // If there is a conflicting proposal in the current round, we can only propose if the
         // next round can be started without a timeout, i.e. if we are in a multi-leader round.
