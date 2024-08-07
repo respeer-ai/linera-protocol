@@ -8,6 +8,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
     sync::Arc,
+    str::FromStr,
 };
 
 use anyhow::{anyhow, Context};
@@ -1274,6 +1275,7 @@ where
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
         let application_handler =
             axum::routing::get(util::graphiql).post(Self::application_handler);
+        let blob_handler = axum::routing::get(Self::blob_handler);
         let application_handler_without_block_proposal = axum::routing::get(util::graphiql)
             .post(Self::application_handler_without_block_proposal);
 
@@ -1282,6 +1284,10 @@ where
             .route(
                 "/chains/:chain_id/applications/:application_id",
                 application_handler,
+            )
+            .route(
+                "/chains/:chain_id/applications/:application_id/blobs/:blob_id",
+                blob_handler,
             )
             .route(
                 "/checko/chains/:chain_id/applications/:application_id",
@@ -1392,6 +1398,23 @@ where
             .execute(request.into_inner())
             .await
             .into()
+    }
+
+    async fn blob_handler(
+        Path((chain_id, application_id, blob_id)): Path<(String, String, String)>,
+        service: Extension<Self>,
+    ) -> Result<impl IntoResponse, NodeServiceError> {
+        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
+        let application_id: UserApplicationId = application_id.parse()?;
+        let blob_id = BlobId::from_str(&("Data:".to_owned() + &blob_id)).expect("Invlaid query");
+        let request = Request::new(format!("query {} fetch(blobId: \"{blob_id}\") {}", "{", "}"));
+
+        let _response = service
+            .0
+            .user_application_query(application_id, &request, chain_id)
+            .await?;
+
+        Ok(response::Json(_response))
     }
 
     /// Executes a GraphQL query against an application.
