@@ -795,7 +795,7 @@ where
             5,
         );
 
-        tracing::info!("Chain {} is synchronizing", chain_id);
+        tokio::task::yield_now().await;
         std::thread::sleep(std::time::Duration::from_millis(2000));
         let client = self.clients.try_client_lock(&chain_id).await?;
         let nodes: Vec<_> = self
@@ -805,6 +805,7 @@ where
             .make_node_provider()
             .make_nodes_from_list(validators)?
             .collect();
+        tracing::info!("Synchronize chain {} client", chain_id);
         client
             .synchronize_chain_state(&nodes, chain_id, &mut Vec::new())
             .await?;
