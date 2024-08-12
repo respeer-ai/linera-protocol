@@ -14,6 +14,7 @@ use linera_base::{
 };
 use linera_chain::data_types::Block;
 use linera_core::{client::ChainClient, data_types::RawBlockProposal, node::ValidatorNodeProvider};
+use linera_execution::Operation;
 use linera_storage::Storage;
 use linera_views::views::ViewError;
 use rand::Rng as _;
@@ -147,6 +148,7 @@ impl Wallet {
             pending_block: None,
             pending_blobs: BTreeMap::new(),
             pending_raw_block: None,
+            pending_operations: Vec::new(),
         };
         self.insert(user_chain);
         Ok(())
@@ -167,6 +169,7 @@ impl Wallet {
             pending_block: None,
             pending_blobs: BTreeMap::new(),
             pending_raw_block: None,
+            pending_operations: Vec::new(),
         };
         self.insert(user_chain);
         Ok(())
@@ -202,6 +205,8 @@ impl Wallet {
                 pending_block: state.pending_block.clone(),
                 pending_blobs: state.pending_blobs.clone(),
                 pending_raw_block: state.pending_raw_block.clone(),
+                // pending_operations: state.pending_operations.clone(),
+                pending_operations: Vec::new(),
             },
         );
     }
@@ -235,6 +240,7 @@ pub struct UserChain {
     pub pending_block: Option<Block>,
     pub pending_blobs: BTreeMap<BlobId, HashedBlob>,
     pub pending_raw_block: Option<RawBlockProposal>,
+    pub pending_operations: Vec<Operation>,
 }
 
 impl UserChain {
@@ -254,6 +260,7 @@ impl UserChain {
             pending_block: None,
             pending_blobs: BTreeMap::new(),
             pending_raw_block: None,
+            pending_operations: Vec::new(),
         }
     }
 
@@ -269,6 +276,7 @@ impl UserChain {
             pending_block: None,
             pending_blobs: BTreeMap::new(),
             pending_raw_block: None,
+            pending_operations: Vec::new(),
         }
     }
 }

@@ -213,7 +213,7 @@ where
     where
         C: ClientContext<ValidatorNodeProvider = P, Storage = S> + Send + 'static,
     {
-        let mut client = {
+        let client = {
             let mut map_guard = clients.map_lock().await;
             let context_guard = context.lock().await;
             let btree_map::Entry::Vacant(entry) = map_guard.entry(chain_id) else {
@@ -250,11 +250,18 @@ where
                     match result {
                         Err(error) => {
                             warn!(%error, "Failed to process inbox.");
-                            timeout = Timestamp::from(u64::MAX);
+                            timeout = if config.external_signing {
+                                storage.clock().current_time().saturating_add_micros(100000)
+                            } else {
+                                Timestamp::from(u64::MAX)
+                            };
                         }
-                        Ok((certs, None)) => {
-                            info!("Done processing inbox ({} blocks created)", certs.len());
-                            timeout = Timestamp::from(u64::MAX);
+                        Ok((_certs, None)) => {
+                            timeout = if config.external_signing {
+                                storage.clock().current_time().saturating_add_micros(10000)
+                            } else {
+                                Timestamp::from(u64::MAX)
+                            }
                         }
                         Ok((certs, Some(new_timeout))) => {
                             info!("Done processing inbox ({} blocks created)", certs.len());

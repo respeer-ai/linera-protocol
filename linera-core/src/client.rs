@@ -153,6 +153,7 @@ where
         pending_block: Option<Block>,
         pending_blobs: BTreeMap<BlobId, HashedBlob>,
         pending_raw_block: Option<RawBlockProposal>,
+        pending_operations: Vec<Operation>,
     ) -> ChainClient<P, S>
     where
         ViewError: From<S::StoreError>,
@@ -176,6 +177,7 @@ where
             received_certificate_trackers: HashMap::new(),
             preparing_block: Arc::default(),
             pending_raw_block: pending_raw_block,
+            pending_operations: pending_operations.clone(),
         });
 
         ChainClient {
@@ -250,6 +252,8 @@ pub struct ChainState {
 
     /// Raw block proposal list waiting for sign
     pub pending_raw_block: Option<RawBlockProposal>,
+    /// Pending operations
+    pub pending_operations: Vec<Operation>,
 }
 
 #[non_exhaustive]
@@ -3147,12 +3151,13 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(level = "trace")]
     /// Executes (or retries) a regular block proposal. Updates local balance.
     ///
     /// Different from propose_block, we don't submit proposal here, and just put
     /// executed_block to pending list, then let client to fetch
     async fn propose_block_without_block_proposal(
-        &mut self,
+        &self,
         block: Block,
         round: Round,
         manager: ChainManagerInfo,
@@ -3266,7 +3271,7 @@ where
     }
 
     pub async fn submit_extenal_signed_block_proposal(
-        &mut self,
+        &self,
         height: BlockHeight,
         signature: Signature,
     ) -> Result<Certificate, ChainClientError> {
@@ -3323,12 +3328,13 @@ where
         Ok(certificate)
     }
 
+    #[tracing::instrument(level = "trace")]
     /// Processes the last pending block. Assumes that the local chain is up to date.
     ///
     /// Different from process_pending_block_without_prepare, we don't submit proposal here, and just put
     /// executed_block to pending list, then let client to fetch
     async fn process_pending_block_without_prepare_without_block_proposal(
-        &mut self,
+        &self,
     ) -> Result<ClientOutcome<bool>, ChainClientError> {
         let identity = self.identity().await?;
         let mut info = self.chain_info_with_manager_values().await?;
@@ -3421,36 +3427,46 @@ where
         }
     }
 
+    #[tracing::instrument(level = "trace")]
     /// Executes a list of operations.
     pub async fn execute_operations_without_block_proposal(
-        &mut self,
+        &self,
         operations: Vec<Operation>,
-    ) -> Result<(), ChainClientError> {
+    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
         self.prepare_chain().await?;
-        self.execute_with_messages_without_block_proposal(operations)
+        let (retry, timeout) = self
+            .execute_with_messages_without_block_proposal(operations.clone())
+            .await?;
+        if retry {
+            self.state_mut()
+                .pending_operations
+                .extend_from_slice(&operations);
+        }
+        Ok((retry, timeout))
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    /// Executes a list of operations, without calling `prepare_chain`.
+    pub async fn execute_with_messages_without_block_proposal(
+        &self,
+        operations: Vec<Operation>,
+    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
+        let messages = self.pending_messages().await?;
+        self.execute_block_without_block_proposal(messages, operations.clone())
             .await
     }
 
-    /// Executes a list of operations, without calling `prepare_chain`.
-    pub async fn execute_with_messages_without_block_proposal(
-        &mut self,
-        operations: Vec<Operation>,
-    ) -> Result<(), ChainClientError> {
-        let messages = self.pending_messages().await?;
-        self.execute_block_without_block_proposal(messages, operations.clone())
-            .await?;
-        Ok(())
-    }
-
+    #[tracing::instrument(level = "trace")]
     /// Executes an operation.
     pub async fn execute_operation_without_block_proposal(
-        &mut self,
+        &self,
         operation: Operation,
-    ) -> Result<(), ChainClientError> {
+    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
         self.execute_operations_without_block_proposal(vec![operation])
             .await
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     /// Executes a new block.
     ///
     /// This must be preceded by a call to `prepare_chain()`.
@@ -3458,17 +3474,21 @@ where
     /// Different from ececute_block, we don't submit proposal here, and just put
     /// executed_block to pending list, then let client to fetch
     pub async fn execute_block_without_block_proposal(
-        &mut self,
+        &self,
         incoming_messages: Vec<IncomingMessage>,
         operations: Vec<Operation>,
-    ) -> Result<Option<RoundTimeout>, ChainClientError> {
+    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
         match self
             .process_pending_block_without_prepare_without_block_proposal()
             .await?
         {
-            ClientOutcome::Committed(true) => return Ok(None),
+            ClientOutcome::Committed(true) => {
+                return Ok((operations.len() > 0, None));
+            }
             ClientOutcome::Committed(false) => {}
-            ClientOutcome::WaitForTimeout(timeout) => return Ok(Some(timeout)),
+            ClientOutcome::WaitForTimeout(timeout) => {
+                return Ok((operations.len() > 0, Some(timeout)))
+            }
         }
         let _ = self
             .set_pending_block(incoming_messages, operations)
@@ -3477,15 +3497,16 @@ where
             .process_pending_block_without_prepare_without_block_proposal()
             .await?
         {
-            ClientOutcome::Committed(true) => Ok(None),
+            ClientOutcome::Committed(true) => Ok((false, None)),
             // Should be unreachable: We did set a pending block.
             ClientOutcome::Committed(false) => Err(ChainClientError::BlockProposalError(
                 "Unexpected block proposal error",
             )),
-            ClientOutcome::WaitForTimeout(timeout) => Ok(Some(timeout)),
+            ClientOutcome::WaitForTimeout(timeout) => Ok((true, Some(timeout))),
         }
     }
 
+    #[tracing::instrument(level = "trace", skip_all)]
     /// Creates an empty block to process all incoming messages. This may require several blocks.
     ///
     /// If not all certificates could be processed due to a timeout, the timestamp for when to retry
@@ -3494,43 +3515,47 @@ where
     /// Different from process_inbox, we don't submit proposal here, and just put
     /// executed_block to pending list, then let client to fetch
     pub async fn process_inbox_without_block_proposal(
-        &mut self,
+        &self,
     ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
         self.prepare_chain().await?;
         let incoming_messages = self.pending_messages().await?;
         if incoming_messages.is_empty() {
             return Ok((Vec::new(), None));
         }
-        return Ok((
-            Vec::new(),
-            self.execute_block_without_block_proposal(incoming_messages, vec![])
-                .await?,
-        ));
+        let operations = self.state().pending_operations.clone();
+        let (retry, timeout) = self
+            .execute_block_without_block_proposal(incoming_messages, operations)
+            .await?;
+        if !retry {
+            self.state_mut().pending_operations.clear();
+        }
+        Ok((Vec::new(), timeout))
     }
 
+    #[tracing::instrument(level = "trace")]
     /// Creates an empty block to process all incoming messages. This may require several blocks.
     /// If we are not a chain owner, this doesn't fail, and just returns an empty list.
     ///
     /// Different from process_inbox_if_owned, we don't submit proposal here, and just put
     /// executed_block to pending list, then let client to fetch
     pub async fn process_inbox_if_owned_without_block_proposal(
-        &mut self,
+        &self,
     ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
         self.process_inbox_without_block_proposal().await
     }
 
-    pub async fn peek_candidate_block_proposal(&mut self) -> Option<RawBlockProposal> {
+    pub async fn peek_candidate_block_proposal(&self) -> Option<RawBlockProposal> {
         self.state().pending_raw_block.clone()
     }
 
     /// Sends money.
     pub async fn transfer_without_block_proposal(
-        &mut self,
+        &self,
         owner: Option<Owner>,
         amount: Amount,
         recipient: Recipient,
         user_data: UserData,
-    ) -> Result<(), ChainClientError> {
+    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
         // TODO(#467): check the balance of `owner` before signing any block proposal.
         self.prepare_chain().await?;
         let incoming_messages = self.pending_messages().await?;
@@ -3543,17 +3568,17 @@ where
                 user_data,
             })],
         )
-        .await?;
-        Ok(())
+        .await
     }
 
+    #[tracing::instrument(level = "trace")]
     /// Requests a `RegisterApplications` message from another chain so the application can be used
     /// on this one.
     pub async fn request_application_without_block_proposal(
-        &mut self,
+        &self,
         application_id: UserApplicationId,
         chain_id: Option<ChainId>,
-    ) -> Result<(), ChainClientError> {
+    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
         let chain_id = chain_id.unwrap_or(application_id.creation.chain_id);
         self.execute_operation_without_block_proposal(Operation::System(
             SystemOperation::RequestApplication {

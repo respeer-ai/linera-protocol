@@ -235,7 +235,7 @@ where
 
         while let Some(request) = incoming_requests.recv().await {
             // TODO(#2237): Spawn concurrent tasks for read-only operations
-            trace!("Handling `ChainWorkerRequest`: {request:?}");
+            info!("Handling `ChainWorkerRequest`: {request:?}");
 
             let responded = match request {
                 #[cfg(with_testing)]

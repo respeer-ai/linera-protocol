@@ -7,8 +7,8 @@ use std::{
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
-    sync::Arc,
     str::FromStr,
+    sync::Arc,
 };
 
 use anyhow::{anyhow, Context};
@@ -822,7 +822,7 @@ where
         height: BlockHeight,
         signature: Signature,
     ) -> Result<CryptoHash, Error> {
-        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        let client = self.clients.try_client_lock(&chain_id).await?;
         let hash = client
             .submit_extenal_signed_block_proposal(height, signature)
             .await?
@@ -852,7 +852,7 @@ where
             Some(public_key) => Some(Owner::from(public_key)),
             _ => None,
         };
-        let mut client = self.clients.try_client_lock(&from_chain_id).await?;
+        let client = self.clients.try_client_lock(&from_chain_id).await?;
         client
             .transfer_without_block_proposal(
                 from_owner,
@@ -875,7 +875,7 @@ where
         application_id: UserApplicationId,
         target_chain_id: Option<ChainId>,
     ) -> Result<UserApplicationId, Error> {
-        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        let client = self.clients.try_client_lock(&chain_id).await?;
         client
             .request_application_without_block_proposal(application_id, target_chain_id)
             .await?;
@@ -982,7 +982,7 @@ where
         &self,
         chain_id: ChainId,
     ) -> Result<Option<RawBlockProposalPayload>, Error> {
-        let mut client = self.clients.try_client_lock(&chain_id).await?;
+        let client = self.clients.try_client_lock(&chain_id).await?;
         match client.peek_candidate_block_proposal().await {
             Some(raw_block_proposal) => {
                 let mut message = Vec::new();
@@ -1408,7 +1408,10 @@ where
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: UserApplicationId = application_id.parse()?;
         let blob_id = BlobId::from_str(&("Data:".to_owned() + &blob_id)).expect("Invlaid query");
-        let request = Request::new(format!("query {} fetch(blobId: \"{blob_id}\") {}", "{", "}"));
+        let request = Request::new(format!(
+            "query {} fetch(blobId: \"{blob_id}\") {}",
+            "{", "}"
+        ));
 
         let _response = service
             .0
@@ -1485,7 +1488,7 @@ where
             })
             .collect::<Vec<_>>();
 
-        let Some(mut client) = self.clients.client_lock(&chain_id).await else {
+        let Some(client) = self.clients.client_lock(&chain_id).await else {
             return Err(NodeServiceError::UnknownChainId {
                 chain_id: chain_id.to_string(),
             });
