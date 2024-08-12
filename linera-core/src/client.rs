@@ -3524,10 +3524,13 @@ where
         }
         let operations = self.state().pending_operations.clone();
         let (retry, timeout) = self
-            .execute_block_without_block_proposal(incoming_messages, operations)
+            .execute_block_without_block_proposal(
+                incoming_messages,
+                operations.get(0..1).unwrap_or(&Vec::new()).to_vec(),
+            )
             .await?;
-        if !retry {
-            self.state_mut().pending_operations.clear();
+        if !retry && operations.len() > 0 {
+            self.state_mut().pending_operations.drain(0..1);
         }
         Ok((Vec::new(), timeout))
     }
