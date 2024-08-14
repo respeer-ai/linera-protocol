@@ -3518,21 +3518,31 @@ where
         if incoming_messages.is_empty() && operations.is_empty() {
             return Ok((Vec::new(), None));
         }
-        let count = if operations.len() > 10 {
+        let mut count = if operations.len() > 10 {
             10
         } else {
             operations.len()
         };
-        let (retry, timeout) = self
-            .execute_block_without_block_proposal(
-                incoming_messages.clone(),
-                operations.get(0..count).unwrap_or(&Vec::new()).to_vec(),
-            )
-            .await?;
-        if !retry && count > 0 {
-            self.state_mut().pending_operations.drain(0..count);
+        loop {
+            match self.execute_block_without_block_proposal(
+                    incoming_messages.clone(),
+                    operations.get(0..count).unwrap_or(&Vec::new()).to_vec(),
+                ).await {
+                    Ok((retry, timeout)) => {
+                        if !retry && count > 0 {
+                            self.state_mut().pending_operations.drain(0..count);
+                        }
+                        return Ok((Vec::new(), timeout));
+                    }
+                    _ => {
+                        if count == 1 {
+                            self.state_mut().pending_operations.drain(0..count);
+                            return Ok((Vec::new(), None))
+                        }
+                        count = 1;
+                    }
+                }
         }
-        Ok((Vec::new(), timeout))
     }
 
     #[tracing::instrument(level = "trace")]
