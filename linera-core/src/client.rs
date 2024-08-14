@@ -3442,6 +3442,13 @@ where
                 .pending_operations
                 .extend_from_slice(&operations);
         }
+        tracing::info!(
+            "Execute operations {:?} retry {} timeout {:?} pending operations {:?}",
+            operations,
+            retry,
+            timeout,
+            self.state().pending_operations,
+        );
         Ok((retry, timeout))
     }
 
@@ -3519,13 +3526,13 @@ where
     ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
         self.prepare_chain().await?;
         let incoming_messages = self.pending_messages().await?;
-        if incoming_messages.is_empty() {
+        let operations = self.state().pending_operations.clone();
+        if incoming_messages.is_empty() && operations.is_empty() {
             return Ok((Vec::new(), None));
         }
-        let operations = self.state().pending_operations.clone();
         let (retry, timeout) = self
             .execute_block_without_block_proposal(
-                incoming_messages,
+                incoming_messages.clone(),
                 operations.get(0..1).unwrap_or(&Vec::new()).to_vec(),
             )
             .await?;

@@ -205,8 +205,7 @@ impl Wallet {
                 pending_block: state.pending_block.clone(),
                 pending_blobs: state.pending_blobs.clone(),
                 pending_raw_block: state.pending_raw_block.clone(),
-                // pending_operations: state.pending_operations.clone(),
-                pending_operations: Vec::new(),
+                pending_operations: state.pending_operations.clone(),
             },
         );
     }
