@@ -3433,23 +3433,11 @@ where
         &self,
         operations: Vec<Operation>,
     ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        self.prepare_chain().await?;
-        let (retry, timeout) = self
-            .execute_with_messages_without_block_proposal(operations.clone())
-            .await?;
-        if retry {
-            self.state_mut()
-                .pending_operations
-                .extend_from_slice(&operations);
-        }
-        tracing::info!(
-            "Execute operations {:?} retry {} timeout {:?} pending operations {:?}",
-            operations,
-            retry,
-            timeout,
-            self.state().pending_operations,
-        );
-        Ok((retry, timeout))
+        // It'll be executed in process inbox
+        self.state_mut()
+            .pending_operations
+            .extend_from_slice(&operations);
+        Ok((false, None))
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
@@ -3530,14 +3518,19 @@ where
         if incoming_messages.is_empty() && operations.is_empty() {
             return Ok((Vec::new(), None));
         }
+        let count = if operations.len() > 10 {
+            10
+        } else {
+            operations.len()
+        };
         let (retry, timeout) = self
             .execute_block_without_block_proposal(
                 incoming_messages.clone(),
-                operations.get(0..1).unwrap_or(&Vec::new()).to_vec(),
+                operations.get(0..count).unwrap_or(&Vec::new()).to_vec(),
             )
             .await?;
-        if !retry && operations.len() > 0 {
-            self.state_mut().pending_operations.drain(0..1);
+        if !retry && count > 0 {
+            self.state_mut().pending_operations.drain(0..count);
         }
         Ok((Vec::new(), timeout))
     }
@@ -3566,18 +3559,14 @@ where
         recipient: Recipient,
         user_data: UserData,
     ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        // TODO(#467): check the balance of `owner` before signing any block proposal.
-        self.prepare_chain().await?;
-        let incoming_messages = self.pending_messages().await?;
-        self.execute_block_without_block_proposal(
-            incoming_messages,
-            vec![Operation::System(SystemOperation::Transfer {
+        self.execute_operation_without_block_proposal(Operation::System(
+            SystemOperation::Transfer {
                 owner,
                 recipient,
                 amount,
                 user_data,
-            })],
-        )
+            },
+        ))
         .await
     }
 

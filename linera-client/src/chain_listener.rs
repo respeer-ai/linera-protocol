@@ -251,14 +251,14 @@ where
                         Err(error) => {
                             warn!(%error, "Failed to process inbox.");
                             timeout = if config.external_signing {
-                                storage.clock().current_time().saturating_add_micros(100000)
+                                storage.clock().current_time().saturating_add_micros(1000000)
                             } else {
                                 Timestamp::from(u64::MAX)
                             };
                         }
                         Ok((_certs, None)) => {
                             timeout = if config.external_signing {
-                                storage.clock().current_time().saturating_add_micros(10000)
+                                storage.clock().current_time().saturating_add_micros(1000000)
                             } else {
                                 Timestamp::from(u64::MAX)
                             }
