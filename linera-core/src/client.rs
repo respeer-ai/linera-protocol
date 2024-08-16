@@ -3518,8 +3518,8 @@ where
         if incoming_messages.is_empty() && operations.is_empty() {
             return Ok((Vec::new(), None));
         }
-        let mut count = if operations.len() > 10 {
-            10
+        let mut count = if operations.len() > 4 {
+            4
         } else {
             operations.len()
         };
