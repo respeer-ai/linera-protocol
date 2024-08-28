@@ -137,11 +137,11 @@ where
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), Error> {
         self.assign_new_chain_to_public_key(key, chain_id, timestamp)
     }
 
-    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error> {
+    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
         self.set_default_chain(chain_id)
     }
 }
@@ -399,12 +399,12 @@ where
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), Error> {
         self.wallet_mut()
             .assign_new_chain_to_public_key(key, chain_id, timestamp)
     }
 
-    pub fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error> {
+    pub fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
         self.wallet_mut().set_default_chain(chain_id)
     }
 }

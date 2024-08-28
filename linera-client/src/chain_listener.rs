@@ -101,9 +101,9 @@ pub trait ClientContext {
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
-    ) -> Result<(), anyhow::Error>;
+    ) -> Result<(), Error>;
 
-    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), anyhow::Error>;
+    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts

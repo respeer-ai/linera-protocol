@@ -793,7 +793,7 @@ type QueryRoot {
 	"""
 	Returns the pending message of the chain
 	"""
-	pendingMessages(chainId: ChainId!): [IncomingMessage!]!
+	pendingMessages(chainId: ChainId!): [IncomingBundle!]!
 	"""
 	Returns the next raw block proposal
 	"""

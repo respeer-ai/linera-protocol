@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 use linera_base::{
-    crypto::{CryptoHash, KeyPair},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{Blob, BlobContent, Timestamp},
     identifiers::{BlobId, ChainId},
 };
@@ -13,6 +13,7 @@ use linera_chain::data_types::{
 use linera_client::{
     chain_listener::{ChainListenerConfig, ClientContext},
     wallet::Wallet,
+    Error,
 };
 use linera_core::{
     client::ChainClient,
@@ -173,11 +174,11 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
         _key: PublicKey,
         _chain_id: ChainId,
         _timestamp: Timestamp,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), Error> {
         unimplemented!()
     }
 
-    fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), anyhow::Error> {
+    fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
         unimplemented!()
     }
 }

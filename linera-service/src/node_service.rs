@@ -27,20 +27,14 @@ use futures::{
     Future,
 };
 use linera_base::{
-<<<<<<< HEAD
-    crypto::{CryptoError, CryptoHash, PublicKey},
-    data_types::{Amount, ApplicationPermissions, BlobContent, Bytecode, TimeDelta, Timestamp},
-    identifiers::{ApplicationId, BlobId, BytecodeId, ChainId, Owner},
-=======
     crypto::{BcsSignable, CryptoError, CryptoHash, Hashable, PublicKey, Signature},
-    data_types::{Amount, ApplicationPermissions, Blob, BlockHeight, TimeDelta, Timestamp},
+    data_types::{Amount, ApplicationPermissions, BlobContent, Bytecode, BlockHeight, TimeDelta, Timestamp},
     identifiers::{Account, ApplicationId, BlobId, BytecodeId, ChainId, MessageId, Owner},
->>>>>>> respeer-maas-bfde1929-2024_08_02
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{CertificateValue, HashedCertificateValue, IncomingMessage},
+    data_types::{CertificateValue, HashedCertificateValue, IncomingBundle},
     ChainStateView,
 };
 use linera_client::{
@@ -57,12 +51,8 @@ use linera_core::{
 use linera_execution::{
     committee::{Committee, Epoch, ValidatorName},
     system::{AdminOperation, Recipient, SystemChannel, UserData},
-<<<<<<< HEAD
-    Operation, Query, Response, SystemOperation, UserApplicationDescription, UserApplicationId,
-=======
-    Bytecode, Message, Operation, Query, Response, SystemMessage, SystemOperation,
+    Message, Operation, Query, Response, SystemMessage, SystemOperation,
     UserApplicationDescription, UserApplicationId,
->>>>>>> respeer-maas-bfde1929-2024_08_02
 };
 use linera_storage::Storage;
 use linera_views::views::ViewError;
@@ -985,7 +975,7 @@ where
     }
 
     /// Returns the pending message of the chain
-    async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingMessage>, Error> {
+    async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
         let client = self.clients.try_client_lock(&chain_id).await?;
         Ok(client.pending_messages().await?)
     }

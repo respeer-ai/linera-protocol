@@ -34,7 +34,7 @@ use linera_base::{
 use linera_chain::{
     data_types::{
         Block, BlockProposal, Certificate, CertificateValue, ExecutedBlock, HashedCertificateValue,
-        IncomingBundle, LiteCertificate, LiteVote, MessageAction, PostedMessage,
+        IncomingBundle, LiteCertificate, LiteVote, MessageAction, PostedMessage, ProposalContent,
     },
     manager::ChainManagerInfo,
     ChainError, ChainExecutionContext, ChainStateView,
@@ -3185,17 +3185,7 @@ where
         };
         // Collect the blobs required for execution.
         let committee = self.local_committee().await?;
-        let nodes: Vec<_> = self
-            .client
-            .validator_node_provider
-            .make_nodes(&committee)?
-            .collect();
-        let values = self
-            .client
-            .local_node
-            .read_or_download_hashed_certificate_values(&nodes, block.bytecode_locations())
-            .await?;
-        let hashed_blobs = self.read_local_blobs(block.published_blob_ids()).await?;
+        let blobs = self.read_local_blobs(block.published_blob_ids()).await?;
 
         self.state_mut().pending_raw_block = Some(RawBlockProposal {
             content: ProposalContent {
@@ -3215,8 +3205,7 @@ where
                 },
             },
             owner: self.public_key().await?.into(),
-            hashed_certificate_values: values,
-            hashed_blobs,
+            blobs,
             validated_block_certificate: match manager.requested_locked {
                 Some(ref cert) => Some(cert.lite_certificate().cloned()),
                 _ => None,
@@ -3254,8 +3243,7 @@ where
             content: raw_block.content,
             owner: raw_block.owner,
             signature,
-            hashed_certificate_values: raw_block.hashed_certificate_values,
-            hashed_blobs: raw_block.hashed_blobs,
+            blobs: raw_block.blobs,
             validated_block_certificate: raw_block.validated_block_certificate,
         };
         // Check the final block proposal. This will be cheaper after #1401.
@@ -3437,7 +3425,7 @@ where
     /// executed_block to pending list, then let client to fetch
     pub async fn execute_block_without_block_proposal(
         &self,
-        incoming_messages: Vec<IncomingMessage>,
+        incoming_bundle: Vec<IncomingBundle>,
         operations: Vec<Operation>,
     ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
         match self
@@ -3453,7 +3441,7 @@ where
             }
         }
         let _ = self
-            .set_pending_block(incoming_messages, operations)
+            .set_pending_block(incoming_bundle, operations)
             .await?;
         match self
             .process_pending_block_without_prepare_without_block_proposal()

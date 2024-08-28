@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, KeyPair, Signature},
-    data_types::{Amount, BlockHeight, HashedBlob, Round, Timestamp},
+    data_types::{Amount, BlockHeight, Blob, Round, Timestamp},
     identifiers::{ChainDescription, ChainId, Owner},
 };
 use linera_chain::{
@@ -333,8 +333,7 @@ impl<T> ClientOutcome<T> {
 pub struct RawBlockProposal {
     pub content: ProposalContent,
     pub owner: Owner,
-    pub hashed_certificate_values: Vec<HashedCertificateValue>,
-    pub hashed_blobs: Vec<HashedBlob>,
+    pub blobs: Vec<Blob>,
     pub validated_block_certificate: Option<LiteCertificate<'static>>,
     pub hashed_value: HashedCertificateValue,
 }

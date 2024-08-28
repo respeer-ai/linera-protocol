@@ -14,6 +14,7 @@ use linera_base::{
 };
 use linera_chain::data_types::Block;
 use linera_core::{client::ChainClient, data_types::RawBlockProposal, node::LocalValidatorNodeProvider};
+use linera_execution::Operation;
 use linera_storage::Storage;
 use linera_views::views::ViewError;
 use rand::Rng as _;
@@ -161,7 +162,7 @@ impl Wallet {
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), Error> {
         let user_chain = UserChain {
             chain_id,
             key_pair: Some(KeyPair::from_public_key(key)),
