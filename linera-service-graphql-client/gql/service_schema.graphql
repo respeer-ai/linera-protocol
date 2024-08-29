@@ -557,6 +557,11 @@ A set of messages from a single block, for a single destination.
 scalar MessageBundle
 
 """
+The index of a message in a chain
+"""
+scalar MessageId
+
+"""
 The kind of outgoing message being sent
 """
 scalar MessageKind
