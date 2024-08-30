@@ -3184,7 +3184,6 @@ where
             HashedCertificateValue::new_validated(executed_block)
         };
         // Collect the blobs required for execution.
-        let committee = self.local_committee().await?;
         let blobs = self.read_local_blobs(block.published_blob_ids()).await?;
 
         self.state_mut().pending_raw_block = Some(RawBlockProposal {
