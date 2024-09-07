@@ -110,7 +110,7 @@ where
         self.make_chain_client(chain_id)
     }
 
-    fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId, 
+    fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId,
         block_hash: Option<CryptoHash>, timestamp: Timestamp, next_block_height: BlockHeight) -> ChainClient<NodeProvider, S> {
         self.make_chain_client_without_wallet_state(chain_id, key_pair, admin_id, block_hash, timestamp, next_block_height)
     }
@@ -174,7 +174,7 @@ where
         self.make_chain_client(chain_id)
     }
 
-    fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId, 
+    fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId,
         block_hash: Option<CryptoHash>, timestamp: Timestamp, next_block_height: BlockHeight) -> ChainClient<NodeProvider, S> {
         self.make_chain_client_without_wallet_state(chain_id, key_pair, admin_id, block_hash, timestamp, next_block_height)
     }
@@ -299,8 +299,8 @@ where
         );
         chain_client
     }
-    
-    fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId, 
+
+    fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId,
         block_hash: Option<CryptoHash>, timestamp: Timestamp, next_block_height: BlockHeight) -> ChainClient<NodeProvider, S> {
         let known_key_pairs = key_pair
             .as_ref()
@@ -561,8 +561,8 @@ where
     fn make_chain_client(&self, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
         panic!("Unknown chain: {}", chain_id)
     }
-    
-    fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId, 
+
+    pub fn make_chain_client_without_wallet_state(&self, chain_id: ChainId, key_pair: Option<KeyPair>, admin_id: ChainId,
         block_hash: Option<CryptoHash>, timestamp: Timestamp, next_block_height: BlockHeight) -> ChainClient<NodeProvider, S> {
         let known_key_pairs = key_pair
             .as_ref()

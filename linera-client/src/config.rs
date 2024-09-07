@@ -132,7 +132,7 @@ impl<W: Persist<Target = Wallet>> Persist for WalletState<W> {
 impl<W: Persist<Target = FakeWallet>> Persist for WalletState<W> {
     type Error = W::Error;
 
-    fn persist(this: &mut Self) -> Result<(), W::Error> {
+    fn persist(_this: &mut Self) -> Result<(), W::Error> {
         Ok(())
     }
 
@@ -186,17 +186,6 @@ impl WalletState<persistent::LocalStorage<Wallet>> {
     }
 }
 
-#[cfg(feature = "no-storage")]
-impl WalletState<persistent::LocalStorage<FakeWallet>> {
-    pub fn create_from_local_storage(key: &str, wallet: FakeWallet) -> Result<Self, Error> {
-        panic!("Not Important")
-    }
-
-    pub fn read_from_local_storage(key: &str) -> Result<Self, Error> {
-        panic!("Not Important")
-    }
-}
-
 #[cfg(not(feature = "no-storage"))]
 impl<W: Deref<Target = Wallet>> WalletState<W> {
     pub fn new(wallet: W) -> Self {
@@ -212,10 +201,10 @@ impl<W: Deref<Target = Wallet>> WalletState<W> {
 }
 
 #[cfg(feature = "no-storage")]
-impl<W: Deref<Target = FakeWallet>> WalletState<W> {
-    pub fn new_no_storage(wallet: W) -> Self {
+impl WalletState<persistent::Memory<FakeWallet>> {
+    pub fn new_no_storage(wallet: FakeWallet) -> Self {
         Self {
-            wallet,
+            wallet: persistent::Memory::new(wallet),
         }
     }
 }

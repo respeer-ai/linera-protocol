@@ -33,8 +33,7 @@ pub struct Wallet {
 
 #[cfg(feature = "no-storage")]
 #[derive(Serialize, Deserialize)]
-pub struct FakeWallet;
-
+pub struct FakeWallet {}
 
 impl Extend<UserChain> for Wallet {
     fn extend<Chains: IntoIterator<Item = UserChain>>(&mut self, chains: Chains) {
