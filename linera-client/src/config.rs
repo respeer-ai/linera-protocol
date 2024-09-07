@@ -2,7 +2,7 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{iter::IntoIterator, ops::Deref};
+use std::{fmt::Debug, iter::IntoIterator, ops::Deref};
 
 use linera_base::{
     crypto::{BcsSignable, CryptoHash, CryptoRng, KeyPair, PublicKey},
@@ -32,6 +32,11 @@ use crate::{
     persistent::{self, Persist},
     util,
     wallet::{UserChain, Wallet},
+};
+
+#[cfg(feature = "no-storage")]
+use crate::{
+    wallet::FakeWallet,
 };
 
 util::impl_from_dynamic!(Error:Persistence, persistent::memory::Error);
@@ -83,10 +88,17 @@ impl CommitteeConfig {
 }
 
 /// The runtime state of the wallet, persisted atomically on change via an instance of
+#[cfg(not(feature = "no-storage"))]
 /// [`Persist`].
 pub struct WalletState<W> {
     wallet: W,
     prng: Box<dyn CryptoRng>,
+}
+
+#[cfg(feature = "no-storage")]
+/// [`Persist`].
+pub struct WalletState<W> {
+    wallet: W,
 }
 
 impl<W: Deref> Deref for WalletState<W> {
@@ -97,6 +109,7 @@ impl<W: Deref> Deref for WalletState<W> {
     }
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<W: Persist<Target = Wallet>> Persist for WalletState<W> {
     type Error = W::Error;
 
@@ -115,7 +128,32 @@ impl<W: Persist<Target = Wallet>> Persist for WalletState<W> {
     }
 }
 
+#[cfg(feature = "no-storage")]
+impl<W: Persist<Target = FakeWallet>> Persist for WalletState<W> {
+    type Error = W::Error;
+
+    fn persist(this: &mut Self) -> Result<(), W::Error> {
+        Ok(())
+    }
+
+    fn as_mut(this: &mut Self) -> &mut FakeWallet {
+        Persist::as_mut(&mut this.wallet)
+    }
+
+    fn into_value(this: Self) -> FakeWallet {
+        Persist::into_value(this.wallet)
+    }
+}
+
+#[cfg(not(feature = "no-storage"))]
 impl<W: Persist<Target = Wallet>> Extend<UserChain> for WalletState<W> {
+    fn extend<Chains: IntoIterator<Item = UserChain>>(&mut self, chains: Chains) {
+        Persist::mutate(self).extend(chains);
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl<W: Persist<Target = FakeWallet>> Extend<UserChain> for WalletState<W> {
     fn extend<Chains: IntoIterator<Item = UserChain>>(&mut self, chains: Chains) {
         Persist::mutate(self).extend(chains);
     }
@@ -134,7 +172,7 @@ impl WalletState<persistent::File<Wallet>> {
     }
 }
 
-#[cfg(with_local_storage)]
+#[cfg(all(with_local_storage, not(feature = "no-storage")))]
 impl WalletState<persistent::LocalStorage<Wallet>> {
     pub fn create_from_local_storage(key: &str, wallet: Wallet) -> Result<Self, Error> {
         Ok(Self::new(persistent::LocalStorage::read_or_create(
@@ -148,6 +186,18 @@ impl WalletState<persistent::LocalStorage<Wallet>> {
     }
 }
 
+#[cfg(feature = "no-storage")]
+impl WalletState<persistent::LocalStorage<FakeWallet>> {
+    pub fn create_from_local_storage(key: &str, wallet: FakeWallet) -> Result<Self, Error> {
+        panic!("Not Important")
+    }
+
+    pub fn read_from_local_storage(key: &str) -> Result<Self, Error> {
+        panic!("Not Important")
+    }
+}
+
+#[cfg(not(feature = "no-storage"))]
 impl<W: Deref<Target = Wallet>> WalletState<W> {
     pub fn new(wallet: W) -> Self {
         Self {
@@ -158,6 +208,15 @@ impl<W: Deref<Target = Wallet>> WalletState<W> {
 
     pub fn generate_key_pair(&mut self) -> KeyPair {
         KeyPair::generate_from(&mut self.prng)
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl<W: Deref<Target = FakeWallet>> WalletState<W> {
+    pub fn new_no_storage(wallet: W) -> Self {
+        Self {
+            wallet,
+        }
     }
 }
 

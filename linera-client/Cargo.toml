@@ -10,6 +10,7 @@ edition.workspace = true
 
 [features]
 default = ["fs", "storage-service"]
+no-storage = []
 test = ["linera-views/test", "linera-execution/test"]
 benchmark = ["linera-base/test", "dep:linera-sdk"]
 wasmer = [

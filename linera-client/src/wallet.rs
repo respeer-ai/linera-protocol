@@ -31,6 +31,11 @@ pub struct Wallet {
     pub testing_prng_seed: Option<u64>,
 }
 
+#[cfg(feature = "no-storage")]
+#[derive(Serialize, Deserialize)]
+pub struct FakeWallet;
+
+
 impl Extend<UserChain> for Wallet {
     fn extend<Chains: IntoIterator<Item = UserChain>>(&mut self, chains: Chains) {
         let mut chains = chains.into_iter();
@@ -42,6 +47,19 @@ impl Extend<UserChain> for Wallet {
             self.chains
                 .extend(chains.map(|chain| (chain.chain_id, chain)));
         }
+    }
+}
+
+
+#[cfg(feature = "no-storage")]
+impl Extend<UserChain> for FakeWallet {
+    fn extend<Chains: IntoIterator<Item = UserChain>>(&mut self, chains: Chains) {}
+}
+
+#[cfg(feature = "no-storage")]
+impl FakeWallet {
+    pub fn new() -> Self {
+        FakeWallet {}
     }
 }
 
