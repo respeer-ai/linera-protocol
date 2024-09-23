@@ -70,12 +70,14 @@
 
 use std::collections::BTreeMap;
 
+use async_graphql::SimpleObject;
+
 use linera_base::{
     crypto::{KeyPair, PublicKey},
     data_types::{ArithmeticError, Blob, BlockHeight, Round, Timestamp},
     doc_scalar, ensure,
     identifiers::{BlobId, ChainId, Owner},
-    ownership::ChainOwnership,
+    ownership::{ChainOwnership, NodeChainOwnership},
 };
 use linera_execution::committee::Epoch;
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
@@ -632,4 +634,17 @@ impl ChainManagerInfo {
 
         None
     }
+}
+
+/// Chain manager information that is included in `ChainInfo` sent to clients.
+#[derive(Default, Clone, Debug, Serialize, Deserialize, SimpleObject)]
+#[cfg_attr(with_testing, derive(Eq, PartialEq))]
+pub struct NodeChainManagerInfo {
+    /// The configuration of the chain's owners.
+    pub ownership: NodeChainOwnership,
+    /// The current leader, who is allowed to propose the next block.
+    /// `None` if everyone is allowed to propose.
+    pub leader: Option<Owner>,
+    /// The current round, i.e. the lowest round where we can still vote to validate a block.
+    pub current_round: Round,
 }

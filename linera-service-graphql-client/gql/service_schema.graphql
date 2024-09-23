@@ -704,6 +704,78 @@ type MutationRoot {
 	requestApplicationWithoutBlockProposal(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): ApplicationId!
 }
 
+type NodeChainInfo {
+	"""
+	The chain ID.
+	"""
+	chainId: ChainId!
+	"""
+	The number identifying the current configuration.
+	"""
+	epoch: Epoch
+	"""
+	The state of the chain authentication.
+	"""
+	manager: NodeChainManagerInfo!
+	"""
+	The current balance.
+	"""
+	chainBalance: Amount!
+	"""
+	The last block hash, if any.
+	"""
+	blockHash: CryptoHash
+	"""
+	The earliest possible timestamp for the next block.
+	"""
+	timestamp: Timestamp!
+	"""
+	The height after the latest block in the chain.
+	"""
+	nextBlockHeight: BlockHeight!
+}
+
+"""
+Chain manager information that is included in `ChainInfo` sent to clients.
+"""
+type NodeChainManagerInfo {
+	"""
+	The configuration of the chain's owners.
+	"""
+	ownership: NodeChainOwnership!
+	"""
+	The current leader, who is allowed to propose the next block.
+	`None` if everyone is allowed to propose.
+	"""
+	leader: Owner
+	"""
+	The current round, i.e. the lowest round where we can still vote to validate a block.
+	"""
+	currentRound: Round!
+}
+
+"""
+Represents the owner(s) of a chain.
+"""
+type NodeChainOwnership {
+	"""
+	Super owners can propose fast blocks in the first round, and regular blocks in any round.
+	"""
+	superOwners: JSONObject!
+	"""
+	The regular owners, with their weights that determine how often they are round leader.
+	"""
+	owners: JSONObject!
+	"""
+	The number of initial rounds after 0 in which all owners are allowed to propose blocks.
+	"""
+	multiLeaderRounds: Int!
+	"""
+	The timeout configuration: how long fast, multi-leader and single-leader rounds last.
+	"""
+	timeoutConfig: TimeoutConfig!
+}
+
 """
 Notify that a chain has a new certified block or a new message
 """
@@ -799,6 +871,10 @@ type QueryRoot {
 	Returns the pending message of the chain
 	"""
 	pendingMessages(chainId: ChainId!): [IncomingBundle!]!
+	"""
+	Returns the pending message of the chain
+	"""
+	nodeChainInfo(chainId: ChainId!): NodeChainInfo!
 	"""
 	Returns the next raw block proposal
 	"""
@@ -912,6 +988,11 @@ input ResourceControlPolicy {
 }
 
 """
+A number to identify successive attempts to decide a value in a consensus protocol.
+"""
+scalar Round
+
+"""
 A signature value
 """
 scalar Signature
@@ -969,6 +1050,34 @@ type SystemExecutionStateView {
 The target of a message, relative to a particular application. Used to identify each outbox.
 """
 scalar Target
+
+"""
+A duration in microseconds
+"""
+scalar TimeDelta
+
+"""
+The timeout configuration: how long fast, multi-leader and single-leader rounds last.
+"""
+type TimeoutConfig {
+	"""
+	The duration of the fast round.
+	"""
+	fastRoundDuration: TimeDelta
+	"""
+	The duration of the first single-leader and all multi-leader rounds.
+	"""
+	baseTimeout: TimeDelta!
+	"""
+	The duration by which the timeout increases after each single-leader round.
+	"""
+	timeoutIncrement: TimeDelta!
+	"""
+	The age of an incoming tracked or protected message after which the validators start
+	transitioning the chain to fallback mode.
+	"""
+	fallbackDuration: TimeDelta!
+}
 
 """
 A timestamp, in microseconds since the Unix epoch

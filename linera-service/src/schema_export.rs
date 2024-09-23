@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use linera_base::{
     crypto::{CryptoHash, KeyPair, PublicKey},
-    data_types::{Blob, BlobContent, Timestamp},
+    data_types::{Blob, BlobContent, Timestamp, BlockHeight},
     identifiers::{BlobId, ChainId},
 };
 use linera_chain::data_types::{
@@ -143,6 +143,14 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
     }
 
     fn make_chain_client(&self, _: ChainId) -> ChainClient<P, S>
+    where
+        ViewError: From<S::StoreError>,
+    {
+        unimplemented!()
+    }
+
+    fn make_chain_client_without_wallet_state(&self, _: ChainId, _: Option<KeyPair>, _: ChainId, _: Option<CryptoHash>, 
+        _: Timestamp, _: BlockHeight) -> ChainClient<P, S>
     where
         ViewError: From<S::StoreError>,
     {

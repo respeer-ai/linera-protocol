@@ -43,7 +43,7 @@ use linera_client::{
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
-    data_types::{ClientOutcome, RoundTimeout},
+    data_types::{ClientOutcome, RoundTimeout, NodeChainInfo},
     local_node::LocalNodeClient,
     node::{LocalValidatorNodeProvider, NotificationStream, ValidatorNode, ValidatorNodeProvider},
     worker::{Notification, Reason, WorkerState},
@@ -978,6 +978,12 @@ where
     async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
         let client = self.clients.try_client_lock(&chain_id).await?;
         Ok(client.pending_messages().await?)
+    }
+
+    /// Returns the pending message of the chain
+    async fn node_chain_info(&self, chain_id: ChainId) -> Result<Box<NodeChainInfo>, Error> {
+        let client = self.clients.try_client_lock(&chain_id).await?;
+        Ok(client.node_chain_info().await?)
     }
 
     /// Returns the next raw block proposal

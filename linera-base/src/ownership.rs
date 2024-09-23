@@ -6,6 +6,8 @@
 
 use std::{collections::BTreeMap, iter};
 
+use async_graphql::SimpleObject;
+
 use linera_witty::{WitLoad, WitStore, WitType};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,7 +20,7 @@ use crate::{
 };
 
 /// The timeout configuration: how long fast, multi-leader and single-leader rounds last.
-#[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize, WitLoad, WitStore, WitType)]
+#[derive(PartialEq, Eq, Clone, Hash, Debug, Serialize, Deserialize, WitLoad, WitStore, WitType, SimpleObject)]
 pub struct TimeoutConfig {
     /// The duration of the fast round.
     pub fast_round_duration: Option<TimeDelta>,
@@ -75,6 +77,135 @@ impl ChainOwnership {
         timeout_config: TimeoutConfig,
     ) -> Self {
         ChainOwnership {
+            super_owners: BTreeMap::new(),
+            owners: keys_and_weights
+                .into_iter()
+                .map(|(public_key, weight)| (Owner::from(public_key), (public_key, weight)))
+                .collect(),
+            multi_leader_rounds,
+            timeout_config,
+        }
+    }
+
+    /// Adds a regular owner.
+    pub fn with_regular_owner(mut self, public_key: PublicKey, weight: u64) -> Self {
+        self.owners
+            .insert(Owner::from(public_key), (public_key, weight));
+        self
+    }
+
+    /// Returns whether there are any owners or super owners or it is a public chain.
+    pub fn is_active(&self) -> bool {
+        !self.super_owners.is_empty()
+            || !self.owners.is_empty()
+            || self.timeout_config.fallback_duration == TimeDelta::ZERO
+    }
+
+    /// Returns the given owner's public key, if they are an owner or super owner.
+    pub fn verify_owner(&self, owner: &Owner) -> Option<PublicKey> {
+        if let Some(public_key) = self.super_owners.get(owner) {
+            Some(*public_key)
+        } else {
+            self.owners.get(owner).map(|(public_key, _)| *public_key)
+        }
+    }
+
+    /// Returns the duration of the given round.
+    pub fn round_timeout(&self, round: Round) -> Option<TimeDelta> {
+        let tc = &self.timeout_config;
+        match round {
+            Round::Fast => tc.fast_round_duration,
+            Round::MultiLeader(r) if r.saturating_add(1) == self.multi_leader_rounds => {
+                Some(tc.base_timeout)
+            }
+            Round::MultiLeader(_) => None,
+            Round::SingleLeader(r) => {
+                let increment = tc.timeout_increment.saturating_mul(u64::from(r));
+                Some(tc.base_timeout.saturating_add(increment))
+            }
+            Round::Validator(r) => {
+                let increment = tc.timeout_increment.saturating_mul(u64::from(r));
+                Some(tc.base_timeout.saturating_add(increment))
+            }
+        }
+    }
+
+    /// Returns the first consensus round for this configuration.
+    pub fn first_round(&self) -> Round {
+        if !self.super_owners.is_empty() {
+            Round::Fast
+        } else if self.owners.is_empty() {
+            Round::Validator(0)
+        } else if self.multi_leader_rounds > 0 {
+            Round::MultiLeader(0)
+        } else {
+            Round::SingleLeader(0)
+        }
+    }
+
+    /// Returns an iterator over all super owners, followed by all owners.
+    pub fn all_owners(&self) -> impl Iterator<Item = &Owner> {
+        self.super_owners.keys().chain(self.owners.keys())
+    }
+
+    /// Returns an iterator over all super owners' keys, followed by all owners'.
+    pub fn all_public_keys(&self) -> impl Iterator<Item = &PublicKey> {
+        self.super_owners
+            .values()
+            .chain(self.owners.values().map(|(public_key, _)| public_key))
+    }
+
+    /// Returns the round following the specified one, if any.
+    pub fn next_round(&self, round: Round) -> Option<Round> {
+        let next_round = match round {
+            Round::Fast if self.multi_leader_rounds == 0 => Round::SingleLeader(0),
+            Round::Fast => Round::MultiLeader(0),
+            Round::MultiLeader(r) => r
+                .checked_add(1)
+                .filter(|r| *r < self.multi_leader_rounds)
+                .map_or(Round::SingleLeader(0), Round::MultiLeader),
+            Round::SingleLeader(r) => r
+                .checked_add(1)
+                .map_or(Round::Validator(0), Round::SingleLeader),
+            Round::Validator(r) => Round::Validator(r.checked_add(1)?),
+        };
+        Some(next_round)
+    }
+}
+
+/// Represents the owner(s) of a chain.
+#[derive(
+    PartialEq, Eq, Clone, Hash, Debug, Default, Serialize, Deserialize, WitLoad, WitStore, WitType, SimpleObject,
+)]
+pub struct NodeChainOwnership {
+    /// Super owners can propose fast blocks in the first round, and regular blocks in any round.
+    pub super_owners: BTreeMap<Owner, PublicKey>,
+    /// The regular owners, with their weights that determine how often they are round leader.
+    pub owners: BTreeMap<Owner, (PublicKey, u64)>,
+    /// The number of initial rounds after 0 in which all owners are allowed to propose blocks.
+    pub multi_leader_rounds: u32,
+    /// The timeout configuration: how long fast, multi-leader and single-leader rounds last.
+    pub timeout_config: TimeoutConfig,
+}
+
+impl NodeChainOwnership {
+    /// Creates a `NodeChainOwnership` with a single super owner.
+    pub fn single(public_key: PublicKey) -> Self {
+        NodeChainOwnership {
+            super_owners: iter::once((Owner::from(public_key), public_key)).collect(),
+            owners: BTreeMap::new(),
+            multi_leader_rounds: 2,
+            timeout_config: TimeoutConfig::default(),
+        }
+    }
+
+    /// Creates a `NodeChainOwnership` with the specified regular owners.
+    pub fn multiple(
+        keys_and_weights: impl IntoIterator<Item = (PublicKey, u64)>,
+        multi_leader_rounds: u32,
+        timeout_config: TimeoutConfig,
+    ) -> Self {
+        NodeChainOwnership {
             super_owners: BTreeMap::new(),
             owners: keys_and_weights
                 .into_iter()

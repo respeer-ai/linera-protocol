@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use async_graphql::SimpleObject;
 use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, KeyPair, Signature},
     data_types::{Amount, BlockHeight, Blob, Round, Timestamp},
@@ -14,7 +15,7 @@ use linera_chain::{
         ChainAndHeight, HashedCertificateValue, IncomingBundle, LiteCertificate, Medium,
         MessageBundle, ProposalContent,
     },
-    manager::ChainManagerInfo,
+    manager::{ChainManagerInfo, NodeChainManagerInfo},
     ChainStateView,
 };
 use linera_execution::{
@@ -166,6 +167,26 @@ pub struct ChainInfo {
     pub count_received_log: usize,
     /// The response to `request_received_certificates_excluding_first_nth`
     pub requested_received_log: Vec<ChainAndHeight>,
+}
+
+
+#[derive(Clone, Debug, Serialize, Deserialize, SimpleObject)]
+#[cfg_attr(with_testing, derive(Eq, PartialEq))]
+pub struct NodeChainInfo {
+    /// The chain ID.
+    pub chain_id: ChainId,
+    /// The number identifying the current configuration.
+    pub epoch: Option<Epoch>,
+    /// The state of the chain authentication.
+    pub manager: Box<NodeChainManagerInfo>,
+    /// The current balance.
+    pub chain_balance: Amount,
+    /// The last block hash, if any.
+    pub block_hash: Option<CryptoHash>,
+    /// The earliest possible timestamp for the next block.
+    pub timestamp: Timestamp,
+    /// The height after the latest block in the chain.
+    pub next_block_height: BlockHeight,
 }
 
 /// The response to an `ChainInfoQuery`
