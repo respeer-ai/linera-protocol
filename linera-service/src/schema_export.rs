@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 use linera_base::{
-    crypto::{CryptoHash, KeyPair},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{Blob, BlobContent, Timestamp},
     identifiers::{BlobId, ChainId},
 };
@@ -13,6 +13,7 @@ use linera_chain::data_types::{
 use linera_client::{
     chain_listener::{ChainListenerConfig, ClientContext},
     wallet::Wallet,
+    Error,
 };
 use linera_core::{
     client::ChainClient,
@@ -23,6 +24,7 @@ use linera_core::{
     },
 };
 use linera_execution::committee::{Committee, ValidatorName};
+use linera_rpc::node_provider::NodeProvider;
 use linera_service::node_service::NodeService;
 use linera_storage::{DbStorage, Storage};
 use linera_version::VersionInfo;
@@ -141,9 +143,34 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
         unimplemented!()
     }
 
+    fn destroy_chain_client(&self, _: ChainId) {
+        unimplemented!()
+    }
+
     fn update_wallet_for_new_chain(&mut self, _: ChainId, _: Option<KeyPair>, _: Timestamp) {}
 
     async fn update_wallet(&mut self, _: &ChainClient<P, S>) {}
+
+    fn save_wallet(&mut self) {
+        unimplemented!()
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        unimplemented!()
+    }
+
+    fn assign_new_chain_to_public_key(
+        &mut self,
+        _key: PublicKey,
+        _chain_id: ChainId,
+        _timestamp: Timestamp,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
+        unimplemented!()
+    }
 }
 
 #[tokio::main]

@@ -557,6 +557,11 @@ A set of messages from a single block, for a single destination.
 scalar MessageBundle
 
 """
+The index of a message in a chain
+"""
+scalar MessageId
+
+"""
 The kind of outgoing message being sent
 """
 scalar MessageKind
@@ -682,6 +687,25 @@ type MutationRoot {
 	on this one.
 	"""
 	requestApplication(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): CryptoHash!
+	"""
+	ResPeer::CheCko::Initialize offline wallet
+	"""
+	walletInitWithoutKeypair(publicKey: PublicKey!, signature: Signature!, faucetUrl: String!, chainId: ChainId!, messageId: MessageId!, certificateHash: CryptoHash!): ChainId!
+	"""
+	Submit pending block proposal signature
+	"""
+	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): CryptoHash!
+	"""
+	Transfers `amount` units of value from the given owner's account to the recipient.
+	If no owner is given, try to take the units out of the unattributed account.
+	Different from transfer, node service won't sign block in transfer_without_block_proposal
+	"""
+	transferWithoutBlockProposal(fromChainId: ChainId!, fromPublicKey: PublicKey, toChainId: ChainId!, toPublicKey: PublicKey, amount: Amount!, userData: UserData): ChainId!
+	"""
+	Requests a `RegisterApplications` message from another chain so the application can be used
+	on this one.
+	"""
+	requestApplicationWithoutBlockProposal(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): ApplicationId!
 }
 
 """
@@ -775,6 +799,22 @@ type QueryRoot {
 	Returns the version information on this node service.
 	"""
 	version: VersionInfo!
+	"""
+	Returns the pending message of the chain
+	"""
+	pendingMessages(chainId: ChainId!): [IncomingBundle!]!
+	"""
+	Returns the next raw block proposal
+	"""
+	peekCandidateRawBlockPayload(chainId: ChainId!): RawBlockProposalPayload
+	"""
+	Returns the balance of given owner
+	"""
+	balance(chainId: ChainId!, publicKey: PublicKey): Amount!
+	"""
+	Returns the balances of given owners
+	"""
+	balances(chainIds: [ChainId!]!, publicKeys: [PublicKey!]!): JSONObject!
 }
 
 type QueueView_BlockHeight_e824a938 {
@@ -787,6 +827,11 @@ type QueueView_MessageBundle_f4399f0b {
 
 type QueueView_TimestampedBundleInInbox_5a630c55 {
 	entries(count: Int): [TimestampedBundleInInbox!]!
+}
+
+type RawBlockProposalPayload {
+	height: BlockHeight!
+	payloadBytes: [Int!]!
 }
 
 """
@@ -869,6 +914,11 @@ input ResourceControlPolicy {
 	"""
 	maximumBytesWrittenPerBlock: Int!
 }
+
+"""
+A signature value
+"""
+scalar Signature
 
 """
 An event stream ID.

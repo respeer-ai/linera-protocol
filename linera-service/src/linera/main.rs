@@ -1094,7 +1094,7 @@ impl Runnable for Job {
 }
 
 impl Job {
-    async fn assign_new_chain_to_key<S>(
+    pub async fn assign_new_chain_to_key<S>(
         chain_id: ChainId,
         message_id: MessageId,
         storage: S,
@@ -1177,7 +1177,7 @@ impl Job {
     /// Prints a warning message to explain that the wallet has been initialized using data from
     /// untrusted nodes, and gives instructions to verify that we are connected to the right
     /// network.
-    async fn print_peg_certificate_hash<S>(
+    pub async fn print_peg_certificate_hash<S>(
         storage: S,
         chain_ids: impl IntoIterator<Item = ChainId>,
         context: &ClientContext<S, impl Persist<Target = Wallet>>,
