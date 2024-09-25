@@ -243,7 +243,7 @@ where
                     };
                     match result {
                         Err(ChainClientError::CannotFindKeyForChain(_)) => continue,
-                        Err(error) => {
+                        Err(ref error) => {
                             warn!(%error, "Failed to process inbox.");
                             timeout = if config.external_signing {
                                 storage
@@ -254,7 +254,7 @@ where
                                 Timestamp::from(u64::MAX)
                             };
                         }
-                        Ok((_certs, None)) => {
+                        Ok((ref _certs, None)) => {
                             timeout = if config.external_signing {
                                 storage
                                     .clock()
@@ -264,7 +264,7 @@ where
                                 Timestamp::from(u64::MAX)
                             }
                         }
-                        Ok((certs, Some(new_timeout))) => {
+                        Ok((ref certs, Some(ref new_timeout))) => {
                             info!("Done processing inbox ({} blocks created)", certs.len());
                             info!("I will try processing the inbox later based on the given round timeout: {:?}", new_timeout);
                             timeout = new_timeout.timestamp;

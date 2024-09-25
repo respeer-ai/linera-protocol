@@ -3347,16 +3347,24 @@ where
         }
         let manager = *info.manager;
         // Drop the pending block if it is outdated.
-        if let Some(block) = &self.state().pending_block {
-            if block.height != info.next_block_height {
-                self.state_mut().pending_block = None;
+        {
+            let state = self.state();
+            if let Some(block) = &self.state().pending_block {
+                if block.height != info.next_block_height {
+                    drop(state);
+                    self.clear_pending_block();
+                }
             }
         }
-        if let Some(raw_block) = &self.state().pending_raw_block {
-            if raw_block.content.block.height == info.next_block_height {
-                return Ok(ClientOutcome::Committed(true));
+        {
+            let state = self.state();
+            if let Some(raw_block) = &self.state().pending_raw_block {
+                if raw_block.content.block.height == info.next_block_height {
+                    return Ok(ClientOutcome::Committed(true));
+                }
+                drop(state);
+                self.state_mut().pending_raw_block = None
             }
-            self.state_mut().pending_raw_block = None
         }
         // If there is a validated block in the current round, finalize it.
         if let Some(certificate) = &manager.requested_locked {
@@ -3445,8 +3453,7 @@ where
         &self,
         operations: Vec<Operation>,
     ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        let messages = self.pending_messages().await?;
-        self.execute_block_without_block_proposal(messages, operations.clone())
+        self.execute_block_without_block_proposal(operations.clone())
             .await
     }
 
@@ -3469,9 +3476,10 @@ where
     /// executed_block to pending list, then let client to fetch
     pub async fn execute_block_without_block_proposal(
         &self,
-        incoming_bundle: Vec<IncomingBundle>,
         operations: Vec<Operation>,
     ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
+        let block_mutex = Arc::clone(&self.state().preparing_block);
+        let _block_guard = block_mutex.lock_owned().await;
         match self
             .process_pending_block_without_prepare_without_block_proposal()
             .await?
@@ -3484,7 +3492,8 @@ where
                 return Ok((operations.len() > 0, Some(timeout)))
             }
         }
-        let _ = self.set_pending_block(incoming_bundle, operations).await?;
+        let incoming_bundles = self.pending_messages().await?;
+        let _ = self.set_pending_block(incoming_bundles, operations).await?;
         match self
             .process_pending_block_without_prepare_without_block_proposal()
             .await?
@@ -3510,9 +3519,9 @@ where
         &self,
     ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
         self.prepare_chain().await?;
-        let incoming_messages = self.pending_messages().await?;
+        let incoming_bundles = self.pending_messages().await?;
         let operations = self.state().pending_operations.clone();
-        if incoming_messages.is_empty() && operations.is_empty() {
+        if incoming_bundles.is_empty() && operations.is_empty() {
             return Ok((Vec::new(), None));
         }
         let mut count = if operations.len() > 4 {
@@ -3523,7 +3532,6 @@ where
         loop {
             match self
                 .execute_block_without_block_proposal(
-                    incoming_messages.clone(),
                     operations.get(0..count).unwrap_or(&Vec::new()).to_vec(),
                 )
                 .await
@@ -3534,8 +3542,14 @@ where
                     }
                     return Ok((Vec::new(), timeout));
                 }
-                _ => {
+                Err(error) => {
                     if count == 1 {
+                        tracing::error!(
+                            "Failed to process chain {} operation {:?}: {}",
+                            self.chain_id,
+                            operations,
+                            error
+                        );
                         self.state_mut().pending_operations.drain(0..count);
                         return Ok((Vec::new(), None));
                     }
