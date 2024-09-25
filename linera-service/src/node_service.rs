@@ -829,7 +829,12 @@ where
 
         tokio::task::yield_now().await;
         std::thread::sleep(std::time::Duration::from_millis(2000));
+
         let client = self.clients.try_client_lock(&chain_id).await?;
+        client.track_chain(chain_id);
+        client.track_chain(message_id.chain_id);
+        client.retry_pending_outgoing_messages().await?;
+
         let nodes: Vec<_> = self
             .context
             .lock()

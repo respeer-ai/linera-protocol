@@ -3163,6 +3163,10 @@ where
         Ok(())
     }
 
+    pub fn track_chain(&self, chain_id: ChainId) {
+        self.client.track_chain(chain_id)
+    }
+
     #[tracing::instrument(level = "trace")]
     /// Executes (or retries) a regular block proposal. Updates local balance.
     ///
