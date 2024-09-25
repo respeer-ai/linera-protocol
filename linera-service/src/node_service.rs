@@ -276,6 +276,7 @@ where
 
     async fn prepare_parent_chain(
         &self,
+        chain_id: ChainId,
         public_key: PublicKey,
         message_id: MessageId,
         certificate_hash: CryptoHash,
@@ -287,6 +288,7 @@ where
             self.storage.clone(),
             NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
         )
+        .with_tracked_chains([message_id.chain_id, chain_id])
         .with_allow_inactive_chains(true)
         .with_allow_messages_from_deprecated_epochs(true);
         let node_client = LocalNodeClient::new(state);
@@ -799,8 +801,14 @@ where
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
-        self.prepare_parent_chain(public_key, message_id, certificate_hash, validators.clone())
-            .await?;
+        self.prepare_parent_chain(
+            chain_id,
+            public_key,
+            message_id,
+            certificate_hash,
+            validators.clone(),
+        )
+        .await?;
         self.context
             .lock()
             .await

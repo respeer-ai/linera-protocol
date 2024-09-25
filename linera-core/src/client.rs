@@ -124,7 +124,7 @@ impl<P, S: Storage + Clone> Client<P, S> {
             name.into(),
             storage.clone(),
             tracked_chains.clone(),
-            NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
+            NonZeroUsize::new(200).expect("Chain worker limit should not be zero"),
         )
         .with_long_lived_services(long_lived_services)
         .with_allow_inactive_chains(true)
