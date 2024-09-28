@@ -706,6 +706,10 @@ type MutationRoot {
 	on this one.
 	"""
 	requestApplicationWithoutBlockProposal(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): ApplicationId!
+	"""
+	Calculate block execution state hash
+	"""
+	calculateTransferBlockStateHash(fromChainId: ChainId!, fromPublicKey: PublicKey, toChainId: ChainId!, toPublicKey: PublicKey, amount: Amount!, userData: UserData, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): CryptoHash!
 }
 
 """
@@ -1002,6 +1006,24 @@ scalar UserApplicationDescription
 Optional user message attached to a transfer
 """
 scalar UserData
+
+"""
+A bundle of cross-chain messages.
+"""
+input UserIncomingBundle {
+	"""
+	The origin of the messages (chain and channel if any).
+	"""
+	origin: Origin!
+	"""
+	The messages to be delivered to the inbox identified by `origin`.
+	"""
+	bundle: MessageBundle!
+	"""
+	What to do with the message.
+	"""
+	action: MessageAction!
+}
 
 """
 The version info of a build of Linera.

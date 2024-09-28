@@ -16,8 +16,8 @@ use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
     resolver_utils::ContainerType,
-    Error, MergedObject, OutputType, Request, ScalarType, Schema, ServerError, SimpleObject,
-    Subscription,
+    Error, InputObject, MergedObject, OutputType, Request, ScalarType, Schema, ServerError,
+    SimpleObject, Subscription,
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
@@ -39,7 +39,10 @@ use linera_base::{
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{CertificateValue, HashedCertificateValue, IncomingBundle},
+    data_types::{
+        CertificateValue, HashedCertificateValue, IncomingBundle, MessageAction, MessageBundle,
+        Origin,
+    },
     ChainStateView,
 };
 use linera_client::{
@@ -115,6 +118,17 @@ where
     clients: ChainClients<P, S>,
     context: Arc<Mutex<C>>,
     config: ChainListenerConfig,
+}
+
+/// A bundle of cross-chain messages.
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, InputObject)]
+pub struct UserIncomingBundle {
+    /// The origin of the messages (chain and channel if any).
+    pub origin: Origin,
+    /// The messages to be delivered to the inbox identified by `origin`.
+    pub bundle: MessageBundle,
+    /// What to do with the message.
+    pub action: MessageAction,
 }
 
 #[derive(Debug, ThisError)]
@@ -917,6 +931,53 @@ where
             .request_application_without_block_proposal(application_id, target_chain_id)
             .await?;
         Ok(application_id)
+    }
+
+    /// Calculate block execution state hash
+    async fn calculate_transfer_block_state_hash(
+        &self,
+        from_chain_id: ChainId,
+        from_public_key: Option<PublicKey>,
+        to_chain_id: ChainId,
+        to_public_key: Option<PublicKey>,
+        amount: Amount,
+        user_data: Option<UserData>,
+        incoming_bundles: Vec<UserIncomingBundle>,
+        local_time: Timestamp,
+    ) -> Result<CryptoHash, Error> {
+        let client = self.clients.try_client_lock(&from_chain_id).await?;
+
+        let from_owner = match from_public_key {
+            Some(public_key) => Some(Owner::from(public_key)),
+            _ => None,
+        };
+        let to_owner = match to_public_key {
+            Some(public_key) => Some(Owner::from(public_key)),
+            _ => None,
+        };
+
+        let mut bundles = Vec::<IncomingBundle>::new();
+        for bundle in incoming_bundles {
+            bundles.push(IncomingBundle {
+                origin: bundle.origin,
+                bundle: bundle.bundle,
+                action: bundle.action,
+            });
+        }
+
+        Ok(client
+            .calculate_transfer_block_state_hash(
+                from_owner,
+                amount,
+                Recipient::Account(Account {
+                    chain_id: to_chain_id,
+                    owner: to_owner,
+                }),
+                user_data.unwrap_or_default(),
+                bundles,
+                local_time,
+            )
+            .await?)
     }
 }
 

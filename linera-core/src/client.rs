@@ -3615,6 +3615,100 @@ where
         ))
         .await
     }
+
+    /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
+    /// called, it will be proposed to the validators.
+    async fn construct_executed_block_with_full_materials(
+        &self,
+        incoming_bundles: Vec<IncomingBundle>,
+        operations: Vec<Operation>,
+        local_time: Timestamp,
+    ) -> Result<ExecutedBlock, ChainClientError> {
+        let timestamp = self.next_timestamp(&incoming_bundles).await;
+        let identity = self.identity().await?;
+        let previous_block_hash;
+        let height;
+        {
+            let state = self.state();
+            previous_block_hash = state.block_hash;
+            height = state.next_block_height;
+        }
+        let block = Block {
+            epoch: self.epoch().await?,
+            chain_id: self.chain_id,
+            incoming_bundles,
+            operations,
+            previous_block_hash,
+            height,
+            authenticated_signer: Some(identity),
+            timestamp,
+        };
+        // Make sure every incoming message succeeds and otherwise remove them.
+        // Also, compute the final certified hash while we're at it.
+        let (executed_block, _) = self
+            .stage_block_execution_and_discard_failing_messages(block)
+            .await?;
+        Ok(executed_block)
+    }
+
+    /// Execute block with operations and incoming bundles
+    async fn execute_block_with_full_materials(
+        &self,
+        operations: Vec<Operation>,
+        incoming_bundles: Vec<IncomingBundle>,
+        local_time: Timestamp,
+    ) -> Result<ExecutedBlock, ChainClientError> {
+        // Construct a block in pending block then clean it
+        let pending_block = self.state_mut().pending_block.clone();
+
+        // Construct block and executed block
+        let executed_block = self
+            .construct_executed_block_with_full_materials(incoming_bundles, operations, local_time)
+            .await?;
+
+        // Finally recover the pending block
+        self.state_mut().pending_block = pending_block;
+
+        Ok(executed_block)
+    }
+
+    /// Calculate block execution state hash
+    async fn calculate_block_state_hash_with_full_materials(
+        &self,
+        operations: Vec<Operation>,
+        incoming_bundles: Vec<IncomingBundle>,
+        local_time: Timestamp,
+    ) -> Result<CryptoHash, ChainClientError> {
+        Ok(self
+            .execute_block_with_full_materials(operations, incoming_bundles, local_time)
+            .await?
+            .outcome
+            .state_hash)
+    }
+
+    /// Calculate block execution state hash
+    pub async fn calculate_transfer_block_state_hash(
+        &self,
+        owner: Option<Owner>,
+        amount: Amount,
+        recipient: Recipient,
+        user_data: UserData,
+        incoming_bundles: Vec<IncomingBundle>,
+        local_time: Timestamp,
+    ) -> Result<CryptoHash, ChainClientError> {
+        let operation = Operation::System(SystemOperation::Transfer {
+            owner,
+            recipient,
+            amount,
+            user_data,
+        });
+        self.calculate_block_state_hash_with_full_materials(
+            [operation].to_vec(),
+            incoming_bundles,
+            local_time,
+        )
+        .await
+    }
 }
 
 /// The outcome of trying to commit a list of incoming messages and operations to the chain.
