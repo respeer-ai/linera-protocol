@@ -17,3 +17,5 @@ pub mod util;
 pub mod wallet;
 
 pub use error::Error;
+
+pub mod fake_wallet;

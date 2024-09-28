@@ -62,6 +62,8 @@ use {
     },
     std::path::PathBuf,
 };
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
 
 use crate::{
     chain_listener,
@@ -88,6 +90,7 @@ where
 }
 
 #[async_trait]
+#[cfg(not(feature = "no-storage"))]
 impl<S, W> chain_listener::ClientContext for ClientContext<S, W>
 where
     S: Storage + Clone + Send + Sync + 'static,
@@ -144,12 +147,14 @@ where
     }
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<S, W> ClientContext<S, W>
 where
     S: Storage + Clone + Send + Sync + 'static,
     W: Persist<Target = Wallet>,
 {
     /// Returns the [`Wallet`] as a mutable reference.
+    #[cfg(not(feature = "no-storage"))]
     pub fn wallet_mut(&mut self) -> impl std::ops::DerefMut<Target = Wallet> + '_ {
         Persist::mutate(&mut self.wallet)
     }
@@ -895,5 +900,329 @@ where
             .stage_block_execution(block)
             .await?
             .0)
+    }
+}
+
+#[async_trait]
+#[cfg(feature = "no-storage")]
+impl<S, W> chain_listener::ClientContext for ClientContext<S, W>
+where
+    S: Storage + Clone + Send + Sync + 'static,
+    W: Persist<Target = FakeWallet> + Send,
+{
+    type ValidatorNodeProvider = NodeProvider;
+    type Storage = S;
+
+    fn wallet(&self) -> &FakeWallet {
+        &self.wallet
+    }
+
+    fn make_chain_client(&self, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
+        self.make_chain_client(chain_id)
+    }
+
+    fn destroy_chain_client(&self, chain_id: ChainId) {
+        self.destroy_chain_client(chain_id);
+    }
+
+    fn update_wallet_for_new_chain(
+        &mut self,
+        chain_id: ChainId,
+        key_pair: Option<KeyPair>,
+        timestamp: Timestamp,
+    ) {
+        self.update_wallet_for_new_chain(chain_id, key_pair, timestamp);
+        self.save_wallet();
+    }
+
+    async fn update_wallet(&mut self, client: &ChainClient<NodeProvider, S>) {
+        self.update_and_save_wallet(client).await;
+    }
+
+    fn save_wallet(&mut self) {
+        self.save_wallet();
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        self.make_node_provider()
+    }
+
+    fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), Error> {
+        self.assign_new_chain_to_public_key(key, chain_id, timestamp)
+    }
+
+    fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
+        self.set_default_chain(chain_id)
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl<S, W> ClientContext<S, W>
+where
+    S: Storage + Clone + Send + Sync + 'static,
+    W: Persist<Target = FakeWallet>,
+{
+    /// Returns the [`FakeWallet`] as a mutable reference.
+    pub fn wallet_mut(&mut self) -> impl std::ops::DerefMut<Target = FakeWallet> + '_ {
+        Persist::mutate(&mut self.wallet)
+    }
+
+    pub fn new(storage: S, options: ClientOptions, wallet: WalletState<W>) -> Self {
+        let node_options = NodeOptions {
+            send_timeout: options.send_timeout,
+            recv_timeout: options.recv_timeout,
+            notification_retry_delay: options.notification_retry_delay,
+            notification_retries: options.notification_retries,
+        };
+        let node_provider = NodeProvider::new(node_options);
+        let delivery = CrossChainMessageDelivery::new(options.wait_for_outgoing_messages);
+        let client = Client::new(
+            node_provider,
+            storage,
+            options.max_pending_messages,
+            delivery,
+            options.long_lived_services,
+            wallet.chain_ids(),
+            "Client node",
+        );
+
+        ClientContext {
+            client: Arc::new(client),
+            wallet,
+            send_timeout: options.send_timeout,
+            recv_timeout: options.recv_timeout,
+            notification_retry_delay: options.notification_retry_delay,
+            notification_retries: options.notification_retries,
+            options,
+            chain_listeners: JoinSet::new(),
+        }
+    }
+
+    /// Retrieve the default account. Current this is the common account of the default
+    /// chain.
+    pub fn default_account(&self) -> Account {
+        Account::chain(self.default_chain())
+    }
+
+    /// Retrieve the default chain.
+    pub fn default_chain(&self) -> ChainId {
+        self.wallet
+            .default_chain()
+            .expect("No chain specified in wallet with no default chain")
+    }
+
+    fn make_chain_client(&self, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
+        let chain = self
+            .wallet
+            .get(chain_id)
+            .unwrap_or_else(|| panic!("Unknown chain: {}", chain_id));
+        let known_key_pairs = chain
+            .key_pair
+            .as_ref()
+            .map(|kp| kp.copy())
+            .into_iter()
+            .collect();
+        let mut chain_client = self.client.create_chain_client(
+            chain_id,
+            known_key_pairs,
+            self.wallet.genesis_admin_chain(),
+            chain.block_hash,
+            chain.timestamp,
+            chain.next_block_height,
+            chain.pending_block.clone(),
+            chain.pending_blobs.clone(),
+            chain.pending_raw_block.clone(),
+            chain.pending_operations.clone(),
+        );
+        chain_client.options_mut().message_policy = MessagePolicy::new(
+            self.options.blanket_message_policy,
+            self.options.restrict_chain_ids_to.clone(),
+        );
+        chain_client
+    }
+
+    fn destroy_chain_client(&self, chain_id: ChainId) {
+        self.client.destroy_chain(chain_id);
+    }
+
+    pub fn make_node_provider(&self) -> NodeProvider {
+        NodeProvider::new(self.make_node_options())
+    }
+
+    fn make_node_options(&self) -> NodeOptions {
+        NodeOptions {
+            send_timeout: self.send_timeout,
+            recv_timeout: self.recv_timeout,
+            notification_retry_delay: self.notification_retry_delay,
+            notification_retries: self.notification_retries,
+        }
+    }
+
+    pub fn save_wallet(&mut self) {
+        Persist::persist(&mut self.wallet).expect("Unable to write user chains");
+    }
+
+    async fn update_wallet_from_client(&mut self, client: &ChainClient<NodeProvider, S>) {
+        self.wallet_mut().update_from_state(client).await
+    }
+
+    pub async fn update_and_save_wallet(&mut self, client: &ChainClient<NodeProvider, S>) {
+        self.update_wallet_from_client(client).await;
+        self.save_wallet()
+    }
+
+    /// Remembers the new private key (if any) in the wallet.
+    pub fn update_wallet_for_new_chain(
+        &mut self,
+        chain_id: ChainId,
+        key_pair: Option<KeyPair>,
+        timestamp: Timestamp,
+    ) {
+        if self.wallet.get(chain_id).is_none() {
+            self.wallet_mut().insert(UserChain {
+                chain_id,
+                key_pair: key_pair.as_ref().map(|kp| kp.copy()),
+                block_hash: None,
+                timestamp,
+                next_block_height: BlockHeight::ZERO,
+                pending_block: None,
+                pending_blobs: BTreeMap::new(),
+                pending_raw_block: None,
+                pending_operations: Vec::new(),
+            });
+        }
+    }
+
+    pub async fn process_inbox(
+        &mut self,
+        chain_client: &ChainClient<NodeProvider, S>,
+    ) -> Result<Vec<Certificate>, Error> {
+        let mut certificates = Vec::new();
+        // Try processing the inbox optimistically without waiting for validator notifications.
+        let (new_certificates, maybe_timeout) = {
+            chain_client.synchronize_from_validators().await?;
+            let result = chain_client.process_inbox().await;
+            self.update_wallet_from_client(chain_client).await;
+            if result.is_err() {
+                self.save_wallet();
+            }
+            result?
+        };
+        certificates.extend(new_certificates);
+        if maybe_timeout.is_none() {
+            self.save_wallet();
+            return Ok(certificates);
+        }
+
+        // Start listening for notifications, so we learn about new rounds and blocks.
+        let (listener, _listen_handle, mut notification_stream) = chain_client.listen().await?;
+        self.chain_listeners.spawn_task(listener);
+
+        loop {
+            let (new_certificates, maybe_timeout) = {
+                let result = chain_client.process_inbox().await;
+                self.update_wallet_from_client(chain_client).await;
+                if result.is_err() {
+                    self.save_wallet();
+                }
+                result?
+            };
+            certificates.extend(new_certificates);
+            match maybe_timeout {
+                None => {
+                    self.save_wallet();
+                    return Ok(certificates);
+                }
+                Some(timestamp) => {
+                    util::wait_for_next_round(&mut notification_stream, timestamp).await
+                }
+            }
+        }
+    }
+
+    /// Applies the given function to the chain client.
+    ///
+    /// Updates the wallet regardless of the outcome. As long as the function returns a round
+    /// timeout, it will wait and retry.
+    pub async fn apply_client_command<E, F, Fut, T>(
+        &mut self,
+        client: &ChainClient<NodeProvider, S>,
+        mut f: F,
+    ) -> Result<T, Error>
+    where
+        F: FnMut(&ChainClient<NodeProvider, S>) -> Fut,
+        Fut: Future<Output = Result<ClientOutcome<T>, E>>,
+        Error: From<E>,
+    {
+        // Try applying f optimistically without validator notifications. Return if committed.
+        let result = f(client).await;
+        self.update_and_save_wallet(client).await;
+        if let ClientOutcome::Committed(t) = result? {
+            return Ok(t);
+        }
+
+        // Start listening for notifications, so we learn about new rounds and blocks.
+        let (listener, _listen_handle, mut notification_stream) = client.listen().await?;
+        self.chain_listeners.spawn_task(listener);
+
+        loop {
+            // Try applying f. Return if committed.
+            let result = f(client).await;
+            self.update_and_save_wallet(client).await;
+            let timeout = match result? {
+                ClientOutcome::Committed(t) => return Ok(t),
+                ClientOutcome::WaitForTimeout(timeout) => timeout,
+            };
+            // Otherwise wait and try again in the next round.
+            util::wait_for_next_round(&mut notification_stream, timeout).await;
+        }
+    }
+
+    pub async fn change_ownership(
+        &mut self,
+        chain_id: Option<ChainId>,
+        ownership_config: ChainOwnershipConfig,
+    ) -> Result<(), Error> {
+        let chain_id = chain_id.unwrap_or_else(|| self.default_chain());
+        let chain_client = self.make_chain_client(chain_id);
+        info!("Changing ownership for chain {}", chain_id);
+        let time_start = Instant::now();
+        let ownership = ChainOwnership::try_from(ownership_config)?;
+
+        let certificate = self
+            .apply_client_command(&chain_client, |chain_client| {
+                let ownership = ownership.clone();
+                let chain_client = chain_client.clone();
+                async move {
+                    chain_client
+                        .change_ownership(ownership)
+                        .await
+                        .context("Failed to change ownership")
+                }
+            })
+            .await?;
+        let time_total = time_start.elapsed();
+        info!("Operation confirmed after {} ms", time_total.as_millis());
+        debug!("{:?}", certificate);
+        Ok(())
+    }
+
+    pub fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), Error> {
+        self.wallet_mut()
+            .assign_new_chain_to_public_key(key, chain_id, timestamp)
+    }
+
+    pub fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
+        self.wallet_mut().set_default_chain(chain_id)
     }
 }

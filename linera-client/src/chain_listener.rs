@@ -26,6 +26,8 @@ use linera_storage::{Clock as _, Storage};
 use tracing::{debug, error, info, warn, Instrument as _};
 
 use crate::{chain_clients::ChainClients, wallet::Wallet, Error};
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
 
 #[cfg(test)]
 #[path = "unit_tests/chain_listener.rs"]
@@ -67,7 +69,10 @@ pub trait ClientContext {
     type ValidatorNodeProvider: LocalValidatorNodeProvider;
     type Storage: Storage;
 
+    #[cfg(not(feature = "no-storage"))]
     fn wallet(&self) -> &Wallet;
+    #[cfg(feature = "no-storage")]
+    fn wallet(&self) -> &FakeWallet;
 
     fn make_chain_client(
         &self,
