@@ -3673,7 +3673,7 @@ where
     }
 
     /// Calculate block execution state hash
-    async fn calculate_block_state_hash_with_full_materials(
+    pub async fn calculate_block_state_hash_with_full_materials(
         &self,
         operations: Vec<Operation>,
         incoming_bundles: Vec<IncomingBundle>,
@@ -3684,30 +3684,6 @@ where
             .await?
             .outcome
             .state_hash)
-    }
-
-    /// Calculate block execution state hash
-    pub async fn calculate_transfer_block_state_hash(
-        &self,
-        owner: Option<Owner>,
-        amount: Amount,
-        recipient: Recipient,
-        user_data: UserData,
-        incoming_bundles: Vec<IncomingBundle>,
-        local_time: Timestamp,
-    ) -> Result<CryptoHash, ChainClientError> {
-        let operation = Operation::System(SystemOperation::Transfer {
-            owner,
-            recipient,
-            amount,
-            user_data,
-        });
-        self.calculate_block_state_hash_with_full_materials(
-            [operation].to_vec(),
-            incoming_bundles,
-            local_time,
-        )
-        .await
     }
 }
 

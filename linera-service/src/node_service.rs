@@ -934,27 +934,14 @@ where
     }
 
     /// Calculate block execution state hash
-    async fn calculate_transfer_block_state_hash(
+    async fn calculate_block_state_hash_with_full_materials(
         &self,
-        from_chain_id: ChainId,
-        from_public_key: Option<PublicKey>,
-        to_chain_id: ChainId,
-        to_public_key: Option<PublicKey>,
-        amount: Amount,
-        user_data: Option<UserData>,
+        chain_id: ChainId,
+        operations: Vec<Operation>,
         incoming_bundles: Vec<UserIncomingBundle>,
         local_time: Timestamp,
     ) -> Result<CryptoHash, Error> {
-        let client = self.clients.try_client_lock(&from_chain_id).await?;
-
-        let from_owner = match from_public_key {
-            Some(public_key) => Some(Owner::from(public_key)),
-            _ => None,
-        };
-        let to_owner = match to_public_key {
-            Some(public_key) => Some(Owner::from(public_key)),
-            _ => None,
-        };
+        let client = self.clients.try_client_lock(&chain_id).await?;
 
         let mut bundles = Vec::<IncomingBundle>::new();
         for bundle in incoming_bundles {
@@ -966,14 +953,8 @@ where
         }
 
         Ok(client
-            .calculate_transfer_block_state_hash(
-                from_owner,
-                amount,
-                Recipient::Account(Account {
-                    chain_id: to_chain_id,
-                    owner: to_owner,
-                }),
-                user_data.unwrap_or_default(),
+            .calculate_block_state_hash_with_full_materials(
+                operations,
                 bundles,
                 local_time,
             )
