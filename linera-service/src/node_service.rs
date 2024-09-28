@@ -953,11 +953,7 @@ where
         }
 
         Ok(client
-            .calculate_block_state_hash_with_full_materials(
-                operations,
-                bundles,
-                local_time,
-            )
+            .calculate_block_state_hash_with_full_materials(operations, bundles, local_time)
             .await?)
     }
 }

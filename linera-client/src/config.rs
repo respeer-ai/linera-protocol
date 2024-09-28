@@ -27,13 +27,13 @@ pub enum Error {
     Persistence(Box<dyn std::error::Error + Send + Sync>),
 }
 
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
 use crate::{
     persistent::{self, Persist},
     util,
     wallet::{UserChain, Wallet},
 };
-#[cfg(feature = "no-storage")]
-use crate::fake_wallet::FakeWallet;
 
 util::impl_from_dynamic!(Error:Persistence, persistent::memory::Error);
 #[cfg(with_local_storage)]

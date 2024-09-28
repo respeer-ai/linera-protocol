@@ -25,9 +25,9 @@ use linera_rpc::node_provider::NodeProvider;
 use linera_storage::{Clock as _, Storage};
 use tracing::{debug, error, info, warn, Instrument as _};
 
-use crate::{chain_clients::ChainClients, wallet::Wallet, Error};
 #[cfg(feature = "no-storage")]
 use crate::fake_wallet::FakeWallet;
+use crate::{chain_clients::ChainClients, wallet::Wallet, Error};
 
 #[cfg(test)]
 #[path = "unit_tests/chain_listener.rs"]

@@ -20,6 +20,8 @@ use linera_views::common::CommonStoreConfig;
 
 #[cfg(feature = "fs")]
 use crate::config::GenesisConfig;
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
 use crate::{
     chain_listener::ChainListenerConfig,
     config::WalletState,
@@ -28,8 +30,6 @@ use crate::{
     util,
     wallet::Wallet,
 };
-#[cfg(feature = "no-storage")]
-use crate::fake_wallet::FakeWallet;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -295,7 +295,9 @@ impl ClientOptions {
     pub fn wallet(&self) -> Result<WalletState<persistent::Memory<FakeWallet>>, Error> {
         #![allow(unreachable_code)]
         let _wallet = unimplemented!("No persistence backend selected for wallet; please use one of the `fs` or `local_storage` features");
-        Ok(WalletState::new_no_storage(persistent::Memory::new(_wallet)))
+        Ok(WalletState::new_no_storage(persistent::Memory::new(
+            _wallet,
+        )))
     }
 }
 

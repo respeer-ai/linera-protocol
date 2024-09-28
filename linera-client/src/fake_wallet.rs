@@ -1,6 +1,10 @@
 use std::str::FromStr;
 
-use linera_base::{crypto::{KeyPair, PublicKey}, data_types::Timestamp, identifiers::ChainId};
+use linera_base::{
+    crypto::{KeyPair, PublicKey},
+    data_types::Timestamp,
+    identifiers::ChainId,
+};
 use linera_core::{client::ChainClient, node::LocalValidatorNodeProvider};
 use linera_storage::Storage;
 use serde::{Deserialize, Serialize};
@@ -42,16 +46,13 @@ impl FakeWallet {
         ChainId::from_str("").unwrap()
     }
 
-    pub fn insert(&mut self, _chain: UserChain) {
-
-    }
+    pub fn insert(&mut self, _chain: UserChain) {}
 
     pub async fn update_from_state<P, S>(&mut self, _chain_client: &ChainClient<P, S>)
     where
         P: LocalValidatorNodeProvider + Sync + 'static,
         S: Storage + Clone + Send + Sync + 'static,
     {
-
     }
 
     pub fn assign_new_chain_to_public_key(

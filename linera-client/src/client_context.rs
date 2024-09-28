@@ -62,9 +62,9 @@ use {
     },
     std::path::PathBuf,
 };
+
 #[cfg(feature = "no-storage")]
 use crate::fake_wallet::FakeWallet;
-
 use crate::{
     chain_listener,
     client_options::{ChainOwnershipConfig, ClientOptions},
