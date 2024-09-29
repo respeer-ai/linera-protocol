@@ -141,11 +141,6 @@ impl Into<IncomingBundle> for UserIncomingBundle {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, InputObject)]
-pub struct UserOperation {
-    pub operation: Operation,
-}
-
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
     #[error(transparent)]
@@ -952,7 +947,7 @@ where
     async fn calculate_block_state_hash_with_full_materials(
         &self,
         chain_id: ChainId,
-        operations: Vec<UserOperation>,
+        operations: Vec<Operation>,
         incoming_bundles: Vec<UserIncomingBundle>,
         local_time: Timestamp,
     ) -> Result<CryptoHash, Error> {
@@ -963,13 +958,8 @@ where
             bundles.push(bundle.into());
         }
 
-        let mut _operations = Vec::<Operation>::new();
-        for operation in operations {
-            _operations.push(operation.operation);
-        }
-
         Ok(client
-            .calculate_block_state_hash_with_full_materials(_operations, bundles, local_time)
+            .calculate_block_state_hash_with_full_materials(operations, bundles, local_time)
             .await?)
     }
 }
