@@ -14,7 +14,7 @@ use std::{
 use linera_base::crypto::PublicKey;
 use linera_base::{
     crypto::{CryptoHash, KeyPair},
-    data_types::{ArithmeticError, Blob, BlockHeight, Round, UserApplicationDescription},
+    data_types::{ArithmeticError, Blob, BlockHeight, Round, UserApplicationDescription, Timestamp},
     doc_scalar,
     identifiers::{BlobId, ChainId, Owner, UserApplicationId},
 };
@@ -973,6 +973,20 @@ where
             }
         }
     }
+
+    /// Tries to execute a block proposal without any verification other than block execution.
+    #[tracing::instrument(level = "trace", skip(self, block))]
+    pub async fn calculate_block_state_hash(
+        &self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+        self.query_chain_worker(block.chain_id, move |callback| {
+            ChainWorkerRequest::CalculateBlockStateHash { block, local_time, callback }
+        })
+        .await
+    }
+
 }
 
 #[cfg(with_testing)]

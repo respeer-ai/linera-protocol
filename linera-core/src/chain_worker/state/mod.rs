@@ -14,7 +14,7 @@ use std::{
 
 use linera_base::{
     crypto::CryptoHash,
-    data_types::{Blob, BlockHeight, UserApplicationDescription},
+    data_types::{Blob, BlockHeight, UserApplicationDescription, Timestamp},
     ensure,
     identifiers::{BlobId, ChainId, UserApplicationId},
 };
@@ -468,6 +468,18 @@ where
             recipient,
             bundle_vecs,
         })
+    }
+
+    /// Executes a block without persisting any changes to the state.
+    pub(super) async fn calculate_block_state_hash(
+        &mut self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+        ChainWorkerStateWithTemporaryChanges::new(self)
+            .await
+            .calculate_block_state_hash(block, local_time)
+            .await
     }
 }
 

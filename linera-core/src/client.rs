@@ -431,6 +431,9 @@ pub enum ChainClientError {
 
     #[error("Mismatch block height {0} != {1}")]
     MismatchBlockHeight(BlockHeight, BlockHeight),
+
+    #[error("Mismatch block timestamp {0} != {1}")]
+    MismatchBlockTimestamp(u64, u64),
 }
 
 impl From<Infallible> for ChainClientError {
@@ -3616,6 +3619,93 @@ where
         .await
     }
 
+    #[tracing::instrument(level = "trace", skip(block))]
+    /// Attempts to execute the block locally. If any incoming message execution fails, that
+    /// message is rejected and execution is retried, until the block accepts only messages
+    /// that succeed.
+    async fn construct_block_with_full_materials_and_discard_failing_messages(
+        &self,
+        mut block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), ChainClientError> {
+        loop {
+            let result = self.calculate_block_state_hash(block.clone(), local_time).await;
+            if let Err(ChainClientError::LocalNodeError(LocalNodeError::WorkerError(
+                WorkerError::ChainError(chain_error),
+            ))) = &result
+            {
+                if let ChainError::ExecutionError(
+                    error,
+                    ChainExecutionContext::IncomingBundle(index),
+                ) = &**chain_error
+                {
+                    let message = block
+                        .incoming_bundles
+                        .get_mut(*index as usize)
+                        .expect("Message at given index should exist");
+                    if message.bundle.is_protected() {
+                        error!("Protected incoming message failed to execute locally: {message:?}");
+                    } else {
+                        // Reject the faulty message from the block and continue.
+                        // TODO(#1420): This is potentially a bit heavy-handed for
+                        // retryable errors.
+                        info!(
+                            %error, origin = ?message.origin,
+                            "Message failed to execute locally and will be rejected."
+                        );
+                        message.action = MessageAction::Reject;
+                        continue;
+                    }
+                }
+            }
+            return result;
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip(block))]
+    /// Attempts to execute the block locally. If any attempt to read a blob fails, the blob is
+    /// downloaded and execution is retried.
+    async fn calculate_block_state_hash(
+        &self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), ChainClientError> {
+        loop {
+            let result = self
+                .client
+                .local_node
+                .calculate_block_state_hash(block.clone(), local_time)
+                .await;
+            if let Err(LocalNodeError::WorkerError(WorkerError::ChainError(chain_error))) = &result
+            {
+                if let ChainError::ExecutionError(
+                    ExecutionError::SystemError(SystemExecutionError::BlobNotFoundOnRead(blob_id)),
+                    _,
+                ) = &**chain_error
+                {
+                    self.receive_certificate_for_blob(*blob_id).await?;
+                    continue; // We found the missing blob: retry.
+                }
+            }
+            return Ok(result?);
+        }
+    }
+
+    #[tracing::instrument(level = "trace", skip(incoming_bundles))]
+    /// Returns a suitable timestamp for the next block.
+    ///
+    /// This will usually be the current time according to the local clock, but may be slightly
+    /// ahead to make sure it's not earlier than the incoming messages or the previous block.
+    fn next_timestamp_ext(&self, incoming_bundles: &[IncomingBundle], local_time: Timestamp) -> Timestamp {
+        incoming_bundles
+            .iter()
+            .map(|msg| msg.bundle.timestamp)
+            .max()
+            .map_or(local_time, |timestamp| timestamp.max(local_time))
+            .max(self.state().timestamp)
+    }
+
+
     /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
     /// called, it will be proposed to the validators.
     async fn construct_executed_block_with_full_materials(
@@ -3624,7 +3714,10 @@ where
         operations: Vec<Operation>,
         local_time: Timestamp,
     ) -> Result<ExecutedBlock, ChainClientError> {
-        let timestamp = self.next_timestamp(&incoming_bundles).await;
+        let timestamp = self.next_timestamp_ext(&incoming_bundles, local_time);
+        if timestamp != local_time {
+            return Err(ChainClientError::MismatchBlockTimestamp(timestamp.micros(), local_time.micros()));
+        }
         let identity = self.identity().await?;
         let previous_block_hash;
         let height;
@@ -3646,7 +3739,7 @@ where
         // Make sure every incoming message succeeds and otherwise remove them.
         // Also, compute the final certified hash while we're at it.
         let (executed_block, _) = self
-            .stage_block_execution_and_discard_failing_messages(block)
+            .construct_block_with_full_materials_and_discard_failing_messages(block, local_time)
             .await?;
         Ok(executed_block)
     }

@@ -1239,4 +1239,250 @@ where
         }
         Ok(())
     }
+
+    /// Executes a block: first the incoming messages, then the main operation.
+    /// * Modifies the state of outboxes and channels, if needed.
+    /// * As usual, in case of errors, `self` may not be consistent any more and should be thrown
+    ///   away.
+    /// * Returns the list of messages caused by the block being executed.
+    pub async fn calculate_block_state_hash(
+        &mut self,
+        block: &Block,
+        local_time: Timestamp,
+        replaying_oracle_responses: Option<Vec<Vec<OracleResponse>>>,
+    ) -> Result<BlockExecutionOutcome, ChainError> {
+        #[cfg(with_metrics)]
+        let _execution_latency = BLOCK_EXECUTION_LATENCY.measure_latency();
+
+        let chain_id = self.chain_id();
+        assert_eq!(block.chain_id, chain_id);
+        // The first incoming message of any child chain must be `OpenChain`. A root chain must
+        // already be initialized
+        if block.height == BlockHeight::ZERO
+            && self
+                .execution_state
+                .system
+                .description
+                .get()
+                .map_or(true, |description| description.is_child())
+        {
+            let (in_bundle, posted_message, config) = block
+                .starts_with_open_chain_message()
+                .ok_or_else(|| ChainError::InactiveChain(chain_id))?;
+            if !self.is_active() {
+                let message_id = MessageId {
+                    chain_id: in_bundle.origin.sender,
+                    height: in_bundle.bundle.height,
+                    index: posted_message.index,
+                };
+                self.execute_init_message(message_id, config, block.timestamp, local_time)
+                    .await?;
+            }
+        }
+
+        ensure!(
+            *self.execution_state.system.timestamp.get() <= block.timestamp,
+            ChainError::InvalidBlockTimestamp
+        );
+        self.execution_state.system.timestamp.set(block.timestamp);
+        let Some((_, committee)) = self.execution_state.system.current_committee() else {
+            return Err(ChainError::InactiveChain(chain_id));
+        };
+        let mut resource_controller = ResourceController {
+            policy: Arc::new(committee.policy().clone()),
+            tracker: ResourceTracker::default(),
+            account: block.authenticated_signer,
+        };
+
+        if self.is_closed() {
+            ensure!(
+                !block.incoming_bundles.is_empty() && block.has_only_rejected_messages(),
+                ChainError::ClosedChain
+            );
+        }
+        let app_permissions = self.execution_state.system.application_permissions.get();
+        let mut mandatory = HashSet::<UserApplicationId>::from_iter(
+            app_permissions.mandatory_applications.iter().cloned(),
+        );
+        for operation in &block.operations {
+            ensure!(
+                app_permissions.can_execute_operations(&operation.application_id()),
+                ChainError::AuthorizedApplications(
+                    app_permissions.execute_operations.clone().unwrap()
+                )
+            );
+            if let Operation::User { application_id, .. } = operation {
+                mandatory.remove(application_id);
+            }
+        }
+        for pending in block.incoming_messages() {
+            if mandatory.is_empty() {
+                break;
+            }
+            if let Message::User { application_id, .. } = &pending.message {
+                mandatory.remove(application_id);
+            }
+        }
+        ensure!(
+            mandatory.is_empty(),
+            ChainError::MissingMandatoryApplications(mandatory.into_iter().collect())
+        );
+
+        // Execute each incoming bundle as a transaction, then each operation.
+        // Collect messages, events and oracle responses, each as one list per transaction.
+        let mut replaying_oracle_responses = replaying_oracle_responses.map(Vec::into_iter);
+        let mut next_message_index = 0;
+        let mut oracle_responses = Vec::new();
+        let mut events = Vec::new();
+        let mut messages = Vec::new();
+        for (txn_index, transaction) in block.transactions() {
+            let chain_execution_context = match transaction {
+                Transaction::ReceiveMessages(_) => ChainExecutionContext::IncomingBundle(txn_index),
+                Transaction::ExecuteOperation(_) => ChainExecutionContext::Operation(txn_index),
+            };
+            let with_context =
+                |error: ExecutionError| ChainError::ExecutionError(error, chain_execution_context);
+            let maybe_responses = match replaying_oracle_responses.as_mut().map(Iterator::next) {
+                Some(Some(responses)) => Some(responses),
+                Some(None) => return Err(ChainError::MissingOracleResponseList),
+                None => None,
+            };
+            let mut txn_tracker = TransactionTracker::new(next_message_index, maybe_responses);
+            match transaction {
+                Transaction::ReceiveMessages(incoming_bundle) => {
+                    for (message_id, posted_message) in incoming_bundle.messages_and_ids() {
+                        self.execute_message_in_block(
+                            message_id,
+                            posted_message,
+                            incoming_bundle,
+                            block,
+                            txn_index,
+                            local_time,
+                            &mut txn_tracker,
+                            &mut resource_controller,
+                        )
+                        .await?;
+                    }
+                }
+                Transaction::ExecuteOperation(operation) => {
+                    #[cfg(with_metrics)]
+                    let _operation_latency = OPERATION_EXECUTION_LATENCY.measure_latency();
+                    let context = OperationContext {
+                        chain_id,
+                        height: block.height,
+                        index: Some(txn_index),
+                        authenticated_signer: block.authenticated_signer,
+                        authenticated_caller_id: None,
+                    };
+                    self.execution_state
+                        .execute_operation(
+                            context,
+                            local_time,
+                            operation.clone(),
+                            &mut txn_tracker,
+                            &mut resource_controller,
+                        )
+                        .await
+                        .map_err(with_context)?;
+                    resource_controller
+                        .with_state(&mut self.execution_state)
+                        .await?
+                        .track_operation(operation)
+                        .map_err(with_context)?;
+                }
+            }
+
+            self.execution_state
+                .update_execution_outcomes_with_app_registrations(&mut txn_tracker)
+                .await
+                .map_err(with_context)?;
+            let (txn_outcomes, txn_oracle_responses, new_next_message_index) =
+                txn_tracker.destructure().map_err(with_context)?;
+            next_message_index = new_next_message_index;
+            let (txn_messages, txn_events) = self
+                .process_execution_outcomes(block.height, txn_outcomes)
+                .await?;
+            if matches!(
+                transaction,
+                Transaction::ExecuteOperation(_)
+                    | Transaction::ReceiveMessages(IncomingBundle {
+                        action: MessageAction::Accept,
+                        ..
+                    })
+            ) {
+                for message_out in &txn_messages {
+                    resource_controller
+                        .with_state(&mut self.execution_state)
+                        .await?
+                        .track_message(&message_out.message)
+                        .map_err(with_context)?;
+                }
+            }
+            oracle_responses.push(txn_oracle_responses);
+            messages.push(txn_messages);
+            events.push(txn_events);
+        }
+
+        // Finally, charge for the block fee, except if the chain is closed. Closed chains should
+        // always be able to reject incoming messages.
+        if !self.is_closed() {
+            resource_controller
+                .with_state(&mut self.execution_state)
+                .await?
+                .track_block()
+                .map_err(|err| ChainError::ExecutionError(err, ChainExecutionContext::Block))?;
+        }
+
+        // Recompute the state hash.
+        let state_hash = {
+            #[cfg(with_metrics)]
+            let _hash_latency = STATE_HASH_COMPUTATION_LATENCY.measure_latency();
+            self.execution_state.crypto_hash().await?
+        };
+
+        //////////////////
+        ///////// We don't update state_hash here
+        //////////////////
+        // self.execution_state_hash.set(Some(state_hash));
+
+        // Last, reset the consensus state based on the current ownership.
+        let maybe_committee = self.execution_state.system.current_committee().into_iter();
+        self.manager.get_mut().reset(
+            self.execution_state.system.ownership.get(),
+            block.height.try_add_one()?,
+            local_time,
+            maybe_committee.flat_map(|(_, committee)| committee.keys_and_weights()),
+        )?;
+
+        #[cfg(with_metrics)]
+        {
+            // Log Prometheus metrics
+            NUM_BLOCKS_EXECUTED.with_label_values(&[]).inc();
+            WASM_FUEL_USED_PER_BLOCK
+                .with_label_values(&[])
+                .observe(resource_controller.tracker.fuel as f64);
+            WASM_NUM_READS_PER_BLOCK
+                .with_label_values(&[])
+                .observe(resource_controller.tracker.read_operations as f64);
+            WASM_BYTES_READ_PER_BLOCK
+                .with_label_values(&[])
+                .observe(resource_controller.tracker.bytes_read as f64);
+            WASM_BYTES_WRITTEN_PER_BLOCK
+                .with_label_values(&[])
+                .observe(resource_controller.tracker.bytes_written as f64);
+        }
+
+        assert_eq!(
+            messages.len(),
+            block.incoming_bundles.len() + block.operations.len()
+        );
+        Ok(BlockExecutionOutcome {
+            messages,
+            state_hash,
+            oracle_responses,
+            events,
+        })
+    }
+
+
 }

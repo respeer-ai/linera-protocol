@@ -125,6 +125,13 @@ where
         query: ChainInfoQuery,
         callback: oneshot::Sender<Result<(ChainInfoResponse, NetworkActions), WorkerError>>,
     },
+
+    /// Execute a block but discard any changes to the chain state.
+    CalculateBlockStateHash {
+        block: Block,
+        local_time: Timestamp,
+        callback: oneshot::Sender<Result<(ExecutedBlock, ChainInfoResponse), WorkerError>>,
+    },
 }
 
 /// The actor worker type.
@@ -307,6 +314,9 @@ where
                 ChainWorkerRequest::HandleChainInfoQuery { query, callback } => callback
                     .send(self.worker.handle_chain_info_query(query).await)
                     .is_ok(),
+                ChainWorkerRequest::CalculateBlockStateHash { block, local_time, callback } => callback
+                    .send(self.worker.calculate_block_state_hash(block, local_time).await)
+                    .is_ok(),
             };
 
             if !responded {
@@ -433,6 +443,15 @@ where
             } => formatter
                 .debug_struct("ChainWorkerRequest::HandleChainInfoQuery")
                 .field("query", &query)
+                .finish_non_exhaustive(),
+            ChainWorkerRequest::CalculateBlockStateHash {
+                block,
+                local_time,
+                callback: _callback,
+            } => formatter
+                .debug_struct("ChainWorkerRequest::CalculateBlockStateHash")
+                .field("block", &block)
+                .field("local_time", &local_time)
                 .finish_non_exhaustive(),
         }
     }
