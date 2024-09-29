@@ -709,7 +709,7 @@ type MutationRoot {
 	"""
 	Calculate block execution state hash
 	"""
-	calculateBlockStateHashWithFullMaterials(chainId: ChainId!, operations: [Operation!]!, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): CryptoHash!
+	calculateBlockStateHashWithFullMaterials(chainId: ChainId!, operations: [UserOperation!]!, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): CryptoHash!
 }
 
 """
@@ -1023,6 +1023,10 @@ input UserIncomingBundle {
 	What to do with the message.
 	"""
 	action: MessageAction!
+}
+
+input UserOperation {
+	operation: Operation!
 }
 
 """
