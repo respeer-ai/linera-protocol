@@ -131,6 +131,16 @@ pub struct UserIncomingBundle {
     pub action: MessageAction,
 }
 
+impl Into<IncomingBundle> for UserIncomingBundle {
+    fn into(self) -> IncomingBundle {
+        IncomingBundle {
+            origin: self.origin,
+            bundle: self.bundle,
+            action: self.action,
+        }
+    }
+}
+
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
     #[error(transparent)]
@@ -945,11 +955,7 @@ where
 
         let mut bundles = Vec::<IncomingBundle>::new();
         for bundle in incoming_bundles {
-            bundles.push(IncomingBundle {
-                origin: bundle.origin,
-                bundle: bundle.bundle,
-                action: bundle.action,
-            });
+            bundles.push(bundle.into());
         }
 
         Ok(client
