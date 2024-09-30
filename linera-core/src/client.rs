@@ -2012,7 +2012,7 @@ where
     ///
     /// This will usually be the current time according to the local clock, but may be slightly
     /// ahead to make sure it's not earlier than the incoming messages or the previous block.
-    async fn next_timestamp(&self, incoming_bundles: &[IncomingBundle]) -> Timestamp {
+    pub async fn next_timestamp(&self, incoming_bundles: &[IncomingBundle]) -> Timestamp {
         let local_time = self.storage_client().clock().current_time();
         incoming_bundles
             .iter()

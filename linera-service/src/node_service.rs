@@ -295,31 +295,12 @@ impl Into<LiteCertificate<'_>> for UserLiteCertificate {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, InputObject)]
-pub struct UserRawBlockProposal {
-    pub content: UserProposalContent,
-    pub owner: Owner,
-    pub blobs: Vec<Blob>,
-    pub validated_block_certificate: Option<UserLiteCertificate>,
-    // pub hashed_value: UserHashedCertificateValue,
-}
 
-/*
-impl Into<RawBlockProposal> for UserRawBlockProposal {
-    fn into(self) -> RawBlockProposal {
-        RawBlockProposal {
-            content: self.content.into(),
-            owner: self.owner,
-            blobs: self.blobs,
-            validated_block_certificate: match self.validated_block_certificate {
-                Some(cert) => Some(cert.into()),
-                None => None,
-            },
-            hashed_value: self.hashed_value.into(),
-        }
-    }
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct BlockMaterial {
+    pub incoming_bundles: Vec<IncomingBundle>,
+    pub local_time: Timestamp,
 }
-*/
 
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
@@ -1267,6 +1248,17 @@ where
     async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
         let client = self.clients.try_client_lock(&chain_id).await?;
         Ok(client.pending_messages().await?)
+    }
+
+    /// Returns block material of the chain
+    async fn block_material(&self, chain_id: ChainId) -> Result<BlockMaterial, Error> {
+        let client = self.clients.try_client_lock(&chain_id).await?;
+        let incoming_bundles = client.pending_messages().await?;
+        let local_time = client.next_timestamp(&incoming_bundles).await;
+        Ok(BlockMaterial {
+            incoming_bundles,
+            local_time,
+        })
     }
 
     /// Returns the next raw block proposal
