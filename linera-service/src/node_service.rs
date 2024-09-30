@@ -214,6 +214,7 @@ impl Into<LiteCertificate<'_>> for UserLiteCertificate {
 pub struct BlockMaterial {
     pub incoming_bundles: Vec<IncomingBundle>,
     pub local_time: Timestamp,
+    pub round: Round,
 }
 
 #[derive(Debug, ThisError)]
@@ -1161,9 +1162,11 @@ where
         let client = self.clients.try_client_lock(&chain_id).await?;
         let incoming_bundles = client.pending_messages().await?;
         let local_time = client.next_timestamp(&incoming_bundles).await;
+        let round = client.block_round().await?;
         Ok(BlockMaterial {
             incoming_bundles,
             local_time,
+            round,
         })
     }
 

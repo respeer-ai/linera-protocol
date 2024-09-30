@@ -3309,7 +3309,7 @@ where
             validated_block_certificate: None, // TODO
         };
 
-        // TODO: process requested_locked
+        // TODO: process requested_locked and round conflict
 
         // Check the final block proposal. This will be cheaper after #1401.
         self.client
@@ -3820,6 +3820,23 @@ where
             .construct_block_with_full_materials_and_discard_failing_messages(block, local_time)
             .await?;
         Ok(executed_block)
+    }
+
+
+    #[tracing::instrument(level = "trace")]
+    /// Processes the last pending block. Assumes that the local chain is up to date.
+    pub async fn block_round(
+        &self,
+    ) -> Result<Round, ChainClientError> {
+        let chain_id = self.chain_id;
+        let query = ChainInfoQuery::new(chain_id).with_committees();
+        let info = self
+            .client
+            .local_node
+            .handle_chain_info_query(query)
+            .await?
+            .info;
+        Ok(info.manager.current_round)
     }
 
     /// Execute block with operations and incoming bundles

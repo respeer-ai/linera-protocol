@@ -130,6 +130,7 @@ scalar BlockHeight
 type BlockMaterial {
 	incomingBundles: [IncomingBundle!]!
 	localTime: Timestamp!
+	round: Round!
 }
 
 
