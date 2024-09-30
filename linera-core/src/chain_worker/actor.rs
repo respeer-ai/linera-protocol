@@ -314,8 +314,16 @@ where
                 ChainWorkerRequest::HandleChainInfoQuery { query, callback } => callback
                     .send(self.worker.handle_chain_info_query(query).await)
                     .is_ok(),
-                ChainWorkerRequest::CalculateBlockStateHash { block, local_time, callback } => callback
-                    .send(self.worker.calculate_block_state_hash(block, local_time).await)
+                ChainWorkerRequest::CalculateBlockStateHash {
+                    block,
+                    local_time,
+                    callback,
+                } => callback
+                    .send(
+                        self.worker
+                            .calculate_block_state_hash(block, local_time)
+                            .await,
+                    )
                     .is_ok(),
             };
 

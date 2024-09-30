@@ -406,9 +406,9 @@ impl CertificateValue {
 /// A statement to be certified by the validators, with its hash.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct HashedCertificateValue {
-    value: CertificateValue,
+    pub value: CertificateValue,
     /// Hash of the value (used as key for storage).
-    hash: CryptoHash,
+    pub hash: CryptoHash,
 }
 
 #[async_graphql::Object(cache_control(no_cache))]

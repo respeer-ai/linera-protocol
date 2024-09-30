@@ -41,6 +41,11 @@ input ApplicationPermissions {
 }
 
 """
+A blob of binary data, with its content-addressed blob ID.
+"""
+scalar Blob
+
+"""
 A blob of binary data.
 """
 scalar BlobContent
@@ -696,6 +701,10 @@ type MutationRoot {
 	"""
 	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): CryptoHash!
 	"""
+	Submit block proposal with signature
+	"""
+	submitBlockAndSignature(chainId: ChainId!, height: BlockHeight!, content: UserProposalContent!, owner: Owner!, blobs: [Blob!]!, validatedBlockCertificate: UserLiteCertificate, hashedValue: UserHashedCertificateValue!, signature: Signature!): CryptoHash!
+	"""
 	Transfers `amount` units of value from the given owner's account to the recipient.
 	If no owner is given, try to take the units out of the unattributed account.
 	Different from transfer, node service won't sign block in transfer_without_block_proposal
@@ -920,6 +929,11 @@ input ResourceControlPolicy {
 }
 
 """
+A number to identify successive attempts to decide a value in a consensus protocol.
+"""
+scalar Round
+
+"""
 A signature value
 """
 scalar Signature
@@ -1002,10 +1016,26 @@ Description of the necessary information to run a user application
 """
 scalar UserApplicationDescription
 
+input UserBlock {
+	chainId: ChainId!
+	epoch: Epoch!
+	incomingBundles: [UserIncomingBundle!]!
+	operations: [Operation!]!
+	height: BlockHeight!
+	timestamp: Timestamp!
+	authenticatedSigner: Owner
+	previousBlockHash: CryptoHash
+}
+
 """
 Optional user message attached to a transfer
 """
 scalar UserData
+
+"""
+A hashed certificate value contains executed block and its hash.
+"""
+scalar UserHashedCertificateValue
 
 """
 A bundle of cross-chain messages.
@@ -1024,6 +1054,33 @@ input UserIncomingBundle {
 	"""
 	action: MessageAction!
 }
+
+input UserLiteCertificate {
+	value: UserLiteValue!
+	round: Round!
+	signatures: [UserSignature!]!
+}
+
+input UserLiteValue {
+	valueHash: CryptoHash!
+	chainId: ChainId!
+}
+
+input UserProposalContent {
+	block: UserBlock!
+	round: Round!
+	forcedOracleResponses: [[OracleResponse!]!]
+}
+
+input UserSignature {
+	validatorName: ValidatorName!
+	signature: Signature!
+}
+
+"""
+The identity of a validator
+"""
+scalar ValidatorName
 
 """
 The version info of a build of Linera.

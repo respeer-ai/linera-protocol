@@ -10,7 +10,7 @@ use std::{
 
 use futures::future;
 use linera_base::{
-    data_types::{ArithmeticError, Blob, BlockHeight, UserApplicationDescription, Timestamp},
+    data_types::{ArithmeticError, Blob, BlockHeight, Timestamp, UserApplicationDescription},
     identifiers::{BlobId, ChainId, MessageId, UserApplicationId},
 };
 use linera_chain::{
@@ -182,7 +182,11 @@ where
         block: Block,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), LocalNodeError> {
-        let (executed_block, info) = self.node.state.calculate_block_state_hash(block, local_time).await?;
+        let (executed_block, info) = self
+            .node
+            .state
+            .calculate_block_state_hash(block, local_time)
+            .await?;
         Ok((executed_block, info))
     }
 

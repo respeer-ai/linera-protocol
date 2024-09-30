@@ -342,9 +342,13 @@ where
     ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
         let signer = block.authenticated_signer;
 
-        let executed_block = Box::pin(self.0.chain.calculate_block_state_hash(&block, local_time, None))
-            .await?
-            .with(block);
+        let executed_block = Box::pin(
+            self.0
+                .chain
+                .calculate_block_state_hash(&block, local_time, None),
+        )
+        .await?
+        .with(block);
 
         let mut response = ChainInfoResponse::new(&self.0.chain, None);
         if let Some(signer) = signer {

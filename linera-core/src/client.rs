@@ -3277,15 +3277,12 @@ where
         Ok(())
     }
 
-    pub async fn submit_extenal_signed_block_proposal(
+    pub async fn submit_extenal_signed_block_proposal_and_signature(
         &self,
         height: BlockHeight,
+        raw_block: RawBlockProposal,
         signature: Signature,
     ) -> Result<Certificate, ChainClientError> {
-        let raw_block = match &self.state().pending_raw_block {
-            Some(raw_block) => raw_block.clone(),
-            _ => return Err(ChainClientError::InvalidRawBlockProposal),
-        };
         ensure!(
             raw_block.content.block.height == height,
             ChainClientError::MismatchBlockHeight(raw_block.content.block.height, height)
@@ -3308,8 +3305,6 @@ where
         let certificate = self
             .submit_block_proposal(&committee, proposal, raw_block.hashed_value.clone())
             .await?;
-        self.state_mut().pending_raw_block = None;
-        self.clear_pending_block();
         // Communicate the new certificate now.
         self.communicate_chain_updates(
             &committee,
@@ -3331,6 +3326,26 @@ where
                 .await?;
             }
         }
+        Ok(certificate)
+    }
+
+    pub async fn submit_extenal_signed_block_proposal(
+        &self,
+        height: BlockHeight,
+        signature: Signature,
+    ) -> Result<Certificate, ChainClientError> {
+        let raw_block = match &self.state().pending_raw_block {
+            Some(raw_block) => raw_block.clone(),
+            _ => return Err(ChainClientError::InvalidRawBlockProposal),
+        };
+
+        let certificate = self
+            .submit_extenal_signed_block_proposal_and_signature(height, raw_block, signature)
+            .await?;
+
+        self.state_mut().pending_raw_block = None;
+        self.clear_pending_block();
+
         Ok(certificate)
     }
 
@@ -3629,7 +3644,9 @@ where
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), ChainClientError> {
         loop {
-            let result = self.calculate_block_state_hash(block.clone(), local_time).await;
+            let result = self
+                .calculate_block_state_hash(block.clone(), local_time)
+                .await;
             if let Err(ChainClientError::LocalNodeError(LocalNodeError::WorkerError(
                 WorkerError::ChainError(chain_error),
             ))) = &result
@@ -3696,7 +3713,11 @@ where
     ///
     /// This will usually be the current time according to the local clock, but may be slightly
     /// ahead to make sure it's not earlier than the incoming messages or the previous block.
-    fn next_timestamp_ext(&self, incoming_bundles: &[IncomingBundle], local_time: Timestamp) -> Timestamp {
+    fn next_timestamp_ext(
+        &self,
+        incoming_bundles: &[IncomingBundle],
+        local_time: Timestamp,
+    ) -> Timestamp {
         incoming_bundles
             .iter()
             .map(|msg| msg.bundle.timestamp)
@@ -3704,7 +3725,6 @@ where
             .map_or(local_time, |timestamp| timestamp.max(local_time))
             .max(self.state().timestamp)
     }
-
 
     /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
     /// called, it will be proposed to the validators.
@@ -3716,7 +3736,10 @@ where
     ) -> Result<ExecutedBlock, ChainClientError> {
         let timestamp = self.next_timestamp_ext(&incoming_bundles, local_time);
         if timestamp != local_time {
-            return Err(ChainClientError::MismatchBlockTimestamp(timestamp.micros(), local_time.micros()));
+            return Err(ChainClientError::MismatchBlockTimestamp(
+                timestamp.micros(),
+                local_time.micros(),
+            ));
         }
         let identity = self.identity().await?;
         let previous_block_hash;

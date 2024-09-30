@@ -14,7 +14,9 @@ use std::{
 use linera_base::crypto::PublicKey;
 use linera_base::{
     crypto::{CryptoHash, KeyPair},
-    data_types::{ArithmeticError, Blob, BlockHeight, Round, UserApplicationDescription, Timestamp},
+    data_types::{
+        ArithmeticError, Blob, BlockHeight, Round, Timestamp, UserApplicationDescription,
+    },
     doc_scalar,
     identifiers::{BlobId, ChainId, Owner, UserApplicationId},
 };
@@ -982,11 +984,14 @@ where
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
         self.query_chain_worker(block.chain_id, move |callback| {
-            ChainWorkerRequest::CalculateBlockStateHash { block, local_time, callback }
+            ChainWorkerRequest::CalculateBlockStateHash {
+                block,
+                local_time,
+                callback,
+            }
         })
         .await
     }
-
 }
 
 #[cfg(with_testing)]
