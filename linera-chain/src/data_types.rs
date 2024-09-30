@@ -37,11 +37,13 @@ mod data_types_tests;
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct Block {
     /// The chain to which this block belongs.
+    #[serde(alias = "chainId", alias = "chain_id")]
     pub chain_id: ChainId,
     /// The number identifying the current configuration.
     pub epoch: Epoch,
     /// A selection of incoming messages to be executed first. Successive messages of same
     /// sender and height are grouped together for conciseness.
+    #[serde(alias = "incomingBundles", alias = "incoming_bundles")]
     pub incoming_bundles: Vec<IncomingBundle>,
     /// The operations to execute.
     pub operations: Vec<Operation>,
@@ -54,9 +56,11 @@ pub struct Block {
     /// fees. If set, this must be the `owner` in the block proposal. `None` means that
     /// the default account of the chain is used. This value is also used as recipient of
     /// potential refunds for the message grants created by the operations.
+    #[serde(alias = "authenticatedSigner", alias = "authenticated_signer")]
     pub authenticated_signer: Option<Owner>,
     /// Certified hash (see `Certificate` below) of the previous block in the
     /// chain, if any.
+    #[serde(alias = "previousBlockHash", alias = "previous_block_hash")]
     pub previous_block_hash: Option<CryptoHash>,
 }
 
@@ -217,8 +221,10 @@ pub struct MessageBundle {
     /// The block's timestamp.
     pub timestamp: Timestamp,
     /// The confirmed block certificate hash.
+    #[serde(alias = "certificateHash", alias = "certificate_hash")]
     pub certificate_hash: CryptoHash,
     /// The index of the transaction in the block that is sending this bundle.
+    #[serde(alias = "transactionIndex", alias = "transaction_index")]
     pub transaction_index: u32,
     /// The relevant messages.
     pub messages: Vec<PostedMessage>,

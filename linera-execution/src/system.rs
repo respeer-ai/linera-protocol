@@ -115,6 +115,7 @@ pub enum SystemOperation {
         owner: Option<Owner>,
         recipient: Recipient,
         amount: Amount,
+        #[serde(alias = "userData", alias = "user_data")]
         user_data: UserData,
     },
     /// Claims `amount` units of value from the given owner's account in the remote
