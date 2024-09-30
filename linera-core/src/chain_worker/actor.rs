@@ -156,10 +156,11 @@ where
         blob_cache: Arc<ValueCache<BlobId, Blob>>,
         tracked_chains: Option<Arc<RwLock<HashSet<ChainId>>>>,
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> Result<Self, WorkerError> {
         let (service_runtime_thread, service_runtime_endpoint) = {
             if config.long_lived_services {
-                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id);
+                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id, local_time);
                 (Some(thread), Some(endpoint))
             } else {
                 (None, None)
@@ -188,6 +189,7 @@ where
     /// Returns the task handle and the endpoints to interact with the actor.
     fn spawn_service_runtime_actor(
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> (
         linera_base::task::BlockingFuture<()>,
         ServiceRuntimeEndpoint,
@@ -195,7 +197,10 @@ where
         let context = QueryContext {
             chain_id,
             next_block_height: BlockHeight(0),
-            local_time: Timestamp::from(0),
+            local_time: match local_time {
+                Some(timestamp) => timestamp,
+                None => Timestamp::from(0),
+            },
         };
 
         let (execution_state_sender, incoming_execution_requests) =

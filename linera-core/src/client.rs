@@ -3768,7 +3768,7 @@ where
     }
 
     /// Execute block with operations and incoming bundles
-    async fn execute_block_with_full_materials(
+    async fn _execute_block_with_full_materials(
         &self,
         operations: Vec<Operation>,
         incoming_bundles: Vec<IncomingBundle>,
@@ -3789,17 +3789,14 @@ where
     }
 
     /// Calculate block execution state hash
-    pub async fn calculate_block_state_hash_with_full_materials(
+    pub async fn execute_block_with_full_materials(
         &self,
         operations: Vec<Operation>,
         incoming_bundles: Vec<IncomingBundle>,
         local_time: Timestamp,
-    ) -> Result<CryptoHash, ChainClientError> {
-        Ok(self
-            .execute_block_with_full_materials(operations, incoming_bundles, local_time)
-            .await?
-            .outcome
-            .state_hash)
+    ) -> Result<ExecutedBlock, ChainClientError> {
+        self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
+            .await
     }
 }
 

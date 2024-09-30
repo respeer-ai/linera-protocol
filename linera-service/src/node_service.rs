@@ -295,7 +295,6 @@ impl Into<LiteCertificate<'_>> for UserLiteCertificate {
     }
 }
 
-
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct BlockMaterial {
     pub incoming_bundles: Vec<IncomingBundle>,
@@ -1137,13 +1136,13 @@ where
     }
 
     /// Calculate block execution state hash
-    async fn calculate_block_state_hash_with_full_materials(
+    async fn execute_block_with_full_materials(
         &self,
         chain_id: ChainId,
         operations: Vec<Operation>,
         incoming_bundles: Vec<UserIncomingBundle>,
         local_time: Timestamp,
-    ) -> Result<CryptoHash, Error> {
+    ) -> Result<ExecutedBlock, Error> {
         let client = self.clients.try_client_lock(&chain_id).await?;
 
         let bundles = incoming_bundles
@@ -1152,7 +1151,7 @@ where
             .collect();
 
         Ok(client
-            .calculate_block_state_hash_with_full_materials(operations, bundles, local_time)
+            .execute_block_with_full_materials(operations, bundles, local_time)
             .await?)
     }
 }

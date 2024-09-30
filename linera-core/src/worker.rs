@@ -673,7 +673,31 @@ where
             oneshot::Sender<Result<Response, WorkerError>>,
         ) -> ChainWorkerRequest<StorageClient::Context>,
     ) -> Result<Response, WorkerError> {
-        let chain_actor = self.get_chain_worker_endpoint(chain_id).await?;
+        let chain_actor = self.get_chain_worker_endpoint(chain_id, None).await?;
+        let (callback, response) = oneshot::channel();
+
+        chain_actor
+            .send(request_builder(callback))
+            .expect("`ChainWorkerActor` stopped executing unexpectedly");
+
+        response
+            .await
+            .expect("`ChainWorkerActor` stopped executing without responding")
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, request_builder))]
+    /// Sends a request to the [`ChainWorker`] for a [`ChainId`] and waits for the `Response`.
+    async fn query_chain_worker_with_local_time<Response>(
+        &self,
+        chain_id: ChainId,
+        request_builder: impl FnOnce(
+            oneshot::Sender<Result<Response, WorkerError>>,
+        ) -> ChainWorkerRequest<StorageClient::Context>,
+        local_time: Timestamp,
+    ) -> Result<Response, WorkerError> {
+        let chain_actor = self
+            .get_chain_worker_endpoint(chain_id, Some(local_time))
+            .await?;
         let (callback, response) = oneshot::channel();
 
         chain_actor
@@ -691,6 +715,7 @@ where
     async fn get_chain_worker_endpoint(
         &self,
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> Result<ChainActorEndpoint<StorageClient>, WorkerError> {
         let (sender, new_receiver) = timeout(Duration::from_secs(3), async move {
             loop {
@@ -712,6 +737,7 @@ where
                 self.recent_blobs.clone(),
                 self.tracked_chains.clone(),
                 chain_id,
+                local_time,
             )
             .await?;
             self.chain_worker_tasks
@@ -983,13 +1009,15 @@ where
         block: Block,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
-        self.query_chain_worker(block.chain_id, move |callback| {
-            ChainWorkerRequest::CalculateBlockStateHash {
+        self.query_chain_worker_with_local_time(
+            block.chain_id,
+            move |callback| ChainWorkerRequest::CalculateBlockStateHash {
                 block,
                 local_time,
                 callback,
-            }
-        })
+            },
+            local_time,
+        )
         .await
     }
 }
