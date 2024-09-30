@@ -35,8 +35,11 @@ use thiserror::Error;
 use tokio::{
     sync::{mpsc, oneshot, OwnedRwLockReadGuard},
     task::JoinSet,
-    time::{sleep, timeout},
 };
+#[cfg(not(web))]
+use tokio::time::{sleep, timeout};
+#[cfg(web)]
+use wasmtimer::tokio::{sleep, timeout};
 use tracing::{error, instrument, trace, warn, Instrument as _};
 #[cfg(with_metrics)]
 use {

@@ -6,12 +6,11 @@ use std::{collections::btree_map, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use futures::{
     future::{self, Either},
-    lock::Mutex,
-    StreamExt,
+    lock::Mutex, StreamExt,
 };
 use linera_base::{
-    crypto::{KeyPair, PublicKey},
-    data_types::Timestamp,
+    crypto::{KeyPair, PublicKey, CryptoHash},
+    data_types::{Timestamp, BlockHeight},
     identifiers::{ChainId, Destination},
 };
 use linera_chain::data_types::OutgoingMessage;
@@ -27,7 +26,9 @@ use tracing::{debug, error, info, warn, Instrument as _};
 
 #[cfg(feature = "no-storage")]
 use crate::fake_wallet::FakeWallet;
-use crate::{chain_clients::ChainClients, wallet::Wallet, Error};
+#[cfg(not(feature = "no-storage"))]
+use crate::wallet::Wallet;
+use crate::{chain_clients::ChainClients, Error};
 
 #[cfg(test)]
 #[path = "unit_tests/chain_listener.rs"]
@@ -77,6 +78,17 @@ pub trait ClientContext {
     fn make_chain_client(
         &self,
         chain_id: ChainId,
+    ) -> ChainClient<Self::ValidatorNodeProvider, Self::Storage>;
+
+    #[cfg(feature = "no-storage")]
+    fn make_chain_client_ext(
+        &self,
+        chain_id: ChainId,
+        key_pair: KeyPair,
+        admin_id: ChainId,
+        block_hash: Option<CryptoHash>,
+        timestamp: Timestamp,
+        next_block_height: BlockHeight,
     ) -> ChainClient<Self::ValidatorNodeProvider, Self::Storage>;
 
     fn destroy_chain_client(&self, chain_id: ChainId);

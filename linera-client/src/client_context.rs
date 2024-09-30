@@ -10,7 +10,7 @@ use std::{
 use async_trait::async_trait;
 use futures::Future;
 use linera_base::{
-    crypto::{KeyPair, PublicKey},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{BlockHeight, Timestamp},
     identifiers::{Account, ChainId},
     ownership::ChainOwnership,
@@ -917,8 +917,30 @@ where
         &self.wallet
     }
 
-    fn make_chain_client(&self, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
+    fn make_chain_client(
+        &self,
+        chain_id: ChainId,
+    ) -> ChainClient<NodeProvider, S> {
         self.make_chain_client(chain_id)
+    }
+
+    fn make_chain_client_ext(
+        &self,
+        chain_id: ChainId,
+        key_pair: KeyPair,
+        admin_id: ChainId,
+        block_hash: Option<CryptoHash>,
+        timestamp: Timestamp,
+        next_block_height: BlockHeight,
+    ) -> ChainClient<NodeProvider, S> {
+        self.make_chain_client_ext(
+            chain_id,
+            key_pair,
+            admin_id,
+            block_hash,
+            timestamp,
+            next_block_height,
+        )
     }
 
     fn destroy_chain_client(&self, chain_id: ChainId) {
@@ -1016,7 +1038,10 @@ where
             .expect("No chain specified in wallet with no default chain")
     }
 
-    fn make_chain_client(&self, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
+    fn make_chain_client(
+        &self,
+        chain_id: ChainId,
+    ) -> ChainClient<NodeProvider, S> {
         let chain = self
             .wallet
             .get(chain_id)
@@ -1038,6 +1063,37 @@ where
             chain.pending_blobs.clone(),
             chain.pending_raw_block.clone(),
             chain.pending_operations.clone(),
+        );
+        chain_client.options_mut().message_policy = MessagePolicy::new(
+            self.options.blanket_message_policy,
+            self.options.restrict_chain_ids_to.clone(),
+        );
+        chain_client
+    }
+
+    fn make_chain_client_ext(
+        &self,
+        chain_id: ChainId,
+        key_pair: KeyPair,
+        admin_id: ChainId,
+        block_hash: Option<CryptoHash>,
+        timestamp: Timestamp,
+        next_block_height: BlockHeight,
+    ) -> ChainClient<NodeProvider, S> {
+        let mut known_key_pairs = Vec::new();
+        known_key_pairs.push(key_pair);
+
+        let mut chain_client = self.client.create_chain_client(
+            chain_id,
+            known_key_pairs,
+            admin_id,
+            block_hash,
+            timestamp,
+            next_block_height,
+            None,
+            BTreeMap::new(),
+            None,
+            Vec::new(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
             self.options.blanket_message_policy,

@@ -192,7 +192,7 @@ impl<W: Deref<Target = Wallet>> WalletState<W> {
 
 #[cfg(feature = "no-storage")]
 impl WalletState<persistent::Memory<FakeWallet>> {
-    pub fn new_no_storage(wallet: FakeWallet) -> Self {
+    pub fn new(wallet: FakeWallet) -> Self {
         Self {
             wallet: persistent::Memory::new(wallet),
         }
