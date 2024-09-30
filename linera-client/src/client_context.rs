@@ -10,7 +10,7 @@ use std::{
 use async_trait::async_trait;
 use futures::Future;
 use linera_base::{
-    crypto::{CryptoHash, KeyPair, PublicKey},
+    crypto::{KeyPair, PublicKey},
     data_types::{BlockHeight, Timestamp},
     identifiers::{Account, ChainId},
     ownership::ChainOwnership,
@@ -27,6 +27,8 @@ use linera_storage::Storage;
 use thiserror_context::Context;
 use tokio::task::JoinSet;
 use tracing::{debug, info};
+#[cfg(feature = "no-storage")]
+use {crate::fake_wallet::FakeWallet, linera_base::crypto::CryptoHash};
 #[cfg(feature = "benchmark")]
 use {
     futures::{stream, StreamExt as _, TryStreamExt as _},
@@ -55,16 +57,14 @@ use {
 };
 #[cfg(feature = "fs")]
 use {
+    linera_base::crypto::CryptoHash,
     linera_base::{
-        crypto::CryptoHash,
         data_types::{BlobContent, Bytecode},
         identifiers::{BlobId, BytecodeId},
     },
     std::path::PathBuf,
 };
 
-#[cfg(feature = "no-storage")]
-use crate::fake_wallet::FakeWallet;
 use crate::{
     chain_listener,
     client_options::{ChainOwnershipConfig, ClientOptions},
@@ -917,10 +917,7 @@ where
         &self.wallet
     }
 
-    fn make_chain_client(
-        &self,
-        chain_id: ChainId,
-    ) -> ChainClient<NodeProvider, S> {
+    fn make_chain_client(&self, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
         self.make_chain_client(chain_id)
     }
 
@@ -1038,10 +1035,7 @@ where
             .expect("No chain specified in wallet with no default chain")
     }
 
-    fn make_chain_client(
-        &self,
-        chain_id: ChainId,
-    ) -> ChainClient<NodeProvider, S> {
+    fn make_chain_client(&self, chain_id: ChainId) -> ChainClient<NodeProvider, S> {
         let chain = self
             .wallet
             .get(chain_id)

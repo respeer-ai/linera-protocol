@@ -3280,20 +3280,37 @@ where
     pub async fn submit_extenal_signed_block_proposal_and_signature(
         &self,
         height: BlockHeight,
-        raw_block: RawBlockProposal,
+        executed_block: ExecutedBlock,
+        round: Round,
         signature: Signature,
     ) -> Result<Certificate, ChainClientError> {
+        let block = executed_block.block.clone();
         ensure!(
-            raw_block.content.block.height == height,
-            ChainClientError::MismatchBlockHeight(raw_block.content.block.height, height)
+            block.height == height,
+            ChainClientError::MismatchBlockHeight(block.height, height)
         );
-        let proposal = BlockProposal {
-            content: raw_block.content,
-            owner: raw_block.owner,
-            signature,
-            blobs: raw_block.blobs,
-            validated_block_certificate: raw_block.validated_block_certificate,
+
+        let blobs = self.read_local_blobs(block.published_blob_ids()).await?;
+        let hashed_value = if round.is_fast() {
+            HashedCertificateValue::new_confirmed(executed_block)
+        } else {
+            HashedCertificateValue::new_validated(executed_block)
         };
+
+        let proposal = BlockProposal {
+            content: ProposalContent {
+                block: block.clone(),
+                round,
+                forced_oracle_responses: None, // TODO
+            },
+            owner: self.public_key().await?.into(),
+            signature,
+            blobs,
+            validated_block_certificate: None, // TODO
+        };
+
+        // TODO: process requested_locked
+
         // Check the final block proposal. This will be cheaper after #1401.
         self.client
             .local_node
@@ -3303,7 +3320,7 @@ where
         // Send the query to validators.
         let committee = self.local_committee().await?;
         let certificate = self
-            .submit_block_proposal(&committee, proposal, raw_block.hashed_value.clone())
+            .submit_block_proposal(&committee, proposal, hashed_value)
             .await?;
         // Communicate the new certificate now.
         self.communicate_chain_updates(
@@ -3338,14 +3355,52 @@ where
             Some(raw_block) => raw_block.clone(),
             _ => return Err(ChainClientError::InvalidRawBlockProposal),
         };
+        ensure!(
+            raw_block.content.block.height == height,
+            ChainClientError::MismatchBlockHeight(raw_block.content.block.height, height)
+        );
+        let proposal = BlockProposal {
+            content: raw_block.content,
+            owner: raw_block.owner,
+            signature,
+            blobs: raw_block.blobs,
+            validated_block_certificate: raw_block.validated_block_certificate,
+        };
 
-        let certificate = self
-            .submit_extenal_signed_block_proposal_and_signature(height, raw_block, signature)
+        // Check the final block proposal. This will be cheaper after #1401.
+        self.client
+            .local_node
+            .handle_block_proposal(proposal.clone())
             .await?;
-
+        // Remember what we are trying to do before sending the proposal to the validators.
+        // Send the query to validators.
+        let committee = self.local_committee().await?;
+        let certificate = self
+            .submit_block_proposal(&committee, proposal, raw_block.hashed_value.clone())
+            .await?;
         self.state_mut().pending_raw_block = None;
         self.clear_pending_block();
-
+        // Communicate the new certificate now.
+        self.communicate_chain_updates(
+            &committee,
+            self.chain_id,
+            self.next_block_height(),
+            self.options.cross_chain_message_delivery,
+        )
+        .await?;
+        if let Ok(new_committee) = self.local_committee().await {
+            if new_committee != committee {
+                // If the configuration just changed, communicate to the new committee as well.
+                // (This is actually more important that updating the previous committee.)
+                self.communicate_chain_updates(
+                    &new_committee,
+                    self.chain_id,
+                    self.next_block_height(),
+                    self.options.cross_chain_message_delivery,
+                )
+                .await?;
+            }
+        }
         Ok(certificate)
     }
 

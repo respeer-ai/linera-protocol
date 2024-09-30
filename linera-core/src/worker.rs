@@ -32,15 +32,15 @@ use linera_storage::Storage;
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+#[cfg(not(web))]
+use tokio::time::{sleep, timeout};
 use tokio::{
     sync::{mpsc, oneshot, OwnedRwLockReadGuard},
     task::JoinSet,
 };
-#[cfg(not(web))]
-use tokio::time::{sleep, timeout};
+use tracing::{error, instrument, trace, warn, Instrument as _};
 #[cfg(web)]
 use wasmtimer::tokio::{sleep, timeout};
-use tracing::{error, instrument, trace, warn, Instrument as _};
 #[cfg(with_metrics)]
 use {
     linera_base::prometheus_util,

@@ -29,8 +29,8 @@ use futures::{
 use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, Hashable, PublicKey, Signature},
     data_types::{
-        Amount, ApplicationPermissions, Blob, BlobContent, BlockHeight, Bytecode, OracleResponse,
-        Round, TimeDelta, Timestamp, UserApplicationDescription,
+        Amount, ApplicationPermissions, BlobContent, BlockHeight, Bytecode, Round, TimeDelta,
+        Timestamp, UserApplicationDescription,
     },
     doc_scalar,
     identifiers::{
@@ -41,8 +41,8 @@ use linera_base::{
 };
 use linera_chain::{
     data_types::{
-        Block, CertificateValue, ExecutedBlock, HashedCertificateValue, IncomingBundle,
-        LiteCertificate, LiteValue, MessageAction, MessageBundle, Origin, ProposalContent,
+        Block, BlockExecutionOutcome, CertificateValue, ExecutedBlock, HashedCertificateValue,
+        IncomingBundle, LiteCertificate, LiteValue, MessageAction, MessageBundle, Origin,
     },
     ChainStateView,
 };
@@ -52,7 +52,7 @@ use linera_client::{
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
-    data_types::{ClientOutcome, RawBlockProposal, RoundTimeout},
+    data_types::{ClientOutcome, RoundTimeout},
     local_node::LocalNodeClient,
     node::{LocalValidatorNodeProvider, NotificationStream, ValidatorNode, ValidatorNodeProvider},
     worker::{Notification, Reason, WorkerState},
@@ -142,109 +142,24 @@ pub struct ChainAccountBalances {
     account_balances: HashMap<PublicKey, Amount>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, InputObject)]
-pub struct UserBlock {
-    pub chain_id: ChainId,
-    pub epoch: Epoch,
-    pub incoming_bundles: Vec<UserIncomingBundle>,
-    pub operations: Vec<Operation>,
-    pub height: BlockHeight,
-    pub timestamp: Timestamp,
-    pub authenticated_signer: Option<Owner>,
-    pub previous_block_hash: Option<CryptoHash>,
-}
-
-impl Into<Block> for UserBlock {
-    fn into(self) -> Block {
-        Block {
-            chain_id: self.chain_id,
-            epoch: self.epoch,
-            incoming_bundles: self
-                .incoming_bundles
-                .iter()
-                .map(|bundle| bundle.clone().into())
-                .collect(),
-            operations: self.operations,
-            height: self.height,
-            timestamp: self.timestamp,
-            authenticated_signer: self.authenticated_signer,
-            previous_block_hash: self.previous_block_hash,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, InputObject)]
-pub struct UserProposalContent {
-    pub block: UserBlock,
-    pub round: Round,
-    pub forced_oracle_responses: Option<Vec<Vec<OracleResponse>>>,
-}
-
-impl Into<ProposalContent> for UserProposalContent {
-    fn into(self) -> ProposalContent {
-        ProposalContent {
-            block: self.block.into(),
-            round: self.round,
-            forced_oracle_responses: self.forced_oracle_responses,
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Deserialize, Serialize)]
-pub enum UserCertificateValue {
-    ValidatedBlock {
-        executed_block: ExecutedBlock,
-    },
-    ConfirmedBlock {
-        executed_block: ExecutedBlock,
-    },
-    Timeout {
-        chain_id: ChainId,
-        height: BlockHeight,
-        epoch: Epoch,
-    },
-}
-
-impl Into<CertificateValue> for UserCertificateValue {
-    fn into(self) -> CertificateValue {
-        match self {
-            UserCertificateValue::ValidatedBlock { executed_block } => {
-                CertificateValue::ValidatedBlock { executed_block }
-            }
-            UserCertificateValue::ConfirmedBlock { executed_block } => {
-                CertificateValue::ConfirmedBlock { executed_block }
-            }
-            UserCertificateValue::Timeout {
-                chain_id,
-                height,
-                epoch,
-            } => CertificateValue::Timeout {
-                chain_id,
-                height,
-                epoch,
-            },
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-pub struct UserHashedCertificateValue {
-    pub value: CertificateValue,
-    pub hash: CryptoHash,
+pub struct UserExecutedBlock {
+    pub block: Block,
+    pub outcome: BlockExecutionOutcome,
 }
 
-impl Into<HashedCertificateValue> for UserHashedCertificateValue {
-    fn into(self) -> HashedCertificateValue {
-        HashedCertificateValue {
-            value: self.value.into(),
-            hash: self.hash,
+impl Into<ExecutedBlock> for UserExecutedBlock {
+    fn into(self) -> ExecutedBlock {
+        ExecutedBlock {
+            block: self.block,
+            outcome: self.outcome,
         }
     }
 }
 
 doc_scalar!(
-    UserHashedCertificateValue,
-    "A hashed certificate value contains executed block and its hash."
+    UserExecutedBlock,
+    "A executed block which will be submitted to blockchain with its signature."
 );
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, InputObject)]
@@ -1058,26 +973,18 @@ where
         &self,
         chain_id: ChainId,
         height: BlockHeight,
-        content: UserProposalContent,
-        owner: Owner,
-        blobs: Vec<Blob>,
-        validated_block_certificate: Option<UserLiteCertificate>,
-        hashed_value: UserHashedCertificateValue,
+        executed_block: UserExecutedBlock,
+        round: Round,
         signature: Signature,
     ) -> Result<CryptoHash, Error> {
         let client = self.clients.try_client_lock(&chain_id).await?;
-        let raw_block = RawBlockProposal {
-            content: content.into(),
-            owner,
-            blobs,
-            validated_block_certificate: match validated_block_certificate {
-                Some(cert) => Some(cert.into()),
-                None => None,
-            },
-            hashed_value: hashed_value.into(),
-        };
         let hash = client
-            .submit_extenal_signed_block_proposal_and_signature(height, raw_block, signature)
+            .submit_extenal_signed_block_proposal_and_signature(
+                height,
+                executed_block.into(),
+                round,
+                signature,
+            )
             .await?
             .value
             .hash();

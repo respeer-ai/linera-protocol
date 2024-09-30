@@ -6,11 +6,12 @@ use std::{collections::btree_map, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use futures::{
     future::{self, Either},
-    lock::Mutex, StreamExt,
+    lock::Mutex,
+    StreamExt,
 };
 use linera_base::{
-    crypto::{KeyPair, PublicKey, CryptoHash},
-    data_types::{Timestamp, BlockHeight},
+    crypto::{KeyPair, PublicKey},
+    data_types::Timestamp,
     identifiers::{ChainId, Destination},
 };
 use linera_chain::data_types::OutgoingMessage;
@@ -23,9 +24,12 @@ use linera_execution::{Message, SystemMessage};
 use linera_rpc::node_provider::NodeProvider;
 use linera_storage::{Clock as _, Storage};
 use tracing::{debug, error, info, warn, Instrument as _};
-
 #[cfg(feature = "no-storage")]
-use crate::fake_wallet::FakeWallet;
+use {
+    crate::fake_wallet::FakeWallet,
+    linera_base::{crypto::CryptoHash, data_types::BlockHeight},
+};
+
 #[cfg(not(feature = "no-storage"))]
 use crate::wallet::Wallet;
 use crate::{chain_clients::ChainClients, Error};
