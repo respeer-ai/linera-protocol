@@ -42,7 +42,7 @@ use linera_base::{
 use linera_chain::{
     data_types::{
         Block, BlockExecutionOutcome, CertificateValue, ExecutedBlock, HashedCertificateValue,
-        IncomingBundle, LiteCertificate, LiteValue, MessageAction, MessageBundle, Origin,
+        IncomingBundle, MessageAction, MessageBundle, Origin,
     },
     ChainStateView,
 };
@@ -161,54 +161,6 @@ doc_scalar!(
     UserExecutedBlock,
     "A executed block which will be submitted to blockchain with its signature."
 );
-
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, InputObject)]
-pub struct UserLiteValue {
-    pub value_hash: CryptoHash,
-    pub chain_id: ChainId,
-}
-
-impl Into<LiteValue> for UserLiteValue {
-    fn into(self) -> LiteValue {
-        LiteValue {
-            value_hash: self.value_hash,
-            chain_id: self.chain_id,
-        }
-    }
-}
-
-#[derive(Eq, PartialEq, Copy, Clone, Debug, Serialize, Deserialize, InputObject)]
-pub struct UserSignature {
-    validator_name: ValidatorName,
-    signature: Signature,
-}
-
-impl Into<(ValidatorName, Signature)> for UserSignature {
-    fn into(self) -> (ValidatorName, Signature) {
-        (self.validator_name, self.signature)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, InputObject)]
-pub struct UserLiteCertificate {
-    pub value: UserLiteValue,
-    pub round: Round,
-    pub signatures: Vec<UserSignature>,
-}
-
-impl Into<LiteCertificate<'_>> for UserLiteCertificate {
-    fn into(self) -> LiteCertificate<'static> {
-        LiteCertificate {
-            value: self.value.into(),
-            round: self.round,
-            signatures: self
-                .signatures
-                .iter()
-                .map(|signature| signature.clone().into())
-                .collect(),
-        }
-    }
-}
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct BlockMaterial {
@@ -1053,7 +1005,7 @@ where
     ) -> Result<ExecutedBlock, Error> {
         let client = self.clients.try_client_lock(&chain_id).await?;
 
-        let bundles = incoming_bundles
+        let bundles: Vec<_> = incoming_bundles
             .iter()
             .map(|bundle| bundle.clone().into())
             .collect();
