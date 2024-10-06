@@ -28,6 +28,7 @@ pub struct Wallet {
     pub chains: BTreeMap<ChainId, UserChain>,
     pub unassigned_key_pairs: HashMap<PublicKey, KeyPair>,
     pub default: Option<ChainId>,
+    pub defaults: HashMap<PublicKey, ChainId>,
     pub genesis_config: GenesisConfig,
     pub testing_prng_seed: Option<u64>,
 }
@@ -52,6 +53,7 @@ impl Wallet {
             chains: BTreeMap::new(),
             unassigned_key_pairs: HashMap::new(),
             default: None,
+            defaults: HashMap::new(),
             genesis_config,
             testing_prng_seed,
         }
@@ -88,6 +90,10 @@ impl Wallet {
 
     pub fn default_chain(&self) -> Option<ChainId> {
         self.default
+    }
+
+    pub fn default_chain_with_public_key(&self, public_key: PublicKey) -> Option<ChainId> {
+        self.defaults.get(&public_key).copied()
     }
 
     pub fn chain_ids(&self) -> Vec<ChainId> {
@@ -185,6 +191,15 @@ impl Wallet {
             error::Inner::NonexistentChain(chain_id)
         );
         self.default = Some(chain_id);
+        Ok(())
+    }
+
+    pub fn set_default_chain_with_public_key(&mut self, public_key: PublicKey, chain_id: ChainId) -> Result<(), Error> {
+        ensure!(
+            self.chains.contains_key(&chain_id),
+            error::Inner::NonexistentChain(chain_id)
+        );
+        self.defaults.insert(public_key, chain_id);
         Ok(())
     }
 

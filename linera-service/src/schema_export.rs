@@ -191,6 +191,7 @@ async fn main() -> std::io::Result<()> {
         config,
         std::num::NonZeroU16::new(8080).unwrap(),
         None,
+        stc::collections::HashMap::new(),
         storage,
         context,
     );

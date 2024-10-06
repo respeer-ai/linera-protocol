@@ -27,7 +27,7 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{BcsSignable, CryptoError, CryptoHash, Hashable, PublicKey, Signature},
+    crypto::{BcsSignable, CryptoError, CryptoHash, PublicKey, Signature, Hashable},
     data_types::{
         Amount, ApplicationPermissions, BlobContent, BlockHeight, Bytecode, Round, TimeDelta,
         Timestamp, UserApplicationDescription,
@@ -88,6 +88,7 @@ where
     clients: ChainClients<P, S>,
     port: NonZeroU16,
     default_chain: Option<ChainId>,
+    default_chains: HashMap<PublicKey, ChainId>,
 }
 
 /// Our root GraphQL subscription type.
@@ -137,7 +138,7 @@ pub struct RawBlockProposalPayload {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
-pub struct ChainAccountBalances {
+pub struct Balances {
     chain_balance: Amount,
     account_balances: HashMap<PublicKey, Amount>,
 }
@@ -1159,10 +1160,15 @@ where
         &self,
         chain_ids: Vec<ChainId>,
         public_keys: Vec<PublicKey>,
-    ) -> Result<HashMap<ChainId, ChainAccountBalances>, Error> {
+    ) -> Result<HashMap<ChainId, Balances>, Error> {
         let mut chain_balances = HashMap::new();
         for chain_id in &chain_ids {
-            let client = self.clients.try_client_lock(&chain_id).await?;
+            let client = match self.clients.try_client_lock(&chain_id).await {
+                Ok(cli) => cli,
+                _ => {
+                    continue;
+                }
+            };
             let mut account_balances = HashMap::new();
             for public_key in &public_keys {
                 account_balances.insert(
@@ -1172,13 +1178,31 @@ where
             }
             chain_balances.insert(
                 *chain_id,
-                ChainAccountBalances {
+                Balances {
                     chain_balance: client.query_balance().await?,
                     account_balances,
                 },
             );
         }
         Ok(chain_balances)
+    }
+
+    /// Returns the maintained chains of given owner
+    async fn chains_with_public_key(&self, public_key: PublicKey) -> Result<Chains, Error> {
+        let all_chain_ids: Vec<_> = self.clients.0.lock().await.keys().cloned().collect();
+        let mut chain_ids = Vec::new();
+
+        for chain_id in all_chain_ids.iter() {
+            let client = self.clients.try_client_lock(&chain_id).await?;
+            if client.public_key().await? == public_key {
+                chain_ids.push(chain_id.clone());
+            }
+        }
+
+        Ok(Chains {
+            list: chain_ids,
+            default: self.default_chains.get(&public_key).copied(),
+        })
     }
 }
 
@@ -1340,6 +1364,7 @@ where
     config: ChainListenerConfig,
     port: NonZeroU16,
     default_chain: Option<ChainId>,
+    default_chains: HashMap<PublicKey, ChainId>,
     storage: S,
     context: Arc<Mutex<C>>,
 }
@@ -1354,6 +1379,7 @@ where
             config: self.config.clone(),
             port: self.port,
             default_chain: self.default_chain,
+            default_chains: self.default_chains.clone(),
             storage: self.storage.clone(),
             context: self.context.clone(),
         }
@@ -1372,6 +1398,7 @@ where
         config: ChainListenerConfig,
         port: NonZeroU16,
         default_chain: Option<ChainId>,
+        default_chains: HashMap<PublicKey, ChainId>,
         storage: S,
         context: C,
     ) -> Self {
@@ -1380,6 +1407,7 @@ where
             config,
             port,
             default_chain,
+            default_chains,
             storage,
             context: Arc::new(Mutex::new(context)),
         }
@@ -1392,6 +1420,7 @@ where
                 clients: self.clients.clone(),
                 port: self.port,
                 default_chain: self.default_chain,
+                default_chains: self.default_chains.clone(),
             },
             MutationRoot {
                 storage: self.storage.clone(),
