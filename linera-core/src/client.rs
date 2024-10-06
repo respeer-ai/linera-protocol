@@ -3822,12 +3822,9 @@ where
         Ok(executed_block)
     }
 
-
     #[tracing::instrument(level = "trace")]
     /// Processes the last pending block. Assumes that the local chain is up to date.
-    pub async fn block_round(
-        &self,
-    ) -> Result<Round, ChainClientError> {
+    pub async fn block_round(&self) -> Result<Round, ChainClientError> {
         let chain_id = self.chain_id;
         let query = ChainInfoQuery::new(chain_id).with_committees();
         let info = self

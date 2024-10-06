@@ -171,6 +171,14 @@ impl<P: LocalValidatorNodeProvider + Send, S: Storage + Send + Sync> ClientConte
     fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
         unimplemented!()
     }
+
+    fn set_default_chain_with_public_key(
+        &mut self,
+        _public_key: PublicKey,
+        _chain_id: ChainId,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
 }
 
 #[tokio::main]
@@ -191,7 +199,7 @@ async fn main() -> std::io::Result<()> {
         config,
         std::num::NonZeroU16::new(8080).unwrap(),
         None,
-        stc::collections::HashMap::new(),
+        std::collections::HashMap::new(),
         storage,
         context,
     );

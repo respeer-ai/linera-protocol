@@ -146,7 +146,11 @@ where
         self.set_default_chain(chain_id)
     }
 
-    fn set_default_chain_with_public_key(&mut self, public_key: PublicKey, chain_id: ChainId) -> Result<(), Error> {
+    fn set_default_chain_with_public_key(
+        &mut self,
+        public_key: PublicKey,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
         self.set_default_chain_with_public_key(public_key, chain_id)
     }
 }
@@ -205,6 +209,11 @@ where
         self.wallet
             .default_chain()
             .expect("No chain specified in wallet with no default chain")
+    }
+
+    /// Retrieve the default chains.
+    pub fn default_chains(&self) -> std::collections::HashMap<PublicKey, ChainId> {
+        self.wallet.default_chains()
     }
 
     /// Retrieve default chain of public key
@@ -424,8 +433,13 @@ where
         self.wallet_mut().set_default_chain(chain_id)
     }
 
-    pub fn set_default_chain_with_public_key(&mut self, public_key: PublicKey, chain_id: ChainId) -> Result<(), Error> {
-        self.wallet_mut().set_default_chain_with_public_key(public_key, chain_id)
+    pub fn set_default_chain_with_public_key(
+        &mut self,
+        public_key: PublicKey,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.wallet_mut()
+            .set_default_chain_with_public_key(public_key, chain_id)
     }
 }
 

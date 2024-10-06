@@ -92,6 +92,10 @@ impl Wallet {
         self.default
     }
 
+    pub fn default_chains(&self) -> HashMap<PublicKey, ChainId> {
+        self.defaults.clone()
+    }
+
     pub fn default_chain_with_public_key(&self, public_key: PublicKey) -> Option<ChainId> {
         self.defaults.get(&public_key).copied()
     }
@@ -194,7 +198,11 @@ impl Wallet {
         Ok(())
     }
 
-    pub fn set_default_chain_with_public_key(&mut self, public_key: PublicKey, chain_id: ChainId) -> Result<(), Error> {
+    pub fn set_default_chain_with_public_key(
+        &mut self,
+        public_key: PublicKey,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
         ensure!(
             self.chains.contains_key(&chain_id),
             error::Inner::NonexistentChain(chain_id)
