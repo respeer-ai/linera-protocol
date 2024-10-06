@@ -833,6 +833,10 @@ type QueryRoot {
 	Returns the balances of given owners
 	"""
 	balances(chainIds: [ChainId!]!, publicKeys: [PublicKey!]!): JSONObject!
+	"""
+	Returns the maintained chains of given owner
+	"""
+	chainsWithPublicKey(publicKey: PublicKey!): Chains!
 }
 
 type QueueView_BlockHeight_e824a938 {

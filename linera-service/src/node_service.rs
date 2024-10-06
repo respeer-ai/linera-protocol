@@ -868,7 +868,10 @@ where
             .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
             .context("could not assign the new chain")?;
 
-        self.context.lock().await.set_default_chain(chain_id)?;
+        self.context
+            .lock()
+            .await
+            .set_default_chain_with_public_key(public_key, chain_id)?;
         self.context.lock().await.save_wallet();
 
         ChainListener::run_with_chain_id_retry(
