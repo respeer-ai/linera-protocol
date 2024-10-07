@@ -52,10 +52,10 @@ pub enum Error {
 }
 
 #[cfg(feature = "fs")]
-util::impl_from_dynamic!(Error:Persistence, persistent::file::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::file::Error);
 
 #[cfg(with_local_storage)]
-util::impl_from_dynamic!(Error:Persistence, persistent::local_storage::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::local_storage::Error);
 
 util::impl_from_infallible!(Error);
 

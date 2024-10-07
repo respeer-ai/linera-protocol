@@ -26,8 +26,8 @@ pub(crate) enum Inner {
 
 thiserror_context::impl_context!(Error(Inner));
 
-util::impl_from_dynamic!(Inner:Persistence, persistent::memory::Error);
+util::impl_from_dynamic!(Inner: Persistence, persistent::memory::Error);
 #[cfg(feature = "fs")]
-util::impl_from_dynamic!(Inner:Persistence, persistent::file::Error);
+util::impl_from_dynamic!(Inner: Persistence, persistent::file::Error);
 #[cfg(with_local_storage)]
-util::impl_from_dynamic!(Inner:Persistence, persistent::local_storage::Error);
+util::impl_from_dynamic!(Inner: Persistence, persistent::local_storage::Error);

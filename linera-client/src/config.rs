@@ -35,11 +35,11 @@ use crate::{
     wallet::{UserChain, Wallet},
 };
 
-util::impl_from_dynamic!(Error:Persistence, persistent::memory::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::memory::Error);
 #[cfg(with_local_storage)]
-util::impl_from_dynamic!(Error:Persistence, persistent::local_storage::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::local_storage::Error);
 #[cfg(feature = "fs")]
-util::impl_from_dynamic!(Error:Persistence, persistent::file::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::file::Error);
 
 /// The public configuration of a validator.
 #[derive(Clone, Debug, Serialize, Deserialize)]

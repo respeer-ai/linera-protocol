@@ -46,15 +46,18 @@ pub enum Error {
     Config(#[from] crate::config::Error),
 }
 
-util::impl_from_dynamic!(Error:Backend, linera_views::memory::MemoryStoreError);
+util::impl_from_dynamic!(Error: Backend, linera_views::memory::MemoryStoreError);
 #[cfg(feature = "storage-service")]
-util::impl_from_dynamic!(Error:Backend, linera_storage_service::common::ServiceStoreError);
+util::impl_from_dynamic!(
+    Error: Backend,
+    linera_storage_service::common::ServiceStoreError
+);
 #[cfg(feature = "rocksdb")]
-util::impl_from_dynamic!(Error:Backend, linera_views::rocks_db::RocksDbStoreError);
+util::impl_from_dynamic!(Error: Backend, linera_views::rocks_db::RocksDbStoreError);
 #[cfg(feature = "dynamodb")]
-util::impl_from_dynamic!(Error:Backend, linera_views::dynamo_db::DynamoDbStoreError);
+util::impl_from_dynamic!(Error: Backend, linera_views::dynamo_db::DynamoDbStoreError);
 #[cfg(feature = "scylladb")]
-util::impl_from_dynamic!(Error:Backend, linera_views::scylla_db::ScyllaDbStoreError);
+util::impl_from_dynamic!(Error: Backend, linera_views::scylla_db::ScyllaDbStoreError);
 
 /// The configuration of the key value store in use.
 #[allow(clippy::large_enum_variant)]

@@ -67,4 +67,12 @@ impl FakeWallet {
     pub fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
         Ok(())
     }
+
+    pub fn set_default_chain_with_public_key(
+        &mut self,
+        _public_key: PublicKey,
+        _chain_id: ChainId,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
 }
