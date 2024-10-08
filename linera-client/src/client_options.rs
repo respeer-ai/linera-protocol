@@ -16,6 +16,7 @@ use linera_core::client::BlanketMessagePolicy;
 use linera_execution::{
     committee::ValidatorName, ResourceControlPolicy, WasmRuntime, WithWasmDefault as _,
 };
+#[cfg(not(feature = "no-storage"))]
 use linera_views::common::CommonStoreConfig;
 
 #[cfg(feature = "fs")]
@@ -23,11 +24,12 @@ use crate::config::GenesisConfig;
 #[cfg(feature = "no-storage")]
 use crate::fake_wallet::FakeWallet;
 use crate::{
-    chain_listener::ChainListenerConfig,
-    config::WalletState,
-    persistent,
-    storage::{full_initialize_storage, run_with_storage, Runnable, StorageConfigNamespace},
-    util,
+    chain_listener::ChainListenerConfig, config::WalletState, persistent,
+    storage::StorageConfigNamespace, util,
+};
+#[cfg(not(feature = "no-storage"))]
+use crate::{
+    storage::{full_initialize_storage, run_with_storage, Runnable},
     wallet::Wallet,
 };
 
@@ -165,6 +167,7 @@ impl ClientOptions {
         Ok(options)
     }
 
+    #[cfg(not(feature = "no-storage"))]
     fn common_config(&self) -> CommonStoreConfig {
         CommonStoreConfig {
             max_concurrent_queries: self.max_concurrent_queries,

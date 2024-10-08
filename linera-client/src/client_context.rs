@@ -65,13 +65,15 @@ use {
     std::path::PathBuf,
 };
 
+#[cfg(not(feature = "no-storage"))]
+use crate::wallet::Wallet;
 use crate::{
     chain_listener,
     client_options::{ChainOwnershipConfig, ClientOptions},
     config::WalletState,
     persistent::Persist,
     util,
-    wallet::{UserChain, Wallet},
+    wallet::UserChain,
     Error,
 };
 

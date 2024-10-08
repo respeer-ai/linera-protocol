@@ -4,8 +4,10 @@
 
 use std::{iter::IntoIterator, ops::Deref};
 
+#[cfg(not(feature = "no-storage"))]
+use linera_base::crypto::CryptoRng;
 use linera_base::{
-    crypto::{BcsSignable, CryptoHash, CryptoRng, KeyPair, PublicKey},
+    crypto::{BcsSignable, CryptoHash, KeyPair, PublicKey},
     data_types::{Amount, Timestamp},
     identifiers::{ChainDescription, ChainId},
 };
@@ -29,10 +31,12 @@ pub enum Error {
 
 #[cfg(feature = "no-storage")]
 use crate::fake_wallet::FakeWallet;
+#[cfg(not(feature = "no-storage"))]
+use crate::wallet::Wallet;
 use crate::{
     persistent::{self, Persist},
     util,
-    wallet::{UserChain, Wallet},
+    wallet::UserChain,
 };
 
 util::impl_from_dynamic!(Error: Persistence, persistent::memory::Error);
