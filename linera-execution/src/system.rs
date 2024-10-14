@@ -351,8 +351,8 @@ pub enum SystemExecutionError {
     InvalidEpoch { chain_id: ChainId, epoch: Epoch },
     #[error("Transfer must have positive amount")]
     IncorrectTransferAmount,
-    #[error("Transfer from owned account must be authenticated by the right signer")]
-    UnauthenticatedTransferOwner,
+    #[error("Transfer from owned account must be authenticated by the right signer {0} != {1}")]
+    UnauthenticatedTransferOwner(Owner, Owner),
     #[error("The transferred amount must not exceed the current chain balance: {balance}")]
     InsufficientFunding { balance: Amount },
     #[error("Required execution fees exceeded the total funding available: {balance}")]
@@ -678,7 +678,10 @@ where
         if owner.is_some() {
             ensure!(
                 authenticated_signer == owner,
-                SystemExecutionError::UnauthenticatedTransferOwner
+                SystemExecutionError::UnauthenticatedTransferOwner(
+                    authenticated_signer.expect("operation should be authenticated"),
+                    owner.unwrap()
+                )
             );
         }
         ensure!(

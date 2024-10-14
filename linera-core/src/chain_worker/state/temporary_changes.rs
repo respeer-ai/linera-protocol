@@ -333,6 +333,37 @@ where
         }
         Ok(ChainInfoResponse::new(info, self.0.config.key_pair()))
     }
+
+    /// Executes a block without persisting any changes to the state.
+    pub(super) async fn calculate_block_state_hash(
+        &mut self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+        let signer = block.authenticated_signer;
+
+        let executed_block = Box::pin(
+            self.0
+                .chain
+                .calculate_block_state_hash(&block, local_time, None),
+        )
+        .await?
+        .with(block);
+
+        let mut response = ChainInfoResponse::new(&self.0.chain, None);
+        if let Some(signer) = signer {
+            response.info.requested_owner_balance = self
+                .0
+                .chain
+                .execution_state
+                .system
+                .balances
+                .get(&signer)
+                .await?;
+        }
+
+        Ok((executed_block, response))
+    }
 }
 
 impl<StorageClient> Drop for ChainWorkerStateWithTemporaryChanges<'_, StorageClient>

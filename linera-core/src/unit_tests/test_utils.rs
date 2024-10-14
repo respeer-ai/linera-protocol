@@ -792,6 +792,8 @@ where
             block_height,
             None,
             BTreeMap::new(),
+            None,
+            Vec::new(),
         ))
     }
 

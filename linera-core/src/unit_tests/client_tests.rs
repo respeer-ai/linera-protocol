@@ -334,7 +334,7 @@ where
     assert_eq!(sender.next_block_height(), BlockHeight::from(1));
     assert!(sender.pending_block().is_none());
     assert_matches!(
-        sender.key_pair().await.map(|kp| KeyPair::public(&kp)), // KeyPair isn't Debug; using PublicKey.
+        sender.key_pair().await.map(|kp| KeyPair::public(&kp)), /* KeyPair isn't Debug; using PublicKey. */
         Err(ChainClientError::CannotFindKeyForChain(_))
     );
     assert_eq!(

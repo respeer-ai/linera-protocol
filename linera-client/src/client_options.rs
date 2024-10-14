@@ -16,16 +16,20 @@ use linera_core::client::BlanketMessagePolicy;
 use linera_execution::{
     committee::ValidatorName, ResourceControlPolicy, WasmRuntime, WithWasmDefault as _,
 };
+#[cfg(not(feature = "no-storage"))]
 use linera_views::store::CommonStoreConfig;
 
 #[cfg(feature = "fs")]
 use crate::config::GenesisConfig;
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
 use crate::{
-    chain_listener::ChainListenerConfig,
-    config::WalletState,
-    persistent,
-    storage::{full_initialize_storage, run_with_storage, Runnable, StorageConfigNamespace},
-    util,
+    chain_listener::ChainListenerConfig, config::WalletState, persistent,
+    storage::StorageConfigNamespace, util,
+};
+#[cfg(not(feature = "no-storage"))]
+use crate::{
+    storage::{full_initialize_storage, run_with_storage, Runnable},
     wallet::Wallet,
 };
 
@@ -52,7 +56,7 @@ pub enum Error {
 }
 
 #[cfg(feature = "fs")]
-util::impl_from_dynamic!(Error:Persistence, persistent::file::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::file::Error);
 
 #[cfg(with_indexed_db)]
 util::impl_from_dynamic!(Error:Persistence, persistent::indexed_db::Error);
@@ -166,6 +170,7 @@ impl ClientOptions {
         Ok(options)
     }
 
+    #[cfg(not(feature = "no-storage"))]
     fn common_config(&self) -> CommonStoreConfig {
         CommonStoreConfig {
             max_concurrent_queries: self.max_concurrent_queries,
@@ -174,6 +179,7 @@ impl ClientOptions {
         }
     }
 
+    #[cfg(not(feature = "no-storage"))]
     pub async fn run_with_storage<R: Runnable>(&self, job: R) -> Result<R::Output, Error> {
         let genesis_config = self.wallet().await?.genesis_config().clone();
         let output = Box::pin(run_with_storage(
@@ -212,6 +218,7 @@ impl ClientOptions {
         }
     }
 
+    #[cfg(not(feature = "no-storage"))]
     pub async fn initialize_storage(&self) -> Result<(), Error> {
         let wallet = self.wallet().await?;
         full_initialize_storage(
@@ -221,6 +228,11 @@ impl ClientOptions {
             wallet.genesis_config(),
         )
         .await?;
+        Ok(())
+    }
+
+    #[cfg(feature = "no-storage")]
+    pub async fn initialize_storage(&self) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -268,6 +280,7 @@ impl ClientOptions {
 
 #[cfg(with_indexed_db)]
 impl ClientOptions {
+    #[cfg(not(feature = "no-storage"))]
     pub async fn wallet(&self) -> Result<WalletState<persistent::IndexedDb<Wallet>>, Error> {
         Ok(WalletState::new(
             persistent::IndexedDb::read("linera-wallet")
@@ -275,14 +288,29 @@ impl ClientOptions {
                 .ok_or(Error::NonexistentWallet)?,
         ))
     }
+
+    #[cfg(feature = "no-storage")]
+    pub fn wallet(&self) -> Result<WalletState<persistent::LocalStorage<FakeWallet>>, Error> {
+        panic!("Not Important")
+    }
 }
 
 #[cfg(not(with_persist))]
 impl ClientOptions {
+    #[cfg(not(feature = "no-storage"))]
     pub async fn wallet(&self) -> Result<WalletState<persistent::Memory<Wallet>>, Error> {
         #![allow(unreachable_code)]
         let _wallet = unimplemented!("No persistence backend selected for wallet; please use one of the `fs` or `indexed-db` features");
         Ok(WalletState::new(persistent::Memory::new(_wallet)))
+    }
+
+    #[cfg(feature = "no-storage")]
+    pub fn wallet(&self) -> Result<WalletState<persistent::Memory<FakeWallet>>, Error> {
+        #![allow(unreachable_code)]
+        let _wallet = unimplemented!("No persistence backend selected for wallet; please use one of the `fs` or `local_storage` features");
+        Ok(WalletState::new_no_storage(persistent::Memory::new(
+            _wallet,
+        )))
     }
 }
 

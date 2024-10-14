@@ -10,7 +10,7 @@ use futures::{
     StreamExt,
 };
 use linera_base::{
-    crypto::KeyPair,
+    crypto::{KeyPair, PublicKey},
     data_types::Timestamp,
     identifiers::{ChainId, Destination},
 };
@@ -21,9 +21,16 @@ use linera_core::{
     worker::Reason,
 };
 use linera_execution::{Message, SystemMessage};
+use linera_rpc::node_provider::NodeProvider;
 use linera_storage::{Clock as _, Storage};
 use tracing::{debug, error, info, warn, Instrument as _};
+#[cfg(feature = "no-storage")]
+use {
+    crate::fake_wallet::FakeWallet,
+    linera_base::{crypto::CryptoHash, data_types::BlockHeight},
+};
 
+#[cfg(not(feature = "no-storage"))]
 use crate::{wallet::Wallet, Error};
 
 #[cfg(test)]
@@ -55,6 +62,10 @@ pub struct ChainListenerConfig {
         env = "LINERA_LISTENER_DELAY_AFTER"
     )]
     pub delay_after_ms: u64,
+
+    /// Use external signing service.
+    #[arg(long = "external-signing", action = clap::ArgAction::Set, default_value_t = true)]
+    pub external_signing: bool,
 }
 
 type ContextChainClient<C> =
@@ -66,7 +77,11 @@ pub trait ClientContext: 'static {
     type ValidatorNodeProvider: ValidatorNodeProvider + Sync;
     type Storage: Storage + Clone + Send + Sync + 'static;
 
+    #[cfg(not(feature = "no-storage"))]
     fn wallet(&self) -> &Wallet;
+
+    #[cfg(feature = "no-storage")]
+    fn wallet(&self) -> &FakeWallet;
 
     fn make_chain_client(&self, chain_id: ChainId) -> Result<ContextChainClient<Self>, Error>;
 
@@ -86,13 +101,48 @@ pub trait ClientContext: 'static {
         }
         Ok(clients)
     }
+
+    #[cfg(feature = "no-storage")]
+    fn make_chain_client_ext(
+        &self,
+        chain_id: ChainId,
+        key_pair: KeyPair,
+        admin_id: ChainId,
+        block_hash: Option<CryptoHash>,
+        timestamp: Timestamp,
+        next_block_height: BlockHeight,
+    ) -> Result<ContextChainClient<Self>, Error>;
+
+    fn destroy_chain_client(&self, chain_id: ChainId);
+
+    async fn save_wallet(&mut self) -> Result<(), Error>;
+
+    fn make_node_provider(&self) -> NodeProvider;
+
+    async fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+    ) -> Result<(), Error>;
+
+    async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error>;
+
+    async fn set_default_chain_with_public_key(
+        &mut self,
+        public_key: PublicKey,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    fn own_chain_ids(&self) -> Vec<ChainId>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
 /// appropriately.
+#[derive(Clone)]
 pub struct ChainListener {
-    config: ChainListenerConfig,
-    listening: Arc<Mutex<HashSet<ChainId>>>,
+    pub config: ChainListenerConfig,
+    pub listening: Arc<Mutex<HashSet<ChainId>>>,
 }
 
 impl ChainListener {
@@ -122,7 +172,7 @@ impl ChainListener {
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
-    fn run_with_chain_id<C>(
+    pub fn run_with_chain_id<C>(
         chain_id: ChainId,
         context: Arc<Mutex<C>>,
         storage: C::Storage,
@@ -141,6 +191,40 @@ impl ChainListener {
             }
             .in_current_span(),
         );
+    }
+
+    #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
+    pub fn run_with_chain_id_retry<C>(
+        chain_id: ChainId,
+        context: Arc<Mutex<C>>,
+        storage: C::Storage,
+        config: ChainListenerConfig,
+        listening: Arc<Mutex<HashSet<ChainId>>>,
+        retries: usize,
+    ) where
+        C: ClientContext,
+    {
+        let _handle = tokio::task::spawn(async move {
+            for i in 1..retries {
+                if let Err(err) = Self::run_client_stream(
+                    chain_id,
+                    context.clone(),
+                    storage.clone(),
+                    config.clone(),
+                    listening.clone(),
+                )
+                .await
+                {
+                    error!("Stream for chain {} failed [{}]: {}", chain_id, i, err);
+                    let mut guard = listening.lock().await;
+                    if guard.contains(&chain_id) {
+                        guard.remove(&chain_id);
+                    }
+                    context.clone().lock().await.destroy_chain_client(chain_id);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                }
+            }
+        });
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
@@ -181,18 +265,37 @@ impl ChainListener {
                         continue;
                     }
                     debug!("Processing inbox");
-                    match client.process_inbox_without_prepare().await {
-                        Err(ChainClientError::CannotFindKeyForChain(_)) => {}
-                        Err(error) => warn!(%error, "Failed to process inbox."),
-                        Ok((certs, None)) => {
-                            info!("Done processing inbox. {} blocks created.", certs.len());
+                    let result = if config.external_signing {
+                        client.process_inbox_if_owned_without_block_proposal().await
+                    } else {
+                        client.process_inbox_without_prepare().await
+                    };
+                    match result {
+                        Err(ChainClientError::CannotFindKeyForChain(_)) => continue,
+                        Err(ref error) => {
+                            warn!(%error, "Failed to process inbox.");
+                            timeout = if config.external_signing {
+                                storage
+                                    .clock()
+                                    .current_time()
+                                    .saturating_add_micros(1000000)
+                            } else {
+                                Timestamp::from(u64::MAX)
+                            };
                         }
-                        Ok((certs, Some(new_timeout))) => {
-                            info!(
-                                "{} blocks created. Will try processing the inbox later based \
-                                 on the given round timeout: {new_timeout:?}",
-                                certs.len(),
-                            );
+                        Ok((ref _certs, None)) => {
+                            timeout = if config.external_signing {
+                                storage
+                                    .clock()
+                                    .current_time()
+                                    .saturating_add_micros(1000000)
+                            } else {
+                                Timestamp::from(u64::MAX)
+                            }
+                        }
+                        Ok((ref certs, Some(ref new_timeout))) => {
+                            info!("Done processing inbox ({} blocks created)", certs.len());
+                            info!("I will try processing the inbox later based on the given round timeout: {:?}", new_timeout);
                             timeout = new_timeout.timestamp;
                         }
                     }
@@ -204,7 +307,7 @@ impl ChainListener {
             Self::maybe_sleep(config.delay_before_ms).await;
             match &notification.reason {
                 Reason::NewIncomingBundle { .. } => timeout = storage.clock().current_time(),
-                Reason::NewBlock { .. } | Reason::NewRound { .. } => {
+                Reason::NewBlock { .. } | Reason::NewRound { .. } | Reason::NewRawBlock { .. } => {
                     if let Err(error) = client.update_validators().await {
                         warn!(
                             "Failed to update validators about the local chain after \

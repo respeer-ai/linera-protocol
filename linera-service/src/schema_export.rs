@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 use linera_base::{
-    crypto::{CryptoHash, KeyPair},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{Blob, BlobContent, Timestamp},
     identifiers::{BlobId, ChainId},
 };
@@ -24,6 +24,7 @@ use linera_core::{
     },
 };
 use linera_execution::committee::{Committee, ValidatorName};
+use linera_rpc::node_provider::NodeProvider;
 use linera_service::node_service::NodeService;
 use linera_storage::{DbStorage, Storage};
 use linera_version::VersionInfo;
@@ -160,6 +161,43 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
     ) -> Result<Vec<ChainClient<Self::ValidatorNodeProvider, Self::Storage>>, Error> {
         Ok(vec![])
     }
+
+    fn destroy_chain_client(&self, _: ChainId) {
+        unimplemented!()
+    }
+
+    async fn save_wallet(&mut self) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    fn make_node_provider(&self) -> NodeProvider {
+        unimplemented!()
+    }
+
+    async fn assign_new_chain_to_public_key(
+        &mut self,
+        _key: PublicKey,
+        _chain_id: ChainId,
+        _timestamp: Timestamp,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn set_default_chain_with_public_key(
+        &mut self,
+        _public_key: PublicKey,
+        _chain_id: ChainId,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    fn own_chain_ids(&self) -> Vec<ChainId> {
+        unimplemented!()
+    }
 }
 
 #[tokio::main]
@@ -182,6 +220,7 @@ async fn main() -> std::io::Result<()> {
         None,
         storage,
         context,
+        std::collections::HashMap::new(),
     )
     .await;
     let schema = service.schema().sdl();

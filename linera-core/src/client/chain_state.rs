@@ -13,10 +13,10 @@ use linera_base::{
     identifiers::{BlobId, ChainId, Owner},
 };
 use linera_chain::data_types::Block;
-use linera_execution::committee::ValidatorName;
+use linera_execution::{committee::ValidatorName, Operation};
 use tokio::sync::Mutex;
 
-use crate::data_types::ChainInfo;
+use crate::data_types::{ChainInfo, RawBlockProposal};
 
 /// The state of our interaction with a particular chain: how far we have synchronized it and
 /// whether we are currently attempting to propose a new block.
@@ -47,6 +47,11 @@ pub struct ChainState {
     /// A mutex that is held whilst we are performing operations that should not be
     /// attempted by multiple clients at the same time.
     client_mutex: Arc<Mutex<()>>,
+
+    /// Raw block proposal list waiting for sign
+    pub pending_raw_block: Option<RawBlockProposal>,
+    /// Pending operations
+    pub pending_operations: Vec<Operation>,
 }
 
 impl ChainState {
@@ -58,6 +63,8 @@ impl ChainState {
         next_block_height: BlockHeight,
         pending_block: Option<Block>,
         pending_blobs: BTreeMap<BlobId, Blob>,
+        pending_raw_block: Option<RawBlockProposal>,
+        pending_operations: Vec<Operation>,
     ) -> ChainState {
         let known_key_pairs = known_key_pairs
             .into_iter()
@@ -73,6 +80,8 @@ impl ChainState {
             pending_blobs,
             received_certificate_trackers: HashMap::new(),
             client_mutex: Arc::default(),
+            pending_raw_block,
+            pending_operations,
         };
         if let Some(block) = pending_block {
             state.set_pending_block(block);
