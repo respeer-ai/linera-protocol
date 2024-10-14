@@ -759,10 +759,10 @@ impl Runnable for Job {
                     config,
                     port,
                     default_chain,
-                    default_chains,
                     storage,
                     context,
-                );
+                    default_chains,
+                ).await;
                 service.run().await?;
             }
 
