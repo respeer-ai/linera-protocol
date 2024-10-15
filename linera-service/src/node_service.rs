@@ -1171,7 +1171,7 @@ where
 
     /// Returns the maintained chains of given owner
     async fn chains_with_public_key(&self, public_key: PublicKey) -> Result<Chains, Error> {
-        let all_chain_ids = self.context.lock().await.own_chain_ids();
+        let all_chain_ids = self.context.lock().await.wallet().chain_ids();
         let mut chain_ids = Vec::new();
 
         for chain_id in all_chain_ids.iter() {

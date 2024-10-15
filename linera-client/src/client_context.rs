@@ -156,10 +156,6 @@ where
         ) -> Result<(), Error> {
         self.set_default_chain_with_public_key(public_key, chain_id).await
     }
-
-    fn own_chain_ids(&self) -> Vec<ChainId> {
-        self.own_chain_ids()
-    }
 }
 
 #[cfg(not(feature = "no-storage"))]
@@ -484,10 +480,6 @@ where
         self.wallet.as_mut()
             .set_default_chain_with_public_key(public_key, chain_id)?;
         self.save_wallet().await
-    }
-
-    pub fn own_chain_ids(&self) -> Vec<ChainId> {
-        self.wallet.own_chain_ids()
     }
 }
 
@@ -1066,10 +1058,6 @@ where
         chain_id: ChainId,
     ) -> Result<(), Error> {
         self.set_default_chain_with_public_key(public_key, chain_id)
-    }
-
-    fn own_chain_ids(&self) -> Vec<ChainId> {
-        self.own_chain_ids()
     }
 }
 

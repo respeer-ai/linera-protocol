@@ -133,8 +133,6 @@ pub trait ClientContext: 'static {
         public_key: PublicKey,
         chain_id: ChainId,
     ) -> Result<(), Error>;
-
-    fn own_chain_ids(&self) -> Vec<ChainId>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts

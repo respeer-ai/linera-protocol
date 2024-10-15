@@ -194,10 +194,6 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
     ) -> Result<(), Error> {
         unimplemented!()
     }
-
-    fn own_chain_ids(&self) -> Vec<ChainId> {
-        unimplemented!()
-    }
 }
 
 #[tokio::main]
