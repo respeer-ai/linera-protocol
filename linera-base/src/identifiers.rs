@@ -43,7 +43,7 @@ use crate::{
 pub struct Owner(pub CryptoHash);
 
 /// An account owner.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum AccountOwner {
     /// An account owned by a user.
     User(Owner),
