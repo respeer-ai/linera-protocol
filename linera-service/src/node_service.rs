@@ -3,7 +3,7 @@
 
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::{NonZeroU16, NonZeroUsize},
@@ -99,7 +99,9 @@ where
 {
     storage: C::Storage,
     context: Arc<Mutex<C>>,
-    chain_listener: Arc<Mutex<ChainListener>>,
+
+    config: ChainListenerConfig,
+    chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
 /// A bundle of cross-chain messages.
@@ -875,8 +877,8 @@ where
             chain_id,
             self.context.clone(),
             self.storage.clone(),
-            self.chain_listener.lock().await.config.clone(),
-            self.chain_listener.lock().await.listening.clone(),
+            self.config.clone(),
+            Arc::clone(&self.chain_guard),
             5,
         );
 
@@ -885,7 +887,7 @@ where
 
         self.chain_initialized(chain_id, message_id).await?;
 
-        tracing::info!("Chain {} is initialized", chain_id);
+        tracing::info!("Initialized chain {}", chain_id);
 
         Ok(chain_id)
     }
@@ -1348,7 +1350,8 @@ where
     storage: C::Storage,
     context: Arc<Mutex<C>>,
     default_chains: HashMap<PublicKey, ChainId>,
-    chain_listener: Arc<Mutex<ChainListener>>,
+
+    chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
 impl<C> Clone for NodeService<C>
@@ -1363,7 +1366,8 @@ where
             storage: self.storage.clone(),
             context: Arc::clone(&self.context),
             default_chains: self.default_chains.clone(),
-            chain_listener: Arc::clone(&self.chain_listener),
+
+            chain_guard: Arc::clone(&self.chain_guard),
         }
     }
 }
@@ -1388,7 +1392,8 @@ where
             default_chains,
             storage,
             context: Arc::new(Mutex::new(context)),
-            chain_listener: Arc::new(Mutex::new(ChainListener::new(config))),
+
+            chain_guard: Default::default(),
         }
     }
 
@@ -1403,7 +1408,9 @@ where
             MutationRoot {
                 context: Arc::clone(&self.context),
                 storage: self.storage.clone(),
-                chain_listener: Arc::clone(&self.chain_listener),
+                config: self.config.clone(),
+
+                chain_guard: Arc::clone(&self.chain_guard),
             },
             SubscriptionRoot {
                 context: Arc::clone(&self.context),
@@ -1414,7 +1421,7 @@ where
 
     /// Runs the node service.
     #[tracing::instrument(name = "node_service", level = "info", skip(self), fields(port = ?self.port))]
-    pub async fn run(self) -> Result<(), anyhow::Error> {
+    pub async fn run(&mut self) -> Result<(), anyhow::Error> {
         let port = self.port.get();
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
         let application_handler =
@@ -1446,12 +1453,12 @@ where
         let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
         info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
-        self.chain_listener
-            .lock()
-            .await
-            .clone()
+        let chain_listener = ChainListener::new(self.config.clone());
+        self.chain_guard = Arc::clone(&chain_listener.listening);
+        chain_listener
             .run(Arc::clone(&self.context), self.storage.clone())
             .await;
+
         let serve_fut = axum::serve(
             tokio::net::TcpListener::bind(SocketAddr::from((ip_addr, port))).await?,
             app,
