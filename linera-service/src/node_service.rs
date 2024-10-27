@@ -42,7 +42,7 @@ use linera_base::{
 use linera_chain::{
     data_types::{
         Block, BlockExecutionOutcome, CertificateValue, ExecutedBlock, HashedCertificateValue,
-        IncomingBundle, MessageAction, MessageBundle, Origin,
+        IncomingBundle, MessageAction, MessageBundle, Origin, CandidateBlockMaterial,
     },
     ChainStateView,
 };
@@ -161,13 +161,6 @@ doc_scalar!(
     UserExecutedBlock,
     "A executed block which will be submitted to blockchain with its signature."
 );
-
-#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
-pub struct BlockMaterial {
-    pub incoming_bundles: Vec<IncomingBundle>,
-    pub local_time: Timestamp,
-    pub round: Round,
-}
 
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
@@ -1098,12 +1091,12 @@ where
     }
 
     /// Returns block material of the chain
-    async fn block_material(&self, chain_id: ChainId) -> Result<BlockMaterial, Error> {
+    async fn block_material(&self, chain_id: ChainId) -> Result<CandidateBlockMaterial, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
         let incoming_bundles = client.pending_message_bundles().await?;
         let local_time = client.next_timestamp(&incoming_bundles).await;
         let round = client.block_round().await?;
-        Ok(BlockMaterial {
+        Ok(CandidateBlockMaterial {
             incoming_bundles,
             local_time,
             round,

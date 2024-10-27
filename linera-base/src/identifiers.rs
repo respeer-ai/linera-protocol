@@ -13,7 +13,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use async_graphql::SimpleObject;
 use linera_witty::{WitLoad, WitStore, WitType};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     bcs_scalar,
