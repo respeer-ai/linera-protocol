@@ -4227,6 +4227,7 @@ dependencies = [
  "tracing-subscriber",
  "trait-variant",
  "wasm-bindgen-futures",
+ "wasmtimer",
 ]
 
 [[package]]
