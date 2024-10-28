@@ -99,6 +99,7 @@ pub struct WalletState<W> {
     prng: Box<dyn CryptoRng>,
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<W: Persist<Target = Wallet>> WalletState<W> {
     pub async fn add_chains<Chains: IntoIterator<Item = UserChain>>(
         &mut self,
@@ -108,6 +109,16 @@ impl<W: Persist<Target = Wallet>> WalletState<W> {
         W::persist(&mut self.wallet)
             .await
             .map_err(|e| Error::Persistence(Box::new(e)))
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl<W: Persist<Target = FakeWallet>> WalletState<W> {
+    pub async fn add_chains<Chains: IntoIterator<Item = UserChain>>(
+        &mut self,
+        _chains: Chains,
+    ) -> Result<(), Error> {
+        Ok(())
     }
 }
 
@@ -154,14 +165,10 @@ impl<W: Persist<Target = FakeWallet>> Persist for WalletState<W> {
     }
 
     async fn persist(&mut self) -> Result<(), W::Error> {
-        self.wallet
-            .mutate(|w| w.refresh_prng_seed(&mut self.prng))
-            .await?;
-        tracing::debug!("Persisted user chains");
         Ok(())
     }
 
-    fn into_value(self) -> Wallet {
+    fn into_value(self) -> FakeWallet {
         self.wallet.into_value()
     }
 }

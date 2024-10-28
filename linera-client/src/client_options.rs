@@ -308,9 +308,7 @@ impl ClientOptions {
     pub fn wallet(&self) -> Result<WalletState<persistent::Memory<FakeWallet>>, Error> {
         #![allow(unreachable_code)]
         let _wallet = unimplemented!("No persistence backend selected for wallet; please use one of the `fs` or `local_storage` features");
-        Ok(WalletState::new_no_storage(persistent::Memory::new(
-            _wallet,
-        )))
+        Ok(WalletState::new(_wallet))
     }
 }
 

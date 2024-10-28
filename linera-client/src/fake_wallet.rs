@@ -5,7 +5,7 @@ use linera_base::{
     data_types::Timestamp,
     identifiers::ChainId,
 };
-use linera_core::{client::ChainClient, node::LocalValidatorNodeProvider};
+use linera_core::{client::ChainClient, node::ValidatorNodeProvider};
 use linera_storage::Storage;
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +50,7 @@ impl FakeWallet {
 
     pub async fn update_from_state<P, S>(&mut self, _chain_client: &ChainClient<P, S>)
     where
-        P: LocalValidatorNodeProvider + Sync + 'static,
+        P: ValidatorNodeProvider + Sync + 'static,
         S: Storage + Clone + Send + Sync + 'static,
     {
     }

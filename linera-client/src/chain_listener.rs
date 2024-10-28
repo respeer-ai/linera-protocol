@@ -31,7 +31,8 @@ use {
 };
 
 #[cfg(not(feature = "no-storage"))]
-use crate::{wallet::Wallet, Error};
+use crate::wallet::Wallet;
+use crate::Error;
 
 #[cfg(test)]
 #[path = "unit_tests/chain_listener.rs"]
@@ -202,7 +203,7 @@ impl ChainListener {
     ) where
         C: ClientContext,
     {
-        let _handle = tokio::task::spawn(async move {
+        let _handle = linera_base::task::spawn(async move {
             for i in 1..retries {
                 if let Err(err) = Self::run_client_stream(
                     chain_id,
@@ -222,7 +223,7 @@ impl ChainListener {
                     tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                 }
             }
-        });
+        }.in_current_span());
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
