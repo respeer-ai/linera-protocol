@@ -19,7 +19,6 @@ use linera_base::{
     },
     doc_scalar,
     identifiers::{BlobId, ChainId, Owner, UserApplicationId},
-    time::timer::{sleep, timeout},
 };
 use linera_chain::{
     data_types::{
@@ -35,6 +34,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot, OwnedRwLockReadGuard};
 use tracing::{error, instrument, trace, warn, Instrument as _};
+#[cfg(not(web))]
+use linera_base::time::timer::{sleep, timeout};
 #[cfg(web)]
 use wasmtimer::tokio::{sleep, timeout};
 #[cfg(with_metrics)]
