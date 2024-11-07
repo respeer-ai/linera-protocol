@@ -1496,7 +1496,7 @@ where
         request: &Request,
         chain_id: ChainId,
     ) -> Result<async_graphql::Response, NodeServiceError> {
-        debug!("Request: {:?}", &request);
+        info!("Request: {:?}", &request);
         let graphql_response = self
             .user_application_query(application_id, request, chain_id)
             .await?;
@@ -1508,7 +1508,7 @@ where
                 .collect();
             return Err(NodeServiceError::ApplicationServiceError { errors });
         }
-        debug!("Response: {:?}", &graphql_response);
+        info!("Response: {:?}", &graphql_response);
         let bcs_bytes_list = bytes_from_response(graphql_response.data);
         if bcs_bytes_list.is_empty() {
             return Err(NodeServiceError::MalformedApplicationResponse);
@@ -1581,9 +1581,14 @@ where
         request: GraphQLRequest,
     ) -> Result<GraphQLResponse, NodeServiceError> {
         let mut request = request.into_inner();
+        let variables = request.variables.clone();
 
         let parsed_query = request.parsed_query()?;
-        let operation_type = operation_type(parsed_query)?;
+        let operation_type = match variables.get("checko_query_only") {
+            Some(async_graphql::Value::Boolean(true)) => OperationType::Query,
+            _ => operation_type(parsed_query)?,
+        };
+        request.variables.remove("checko_query_only");
 
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: UserApplicationId = application_id.parse()?;
