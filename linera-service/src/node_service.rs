@@ -162,6 +162,12 @@ doc_scalar!(
     "A executed block which will be submitted to blockchain with its signature."
 );
 
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct ExecutedBlockMaterial {
+    executed_block: ExecutedBlock,
+    retry: bool,
+}
+
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
     #[error(transparent)]
@@ -981,7 +987,7 @@ where
         operations: Vec<Operation>,
         incoming_bundles: Vec<UserIncomingBundle>,
         local_time: Timestamp,
-    ) -> Result<ExecutedBlock, Error> {
+    ) -> Result<ExecutedBlockMaterial, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
         let bundles: Vec<_> = incoming_bundles
@@ -989,9 +995,13 @@ where
             .map(|bundle| bundle.clone().into())
             .collect();
 
-        Ok(client
+        let (executed_block, retry) = client
             .execute_block_with_full_materials(operations, bundles, local_time)
-            .await?)
+            .await?;
+        Ok(ExecutedBlockMaterial {
+            executed_block,
+            retry,
+        })
     }
 }
 

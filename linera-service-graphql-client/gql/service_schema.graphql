@@ -413,6 +413,11 @@ type ExecutedBlock {
 	outcome: BlockExecutionOutcome!
 }
 
+type ExecutedBlockMaterial {
+	executedBlock: ExecutedBlock!
+	retry: Boolean!
+}
+
 type ExecutionStateView {
 	system: SystemExecutionStateView!
 }
@@ -730,7 +735,7 @@ type MutationRoot {
 	"""
 	Calculate block execution state hash
 	"""
-	executeBlockWithFullMaterials(chainId: ChainId!, operations: [Operation!]!, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): ExecutedBlock!
+	executeBlockWithFullMaterials(chainId: ChainId!, operations: [Operation!]!, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): ExecutedBlockMaterial!
 }
 
 """

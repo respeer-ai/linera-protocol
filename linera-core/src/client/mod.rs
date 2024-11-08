@@ -521,6 +521,9 @@ pub enum ChainClientError {
 
     #[error("Mismatch block timestamp {0} != {1}")]
     MismatchBlockTimestamp(u64, u64),
+
+    #[error("Invalid block round")]
+    InvalidBlockRound,
 }
 
 impl From<Infallible> for ChainClientError {
@@ -3752,7 +3755,34 @@ where
             .handle_chain_info_query(query)
             .await?
             .info;
-        Ok(info.manager.current_round)
+        let manager = info.manager;
+
+        let Some(block) = manager
+            .highest_validated_block()
+            .cloned()
+            .or_else(|| None)
+        else {
+            return Ok(manager.current_round);
+        };
+
+        // If there is a conflicting proposal in the current round, we can only propose if the
+        // next round can be started without a timeout, i.e. if we are in a multi-leader round.
+        let conflicting_proposal = manager.requested_proposed.as_ref().is_some_and(|proposal| {
+            proposal.content.round == manager.current_round && proposal.content.block != block
+        });
+        let round = if !conflicting_proposal {
+            manager.current_round
+        } else if let Some(round) = manager
+            .ownership
+            .next_round(manager.current_round)
+            .filter(|_| manager.current_round.is_multi_leader())
+        {
+            round
+        } else {
+            return Err(ChainClientError::InvalidBlockRound);
+        };
+
+        Ok(round)
     }
 
     /// Execute block with operations and incoming bundles
@@ -3785,9 +3815,26 @@ where
         operations: Vec<Operation>,
         incoming_bundles: Vec<IncomingBundle>,
         local_time: Timestamp,
-    ) -> Result<ExecutedBlock, ChainClientError> {
-        self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
-            .await
+    ) -> Result<(ExecutedBlock, bool), ChainClientError> {
+        let chain_id = self.chain_id;
+        let query = ChainInfoQuery::new(chain_id).with_committees();
+        let info = self
+            .client
+            .local_node
+            .handle_chain_info_query(query)
+            .await?
+            .info;
+        if let Some(validated_block_certificate) = &info.manager.requested_locked {
+            Ok((validated_block_certificate
+                .value()
+                .executed_block()
+                .unwrap()
+                .clone(), true))
+        } else {
+            Ok((self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
+                .await?, false))
+        }
+
     }
 }
 
