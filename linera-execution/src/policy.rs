@@ -8,7 +8,7 @@ use std::fmt;
 use async_graphql::InputObject;
 use linera_base::data_types::{Amount, ArithmeticError, Resources};
 use serde::{Deserialize, Serialize};
-use serde_with::{DisplayFromStr, serde_as};
+use serde_with::{serde_as, DisplayFromStr};
 
 /// A collection of prices and limits associated with block execution.
 #[serde_as]

@@ -1335,4 +1335,3 @@ pub struct CandidateBlockMaterial {
     pub local_time: Timestamp,
     pub round: Round,
 }
-

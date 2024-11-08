@@ -762,7 +762,8 @@ impl Runnable for Job {
                     storage,
                     context,
                     default_chains,
-                ).await;
+                )
+                .await;
                 service.run().await?;
             }
 

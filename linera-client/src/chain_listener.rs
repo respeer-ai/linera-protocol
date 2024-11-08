@@ -203,27 +203,30 @@ impl ChainListener {
     ) where
         C: ClientContext,
     {
-        let _handle = linera_base::task::spawn(async move {
-            for i in 1..retries {
-                if let Err(err) = Self::run_client_stream(
-                    chain_id,
-                    context.clone(),
-                    storage.clone(),
-                    config.clone(),
-                    listening.clone(),
-                )
-                .await
-                {
-                    error!("Stream for chain {} failed [{}]: {}", chain_id, i, err);
-                    let mut guard = listening.lock().await;
-                    if guard.contains(&chain_id) {
-                        guard.remove(&chain_id);
+        let _handle = linera_base::task::spawn(
+            async move {
+                for i in 1..retries {
+                    if let Err(err) = Self::run_client_stream(
+                        chain_id,
+                        context.clone(),
+                        storage.clone(),
+                        config.clone(),
+                        listening.clone(),
+                    )
+                    .await
+                    {
+                        error!("Stream for chain {} failed [{}]: {}", chain_id, i, err);
+                        let mut guard = listening.lock().await;
+                        if guard.contains(&chain_id) {
+                            guard.remove(&chain_id);
+                        }
+                        context.clone().lock().await.destroy_chain_client(chain_id);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                     }
-                    context.clone().lock().await.destroy_chain_client(chain_id);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
                 }
             }
-        }.in_current_span());
+            .in_current_span(),
+        );
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]

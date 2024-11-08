@@ -141,8 +141,9 @@ where
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
-        ) -> Result<(), Error> {
-        self.assign_new_chain_to_public_key(key, chain_id, timestamp).await
+    ) -> Result<(), Error> {
+        self.assign_new_chain_to_public_key(key, chain_id, timestamp)
+            .await
     }
 
     async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
@@ -153,8 +154,9 @@ where
         &mut self,
         public_key: PublicKey,
         chain_id: ChainId,
-        ) -> Result<(), Error> {
-        self.set_default_chain_with_public_key(public_key, chain_id).await
+    ) -> Result<(), Error> {
+        self.set_default_chain_with_public_key(public_key, chain_id)
+            .await
     }
 }
 
@@ -461,8 +463,9 @@ where
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
-        ) -> Result<(), Error> {
-        self.wallet.as_mut()
+    ) -> Result<(), Error> {
+        self.wallet
+            .as_mut()
             .assign_new_chain_to_public_key(key, chain_id, timestamp)?;
         self.save_wallet().await
     }
@@ -476,8 +479,9 @@ where
         &mut self,
         public_key: PublicKey,
         chain_id: ChainId,
-        ) -> Result<(), Error> {
-        self.wallet.as_mut()
+    ) -> Result<(), Error> {
+        self.wallet
+            .as_mut()
             .set_default_chain_with_public_key(public_key, chain_id)?;
         self.save_wallet().await
     }
@@ -1204,11 +1208,17 @@ where
         Ok(())
     }
 
-    async fn update_wallet_from_client(&mut self, _client: &ChainClient<NodeProvider, S>) -> Result<(), Error> {
+    async fn update_wallet_from_client(
+        &mut self,
+        _client: &ChainClient<NodeProvider, S>,
+    ) -> Result<(), Error> {
         Ok(())
     }
 
-    pub async fn update_and_save_wallet(&mut self, _client: &ChainClient<NodeProvider, S>) -> Result<(), Error> {
+    pub async fn update_and_save_wallet(
+        &mut self,
+        _client: &ChainClient<NodeProvider, S>,
+    ) -> Result<(), Error> {
         Ok(())
     }
 

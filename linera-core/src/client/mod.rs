@@ -3200,6 +3200,8 @@ where
         executed_block: ExecutedBlock,
         round: Round,
         signature: Signature,
+        retry: bool,
+        validated_block_certificate: Option<Certificate>,
     ) -> Result<Certificate, ChainClientError> {
         let block = executed_block.block.clone();
         ensure!(
@@ -3208,6 +3210,8 @@ where
         );
 
         let blobs = self.read_local_blobs(block.published_blob_ids()).await?;
+        let oracle_responses = executed_block.outcome.oracle_responses.clone();
+
         let hashed_value = if round.is_fast() {
             HashedCertificateValue::new_confirmed(executed_block)
         } else {
@@ -3218,12 +3222,21 @@ where
             content: ProposalContent {
                 block: block.clone(),
                 round,
-                forced_oracle_responses: None, // TODO
+                forced_oracle_responses: if retry { Some(oracle_responses) } else { None },
             },
             owner: self.public_key().await?.into(),
             signature,
             blobs,
-            validated_block_certificate: None, // TODO
+            validated_block_certificate: if retry {
+                Some(
+                    validated_block_certificate
+                        .unwrap()
+                        .lite_certificate()
+                        .cloned(),
+                )
+            } else {
+                None
+            },
         };
 
         // TODO: process requested_locked and round conflict
@@ -3757,11 +3770,8 @@ where
             .info;
         let manager = info.manager;
 
-        let Some(block) = manager
-            .highest_validated_block()
-            .cloned()
-            .or_else(|| None)
-        else {
+        let Some(block) = manager.highest_validated_block().cloned().or_else(|| None) else {
+            tracing::info!("Validated block is available, retry it");
             return Ok(manager.current_round);
         };
 
@@ -3815,7 +3825,7 @@ where
         operations: Vec<Operation>,
         incoming_bundles: Vec<IncomingBundle>,
         local_time: Timestamp,
-    ) -> Result<(ExecutedBlock, bool), ChainClientError> {
+    ) -> Result<(ExecutedBlock, Option<CryptoHash>, bool), ChainClientError> {
         let chain_id = self.chain_id;
         let query = ChainInfoQuery::new(chain_id).with_committees();
         let info = self
@@ -3825,16 +3835,24 @@ where
             .await?
             .info;
         if let Some(validated_block_certificate) = &info.manager.requested_locked {
-            Ok((validated_block_certificate
-                .value()
-                .executed_block()
-                .unwrap()
-                .clone(), true))
+            tracing::info!("Requested locked block is available, retry it");
+            Ok((
+                validated_block_certificate
+                    .value()
+                    .executed_block()
+                    .unwrap()
+                    .clone(),
+                Some(validated_block_certificate.hash()),
+                true,
+            ))
         } else {
-            Ok((self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
-                .await?, false))
+            Ok((
+                self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
+                    .await?,
+                None,
+                false,
+            ))
         }
-
     }
 }
 

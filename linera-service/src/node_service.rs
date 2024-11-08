@@ -16,8 +16,8 @@ use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
     resolver_utils::ContainerType,
-    Error, MergedObject, OutputType, Request, ScalarType, Schema, ServerError,
-    SimpleObject, Subscription,
+    Error, MergedObject, OutputType, Request, ScalarType, Schema, ServerError, SimpleObject,
+    Subscription,
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
@@ -29,8 +29,8 @@ use futures::{
 use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, Hashable, PublicKey, Signature},
     data_types::{
-        Amount, ApplicationPermissions, BlockHeight, Bytecode, Round, TimeDelta,
-        Timestamp, UserApplicationDescription, BlobBytes
+        Amount, ApplicationPermissions, BlobBytes, BlockHeight, Bytecode, Round, TimeDelta,
+        Timestamp, UserApplicationDescription,
     },
     doc_scalar,
     identifiers::{
@@ -41,14 +41,12 @@ use linera_base::{
 };
 use linera_chain::{
     data_types::{
-        Block, BlockExecutionOutcome, CertificateValue, ExecutedBlock, HashedCertificateValue,
-        IncomingBundle, MessageAction, MessageBundle, Origin, CandidateBlockMaterial,
+        Block, BlockExecutionOutcome, CandidateBlockMaterial, CertificateValue, ExecutedBlock,
+        HashedCertificateValue, IncomingBundle, MessageAction, MessageBundle, Origin,
     },
     ChainStateView,
 };
-use linera_client::{
-    chain_listener::{ChainListener, ChainListenerConfig, ClientContext},
-};
+use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
 use linera_core::{
     client::{ChainClient, ChainClientError},
     data_types::{ClientOutcome, RoundTimeout},
@@ -125,10 +123,7 @@ impl Into<IncomingBundle> for UserIncomingBundle {
     }
 }
 
-doc_scalar!(
-    UserIncomingBundle,
-    "Input shadow of IncomingBundle."
-);
+doc_scalar!(UserIncomingBundle, "Input shadow of IncomingBundle.");
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct RawBlockProposalPayload {
@@ -165,6 +160,7 @@ doc_scalar!(
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct ExecutedBlockMaterial {
     executed_block: ExecutedBlock,
+    validated_block_certificate_hash: Option<CryptoHash>,
     retry: bool,
 }
 
@@ -916,14 +912,35 @@ where
         executed_block: UserExecutedBlock,
         round: Round,
         signature: Signature,
+        retry: bool,
+        validated_block_certificate_hash: Option<CryptoHash>,
     ) -> Result<CryptoHash, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
+
+        let certificate = if retry {
+            let certificate = self
+                .storage
+                .read_certificate(validated_block_certificate_hash.unwrap())
+                .await?;
+            if let CertificateValue::ValidatedBlock { .. } = certificate.value.clone().into_inner()
+            {
+                // DO NOTHING
+            } else {
+                return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
+            }
+            Some(certificate)
+        } else {
+            None
+        };
+
         let hash = client
             .submit_extenal_signed_block_proposal_and_signature(
                 height,
                 executed_block.into(),
                 round,
                 signature,
+                retry,
+                certificate,
             )
             .await?
             .value
@@ -995,11 +1012,12 @@ where
             .map(|bundle| bundle.clone().into())
             .collect();
 
-        let (executed_block, retry) = client
+        let (executed_block, validated_block_certificate_hash, retry) = client
             .execute_block_with_full_materials(operations, bundles, local_time)
             .await?;
         Ok(ExecutedBlockMaterial {
             executed_block,
+            validated_block_certificate_hash,
             retry,
         })
     }
@@ -1153,7 +1171,12 @@ where
     ) -> Result<HashMap<ChainId, Balances>, Error> {
         let mut chain_balances = HashMap::new();
         for chain_id in &chain_ids {
-            let Ok(client) = self.context.lock().await.make_chain_client(chain_id.clone()) else {
+            let Ok(client) = self
+                .context
+                .lock()
+                .await
+                .make_chain_client(chain_id.clone())
+            else {
                 continue;
             };
             let mut account_balances = HashMap::new();
@@ -1180,7 +1203,11 @@ where
         let mut chain_ids = Vec::new();
 
         for chain_id in all_chain_ids.iter() {
-            let client = self.context.lock().await.make_chain_client(chain_id.clone())?;
+            let client = self
+                .context
+                .lock()
+                .await
+                .make_chain_client(chain_id.clone())?;
             if client.public_key().await? == public_key {
                 chain_ids.push(chain_id.clone());
             }
