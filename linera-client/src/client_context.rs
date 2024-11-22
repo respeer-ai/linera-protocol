@@ -1,11 +1,10 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-#[cfg(with_testing)]
-use std::num::NonZeroUsize;
 use std::{
     collections::{BTreeMap, HashSet},
     sync::Arc,
+    num::NonZeroUsize,
 };
 
 use async_trait::async_trait;
@@ -1170,6 +1169,7 @@ where
             options.long_lived_services,
             wallet.chain_ids(),
             "Client node",
+            NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
         );
 
         ClientContext {
@@ -1179,8 +1179,9 @@ where
             recv_timeout: options.recv_timeout,
             retry_delay: options.retry_delay,
             max_retries: options.max_retries,
-            options,
             chain_listeners: JoinSet::default(),
+            blanket_message_policy: options.blanket_message_policy,
+            restrict_chain_ids_to: options.restrict_chain_ids_to,
         }
     }
 
@@ -1219,8 +1220,8 @@ where
             chain.pending_blobs.clone(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
-            self.options.blanket_message_policy,
-            self.options.restrict_chain_ids_to.clone(),
+            self.blanket_message_policy,
+            self.restrict_chain_ids_to.clone(),
         );
         Ok(chain_client)
     }
@@ -1246,12 +1247,10 @@ where
             next_block_height,
             None,
             BTreeMap::new(),
-            None,
-            Vec::new(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
-            self.options.blanket_message_policy,
-            self.options.restrict_chain_ids_to.clone(),
+            self.blanket_message_policy,
+            self.restrict_chain_ids_to.clone(),
         );
         Ok(chain_client)
     }
@@ -1304,7 +1303,7 @@ where
     pub async fn process_inbox(
         &mut self,
         _chain_client: &ChainClient<NodeProvider, S>,
-    ) -> Result<Vec<Certificate>, Error> {
+    ) -> Result<Vec<ConfirmedBlockCertificate>, Error> {
         Ok(Vec::new())
     }
 
