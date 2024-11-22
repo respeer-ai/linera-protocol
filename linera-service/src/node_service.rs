@@ -157,17 +157,12 @@ doc_scalar!(
     "A executed block which will be submitted to blockchain with its signature."
 );
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct ExecutedBlockMaterial {
     executed_block: ExecutedBlock,
     validated_block_certificate_hash: Option<CryptoHash>,
     retry: bool,
 }
-
-doc_scalar!(
-    ExecutedBlockMaterial,
-    "Executed block material which could be signed by client."
-);
 
 #[derive(Debug, ThisError)]
 enum NodeServiceError {

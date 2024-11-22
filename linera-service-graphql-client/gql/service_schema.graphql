@@ -413,10 +413,11 @@ type ExecutedBlock {
 	outcome: BlockExecutionOutcome!
 }
 
-"""
-Executed block material which could be signed by client.
-"""
-scalar ExecutedBlockMaterial
+type ExecutedBlockMaterial {
+	executedBlock: ExecutedBlock!
+	validatedBlockCertificateHash: CryptoHash
+	retry: Boolean!
+}
 
 type ExecutionStateView {
 	system: SystemExecutionStateView!
