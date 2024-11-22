@@ -1323,3 +1323,10 @@ doc_scalar!(
     Target,
     "The target of a message, relative to a particular application. Used to identify each outbox."
 );
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct CandidateBlockMaterial {
+    pub incoming_bundles: Vec<IncomingBundle>,
+    pub local_time: Timestamp,
+    pub round: Round,
+}

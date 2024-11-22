@@ -20,3 +20,6 @@ pub mod wallet;
 mod unit_tests;
 
 pub use error::Error;
+
+#[cfg(feature = "no-storage")]
+pub mod fake_wallet;

@@ -1,8 +1,17 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{borrow::Cow, iter, net::SocketAddr, num::NonZeroU16, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    iter,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    num::{NonZeroU16, NonZeroUsize},
+    str::FromStr,
+    sync::Arc,
+};
 
+use anyhow::{anyhow, Context};
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -18,29 +27,40 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{CryptoError, CryptoHash, PublicKey},
+    crypto::{BcsSignable, CryptoError, CryptoHash, PublicKey, Signature},
     data_types::{
-        Amount, ApplicationPermissions, BlobBytes, Bytecode, TimeDelta, Timestamp,
-        UserApplicationDescription,
+        Amount, ApplicationPermissions, BlobBytes, BlockHeight, Bytecode, Round, TimeDelta,
+        Timestamp, UserApplicationDescription,
     },
-    identifiers::{ApplicationId, BytecodeId, ChainId, Owner, UserApplicationId},
+    doc_scalar,
+    identifiers::{
+        ApplicationId, BlobId, BytecodeId, ChainId, MessageId, Owner, UserApplicationId,
+    },
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
-use linera_chain::{data_types::HashedCertificateValue, ChainStateView};
+use linera_chain::{
+    data_types::{
+        Block, BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock,
+        HashedCertificateValue, IncomingBundle, MessageAction, MessageBundle, Origin,
+    },
+    ChainStateView,
+};
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
 use linera_core::{
-    client::{ChainClient, ChainClientError},
+    client::{self, ChainClient, ChainClientError},
     data_types::{ClientOutcome, RoundTimeout},
-    node::NotificationStream,
+    node::{CrossChainMessageDelivery, NotificationStream, ValidatorNodeProvider},
+    remote_node::RemoteNode,
     worker::{Notification, Reason},
 };
 use linera_execution::{
-    committee::{Committee, Epoch},
+    committee::{Committee, Epoch, ValidatorName},
     system::{AdminOperation, Recipient, SystemChannel},
-    Operation, Query, Response, SystemOperation,
+    Message, Operation, Query, Response, SystemMessage, SystemOperation,
 };
 use linera_storage::Storage;
+use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error as ThisError;
@@ -49,7 +69,7 @@ use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, instrument};
 
-use crate::util;
+use crate::{cli_wrappers::Faucet, util};
 
 #[derive(SimpleObject, Serialize, Deserialize, Clone)]
 pub struct Chains {
@@ -62,6 +82,7 @@ pub struct QueryRoot<C> {
     context: Arc<Mutex<C>>,
     port: NonZeroU16,
     default_chain: Option<ChainId>,
+    default_chains: HashMap<PublicKey, ChainId>,
 }
 
 /// Our root GraphQL subscription type.
@@ -70,9 +91,71 @@ pub struct SubscriptionRoot<C> {
 }
 
 /// Our root GraphQL mutation type.
-pub struct MutationRoot<C> {
+pub struct MutationRoot<C>
+where
+    C: ClientContext,
+{
+    storage: C::Storage,
     context: Arc<Mutex<C>>,
+
+    config: ChainListenerConfig,
+    chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
+
+/// A bundle of cross-chain messages.
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+pub struct UserIncomingBundle {
+    /// The origin of the messages (chain and channel if any).
+    pub origin: Origin,
+    /// The messages to be delivered to the inbox identified by `origin`.
+    pub bundle: MessageBundle,
+    /// What to do with the message.
+    pub action: MessageAction,
+}
+
+impl Into<IncomingBundle> for UserIncomingBundle {
+    fn into(self) -> IncomingBundle {
+        IncomingBundle {
+            origin: self.origin,
+            bundle: self.bundle,
+            action: self.action,
+        }
+    }
+}
+
+doc_scalar!(UserIncomingBundle, "Input shadow of IncomingBundle.");
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct RawBlockProposalPayload {
+    pub height: BlockHeight,
+    pub payload_bytes: Vec<u8>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct Balances {
+    chain_balance: Amount,
+    account_balances: HashMap<PublicKey, Amount>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
+pub struct UserExecutedBlock {
+    pub block: Block,
+    pub outcome: BlockExecutionOutcome,
+}
+
+impl Into<ExecutedBlock> for UserExecutedBlock {
+    fn into(self) -> ExecutedBlock {
+        ExecutedBlock {
+            block: self.block,
+            outcome: self.outcome,
+        }
+    }
+}
+
+doc_scalar!(
+    UserExecutedBlock,
+    "A executed block which will be submitted to blockchain with its signature."
+);
 
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
@@ -102,6 +185,9 @@ enum NodeServiceError {
     UnknownChainId { chain_id: String },
     #[error("malformed chain ID")]
     InvalidChainId(CryptoError),
+
+    #[error("The message with the ID returned by the faucet is not OpenChain. please make sure you are connecting to a genuine faucet.")]
+    NotOpenChainMessage,
 }
 
 impl From<ServerError> for NodeServiceError {
@@ -146,6 +232,9 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
+            NodeServiceError::NotOpenChainMessage => {
+                (StatusCode::BAD_REQUEST, vec![self.to_string()])
+            }
         };
         let tuple = (tuple.0, json!({"error": tuple.1}).to_string());
         tuple.into_response()
@@ -220,6 +309,71 @@ where
             drop(client);
             wait_for_next_round(&mut stream, timeout).await;
         }
+    }
+
+    async fn prepare_parent_chain(
+        &self,
+        chain_id: ChainId,
+        public_key: PublicKey,
+        message_id: MessageId,
+        validators: Vec<(ValidatorName, String)>,
+    ) -> Result<(), Error> {
+        let node_provider = self.context.lock().await.make_node_provider();
+        let chain_client = client::Client::new(
+            node_provider.clone(),
+            self.storage.clone(),
+            100,
+            CrossChainMessageDelivery::Blocking,
+            false,
+            vec![message_id.chain_id, chain_id],
+            "Temporary client for fetching the parent chain",
+            NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
+        );
+
+        let nodes: Vec<_> = node_provider
+            .make_nodes_from_list(validators)?
+            .map(|(name, node)| RemoteNode { name, node })
+            .collect();
+        let target_height = message_id.height.try_add_one()?;
+        chain_client
+            .download_certificates(&nodes, message_id.chain_id, target_height)
+            .await?;
+
+        let certificate = chain_client
+            .local_node()
+            .certificate_for(&message_id)
+            .await
+            .context("could not find OpenChain message")?;
+        let executed_block = certificate.executed_block();
+
+        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
+            .message_by_id(&message_id)
+            .map(|msg| &msg.message)
+        else {
+            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
+        };
+        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
+            return Err(anyhow!(
+                "The chain with the ID returned by the faucet is not owned by you. \
+                Please make sure you are connecting to a genuine faucet."
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
+    async fn chain_initialized(
+        &self,
+        chain_id: ChainId,
+        message_id: MessageId,
+    ) -> Result<(), Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        client.track_chain(chain_id);
+        client.track_chain(message_id.chain_id);
+        client.retry_pending_outgoing_messages().await?;
+        client.prepare_chain().await?;
+        Ok(())
     }
 }
 
@@ -655,6 +809,104 @@ where
             wait_for_next_round(&mut stream, timeout).await;
         }
     }
+
+    /// ResPeer::CheCko::Initialize offline wallet
+    async fn wallet_init_without_keypair(
+        &self,
+        public_key: PublicKey,
+        signature: Signature,
+        faucet_url: String,
+        chain_id: ChainId,
+        message_id: MessageId,
+        certificate_hash: CryptoHash,
+    ) -> Result<ChainId, Error> {
+        #[derive(Debug, Serialize, Deserialize)]
+        struct Nonce(CryptoHash);
+        impl BcsSignable for Nonce {}
+
+        let nonce = Nonce(certificate_hash);
+        signature.check(&nonce, public_key)?;
+
+        let faucet = Faucet::new(faucet_url.clone());
+        let validators = faucet.current_validators().await?;
+
+        self.prepare_parent_chain(chain_id, public_key, message_id, validators.clone())
+            .await?;
+        self.context
+            .lock()
+            .await
+            .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
+            .await
+            .context("could not assign the new chain")?;
+
+        self.context
+            .lock()
+            .await
+            .set_default_chain_with_public_key(public_key, chain_id)
+            .await?;
+        self.context.lock().await.save_wallet().await?;
+
+        ChainListener::run_with_chain_id_retry(
+            chain_id,
+            self.context.clone(),
+            self.storage.clone(),
+            self.config.clone(),
+            Arc::clone(&self.chain_guard),
+            5,
+        );
+
+        tokio::task::yield_now().await;
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+
+        self.chain_initialized(chain_id, message_id).await?;
+
+        tracing::info!("Initialized chain {}", chain_id);
+
+        Ok(chain_id)
+    }
+
+    /// Submit block proposal with signature
+    async fn submit_block_and_signature(
+        &self,
+        chain_id: ChainId,
+        height: BlockHeight,
+        executed_block: UserExecutedBlock,
+        round: Round,
+        signature: Signature,
+    ) -> Result<CryptoHash, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let hash = client
+            .submit_extenal_signed_block_proposal_and_signature(
+                height,
+                executed_block.into(),
+                round,
+                signature,
+            )
+            .await?
+            .hash();
+        self.context.lock().await.update_wallet(&client).await?;
+        Ok(hash)
+    }
+
+    /// Calculate block execution state hash
+    async fn execute_block_with_full_materials(
+        &self,
+        chain_id: ChainId,
+        operations: Vec<Operation>,
+        incoming_bundles: Vec<UserIncomingBundle>,
+        local_time: Timestamp,
+    ) -> Result<ExecutedBlock, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+
+        let bundles: Vec<_> = incoming_bundles
+            .iter()
+            .map(|bundle| bundle.clone().into())
+            .collect();
+
+        Ok(client
+            .execute_block_with_full_materials(operations, bundles, local_time)
+            .await?)
+    }
 }
 
 #[async_graphql::Object(cache_control(no_cache))]
@@ -744,6 +996,94 @@ where
     /// Returns the version information on this node service.
     async fn version(&self) -> linera_version::VersionInfo {
         linera_version::VersionInfo::default()
+    }
+
+    /// Returns the pending message of the chain
+    async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        Ok(client.pending_message_bundles().await?)
+    }
+
+    /// Returns block material of the chain
+    async fn block_material(&self, chain_id: ChainId) -> Result<CandidateBlockMaterial, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let incoming_bundles = client.pending_message_bundles().await?;
+        let local_time = client.next_timestamp(&incoming_bundles, 0.into());
+        let round = client.block_round().await?;
+        Ok(CandidateBlockMaterial {
+            incoming_bundles,
+            local_time,
+            round,
+        })
+    }
+
+    /// Returns the balance of given owner
+    async fn balance(
+        &self,
+        chain_id: ChainId,
+        public_key: Option<PublicKey>,
+    ) -> Result<Amount, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        Ok(match public_key {
+            Some(public_key) => client.query_owner_balance(Owner::from(public_key)).await?,
+            _ => client.query_balance().await?,
+        })
+    }
+
+    /// Returns the balances of given owners
+    async fn balances(
+        &self,
+        chain_ids: Vec<ChainId>,
+        public_keys: Vec<PublicKey>,
+    ) -> Result<HashMap<ChainId, Balances>, Error> {
+        let mut chain_balances = HashMap::new();
+        for chain_id in &chain_ids {
+            let Ok(client) = self
+                .context
+                .lock()
+                .await
+                .make_chain_client(chain_id.clone())
+            else {
+                continue;
+            };
+            let mut account_balances = HashMap::new();
+            for public_key in &public_keys {
+                account_balances.insert(
+                    *public_key,
+                    client.query_owner_balance(Owner::from(public_key)).await?,
+                );
+            }
+            chain_balances.insert(
+                *chain_id,
+                Balances {
+                    chain_balance: client.query_balance().await?,
+                    account_balances,
+                },
+            );
+        }
+        Ok(chain_balances)
+    }
+
+    /// Returns the maintained chains of given owner
+    async fn chains_with_public_key(&self, public_key: PublicKey) -> Result<Chains, Error> {
+        let all_chain_ids = self.context.lock().await.wallet().chain_ids();
+        let mut chain_ids = Vec::new();
+
+        for chain_id in all_chain_ids.iter() {
+            let client = self
+                .context
+                .lock()
+                .await
+                .make_chain_client(chain_id.clone())?;
+            if client.public_key().await? == public_key {
+                chain_ids.push(chain_id.clone());
+            }
+        }
+
+        Ok(Chains {
+            list: chain_ids,
+            default: self.default_chains.get(&public_key).copied(),
+        })
     }
 }
 
@@ -835,7 +1175,8 @@ impl ApplicationOverview {
             id,
             description,
             link: format!(
-                "http://localhost:{}/chains/{}/applications/{}",
+                "http://{}:{}/chains/{}/applications/{}",
+                local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
                 port.get(),
                 chain_id,
                 id
@@ -905,6 +1246,9 @@ where
     default_chain: Option<ChainId>,
     storage: C::Storage,
     context: Arc<Mutex<C>>,
+    default_chains: HashMap<PublicKey, ChainId>,
+
+    chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
 impl<C> Clone for NodeService<C>
@@ -918,6 +1262,9 @@ where
             default_chain: self.default_chain,
             storage: self.storage.clone(),
             context: Arc::clone(&self.context),
+            default_chains: self.default_chains.clone(),
+
+            chain_guard: Arc::clone(&self.chain_guard),
         }
     }
 }
@@ -933,13 +1280,17 @@ where
         default_chain: Option<ChainId>,
         storage: C::Storage,
         context: C,
+        default_chains: HashMap<PublicKey, ChainId>,
     ) -> Self {
         Self {
-            config,
+            config: config.clone(),
             port,
             default_chain,
+            default_chains,
             storage,
             context: Arc::new(Mutex::new(context)),
+
+            chain_guard: Default::default(),
         }
     }
 
@@ -949,9 +1300,14 @@ where
                 context: Arc::clone(&self.context),
                 port: self.port,
                 default_chain: self.default_chain,
+                default_chains: self.default_chains.clone(),
             },
             MutationRoot {
                 context: Arc::clone(&self.context),
+                storage: self.storage.clone(),
+                config: self.config.clone(),
+
+                chain_guard: Arc::clone(&self.chain_guard),
             },
             SubscriptionRoot {
                 context: Arc::clone(&self.context),
@@ -962,11 +1318,12 @@ where
 
     /// Runs the node service.
     #[instrument(name = "node_service", level = "info", skip(self), fields(port = ?self.port))]
-    pub async fn run(self) -> Result<(), anyhow::Error> {
+    pub async fn run(&mut self) -> Result<(), anyhow::Error> {
         let port = self.port.get();
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
         let application_handler =
             axum::routing::get(util::graphiql).post(Self::application_handler);
+        let blob_handler = axum::routing::get(Self::blob_handler);
 
         let app = Router::new()
             .route("/", index_handler)
@@ -974,19 +1331,27 @@ where
                 "/chains/:chain_id/applications/:application_id",
                 application_handler,
             )
+            .route(
+                "/chains/:chain_id/applications/:application_id/blobs/:blob_id",
+                blob_handler,
+            )
             .route("/ready", axum::routing::get(|| async { "ready!" }))
             .route_service("/ws", GraphQLSubscription::new(self.schema()))
             .layer(Extension(self.clone()))
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
 
-        info!("GraphiQL IDE: http://localhost:{}", port);
+        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
-        ChainListener::new(self.config)
+        let chain_listener = ChainListener::new(self.config.clone());
+        self.chain_guard = Arc::clone(&chain_listener.listening);
+        chain_listener
             .run(Arc::clone(&self.context), self.storage.clone())
             .await;
+
         let serve_fut = axum::serve(
-            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?,
+            tokio::net::TcpListener::bind(SocketAddr::from((ip_addr, port))).await?,
             app,
         );
         serve_fut.await?;
@@ -1085,6 +1450,26 @@ where
             .into()
     }
 
+    async fn blob_handler(
+        Path((chain_id, application_id, blob_id)): Path<(String, String, String)>,
+        service: Extension<Self>,
+    ) -> Result<impl IntoResponse, NodeServiceError> {
+        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
+        let application_id: UserApplicationId = application_id.parse()?;
+        let blob_id = BlobId::from_str(&("Data:".to_owned() + &blob_id)).expect("Invlaid query");
+        let request = Request::new(format!(
+            "query {} fetch(blobId: \"{blob_id}\") {}",
+            "{", "}"
+        ));
+
+        let _response = service
+            .0
+            .user_application_query(application_id, &request, chain_id)
+            .await?;
+
+        Ok(response::Json(_response))
+    }
+
     /// Executes a GraphQL query against an application.
     /// Pattern matches on the `OperationType` of the query and routes the query
     /// accordingly.
@@ -1127,6 +1512,7 @@ pub async fn wait_for_next_round(stream: &mut NotificationStream, timeout: Round
         Reason::NewBlock { height, .. } => *height >= timeout.next_block_height,
         Reason::NewRound { round, .. } => *round > timeout.current_round,
         Reason::NewIncomingBundle { .. } => false,
+        Reason::NewRawBlock { height } => *height >= timeout.next_block_height,
     });
     future::select(
         Box::pin(stream.next()),

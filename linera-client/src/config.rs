@@ -7,8 +7,10 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+#[cfg(not(feature = "no-storage"))]
+use linera_base::crypto::CryptoRng;
 use linera_base::{
-    crypto::{BcsSignable, CryptoHash, CryptoRng, KeyPair, PublicKey},
+    crypto::{BcsSignable, CryptoHash, KeyPair, PublicKey},
     data_types::{Amount, Timestamp},
     identifiers::{ChainDescription, ChainId},
 };
@@ -30,16 +32,17 @@ pub enum Error {
     Persistence(Box<dyn std::error::Error + Send + Sync>),
 }
 
-use crate::{
-    persistent, util,
-    wallet::{UserChain, Wallet},
-};
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
+#[cfg(not(feature = "no-storage"))]
+use crate::wallet::Wallet;
+use crate::{persistent, util, wallet::UserChain};
 
 util::impl_from_dynamic!(Error:Persistence, persistent::memory::Error);
 #[cfg(with_indexed_db)]
 util::impl_from_dynamic!(Error:Persistence, persistent::indexed_db::Error);
 #[cfg(feature = "fs")]
-util::impl_from_dynamic!(Error:Persistence, persistent::file::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::file::Error);
 
 /// The public configuration of a validator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -92,6 +95,7 @@ impl CommitteeConfig {
 /// [`Persist`].
 pub struct WalletState<W> {
     wallet: W,
+    #[cfg(not(feature = "no-storage"))]
     prng: Box<dyn CryptoRng>,
 }
 
@@ -120,10 +124,32 @@ impl<W: DerefMut> DerefMut for WalletState<W> {
     }
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<W: Persist<Target = Wallet>> Persist for WalletState<W> {
     type Error = W::Error;
 
     fn as_mut(&mut self) -> &mut Wallet {
+        self.wallet.as_mut()
+    }
+
+    async fn persist(&mut self) -> Result<(), W::Error> {
+        self.wallet
+            .mutate(|w| w.refresh_prng_seed(&mut self.prng))
+            .await?;
+        tracing::debug!("Persisted user chains");
+        Ok(())
+    }
+
+    fn into_value(self) -> Wallet {
+        self.wallet.into_value()
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl<W: Persist<Target = FakeWallet>> Persist for WalletState<W> {
+    type Error = W::Error;
+
+    fn as_mut(&mut self) -> &mut FakeWallet {
         self.wallet.as_mut()
     }
 
@@ -153,7 +179,7 @@ impl WalletState<persistent::File<Wallet>> {
     }
 }
 
-#[cfg(with_indexed_db)]
+#[cfg(all(with_indexed_db, not(feature = "no-storage")))]
 impl WalletState<persistent::IndexedDb<Wallet>> {
     pub async fn create_from_indexed_db(key: &str, wallet: Wallet) -> Result<Self, Error> {
         Ok(Self::new(
@@ -166,6 +192,7 @@ impl WalletState<persistent::IndexedDb<Wallet>> {
     }
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<W: Deref<Target = Wallet>> WalletState<W> {
     pub fn new(wallet: W) -> Self {
         Self {
@@ -176,6 +203,15 @@ impl<W: Deref<Target = Wallet>> WalletState<W> {
 
     pub fn generate_key_pair(&mut self) -> KeyPair {
         KeyPair::generate_from(&mut self.prng)
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl WalletState<persistent::Memory<FakeWallet>> {
+    pub fn new(wallet: FakeWallet) -> Self {
+        Self {
+            wallet: persistent::Memory::new(wallet),
+        }
     }
 }
 
