@@ -3,7 +3,7 @@
 
 #![allow(clippy::large_futures)]
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc};
 
 use async_trait::async_trait;
 use futures::{lock::Mutex, FutureExt as _};
@@ -18,18 +18,14 @@ use linera_core::{
     node::CrossChainMessageDelivery,
     test_utils::{MemoryStorageBuilder, NodeProvider, StorageBuilder as _, TestBuilder},
 };
-use linera_execution::{system::Recipient, ResourceControlPolicy};
-use linera_rpc::{
-    config::{NetworkProtocol, ValidatorPublicNetworkPreConfig},
-    simple::TransportProtocol,
-};
+use linera_execution::system::Recipient;
 use linera_storage::{DbStorage, TestClock};
 use linera_views::memory::MemoryStore;
 use rand::SeedableRng as _;
 
+use super::util::make_genesis_config;
 use crate::{
     chain_listener::{self, ChainListener, ChainListenerConfig, ClientContext as _},
-    config::{CommitteeConfig, GenesisConfig, ValidatorConfig},
     wallet::{UserChain, Wallet},
     Error,
 };
@@ -108,30 +104,6 @@ impl chain_listener::ClientContext for ClientContext {
     }
 }
 
-fn make_genesis_config(builder: &TestBuilder<MemoryStorageBuilder>) -> GenesisConfig {
-    let network = ValidatorPublicNetworkPreConfig {
-        protocol: NetworkProtocol::Simple(TransportProtocol::Tcp),
-        host: "localhost".to_string(),
-        port: 8080,
-    };
-    let validator_names = builder.initial_committee.validators().keys();
-    let validators = validator_names
-        .map(|name| ValidatorConfig {
-            name: *name,
-            network: network.clone(),
-        })
-        .collect();
-    let mut genesis_config = GenesisConfig::new(
-        CommitteeConfig { validators },
-        builder.admin_id(),
-        Timestamp::from(0),
-        ResourceControlPolicy::default(),
-        "test network".to_string(),
-    );
-    genesis_config.chains.extend(builder.genesis_chains());
-    genesis_config
-}
-
 /// Tests that the chain listener, if there is a message in the inbox, will continue requesting
 /// timeout certificates until it becomes the leader and can process the inbox.
 #[test_log::test(tokio::test)]
@@ -162,6 +134,7 @@ async fn test_chain_listener() -> anyhow::Result<()> {
             false,
             [chain_id0],
             format!("Client node for {:.8}", chain_id0),
+            NonZeroUsize::new(20).expect("Chain worker LRU cache size must be non-zero"),
         )),
     };
     let key_pair = KeyPair::generate_from(&mut rng);

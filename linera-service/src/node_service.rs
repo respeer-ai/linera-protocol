@@ -27,32 +27,32 @@ use futures::{
     Future,
 };
 use linera_base::{
-    crypto::{BcsSignable, CryptoError, CryptoHash, Hashable, PublicKey, Signature},
+    crypto::{BcsSignable, CryptoError, CryptoHash, PublicKey, Signature},
     data_types::{
         Amount, ApplicationPermissions, BlobBytes, BlockHeight, Bytecode, Round, TimeDelta,
         Timestamp, UserApplicationDescription,
     },
     doc_scalar,
     identifiers::{
-        Account, ApplicationId, BlobId, BytecodeId, ChainId, MessageId, Owner, UserApplicationId,
+        ApplicationId, BlobId, BytecodeId, ChainId, MessageId, Owner, UserApplicationId,
     },
     ownership::{ChainOwnership, TimeoutConfig},
     BcsHexParseError,
 };
 use linera_chain::{
     data_types::{
-        Block, BlockExecutionOutcome, CandidateBlockMaterial, CertificateValue, ExecutedBlock,
+        Block, BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock,
         HashedCertificateValue, IncomingBundle, MessageAction, MessageBundle, Origin,
     },
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
 use linera_core::{
-    client::{ChainClient, ChainClientError},
+    client::{self, ChainClient, ChainClientError},
     data_types::{ClientOutcome, RoundTimeout},
-    local_node::{LocalNodeClient, RemoteNode},
-    node::{NotificationStream, ValidatorNodeProvider},
-    worker::{Notification, Reason, WorkerState},
+    node::{CrossChainMessageDelivery, NotificationStream, ValidatorNodeProvider},
+    remote_node::RemoteNode,
+    worker::{Notification, Reason},
 };
 use linera_execution::{
     committee::{Committee, Epoch, ValidatorName},
@@ -67,7 +67,7 @@ use thiserror::Error as ThisError;
 use tokio::sync::OwnedRwLockReadGuard;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
-use tracing::{debug, error, info};
+use tracing::{error, info, instrument};
 
 use crate::{cli_wrappers::Faucet, util};
 
@@ -157,12 +157,17 @@ doc_scalar!(
     "A executed block which will be submitted to blockchain with its signature."
 );
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct ExecutedBlockMaterial {
     executed_block: ExecutedBlock,
     validated_block_certificate_hash: Option<CryptoHash>,
     retry: bool,
 }
+
+doc_scalar!(
+    ExecutedBlockMaterial,
+    "Executed block material which could be signed by client."
+);
 
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
@@ -193,8 +198,6 @@ enum NodeServiceError {
     #[error("malformed chain ID")]
     InvalidChainId(CryptoError),
 
-    #[error("Unexpected certificate. Please make sure you are connecting to the right network and are using a current software version.")]
-    UnexpectedCertificate,
     #[error("The message with the ID returned by the faucet is not OpenChain. please make sure you are connecting to a genuine faucet.")]
     NotOpenChainMessage,
 }
@@ -241,9 +244,6 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
-            NodeServiceError::UnexpectedCertificate => {
-                (StatusCode::BAD_REQUEST, vec![self.to_string()])
-            }
             NodeServiceError::NotOpenChainMessage => {
                 (StatusCode::BAD_REQUEST, vec![self.to_string()])
             }
@@ -328,40 +328,36 @@ where
         chain_id: ChainId,
         public_key: PublicKey,
         message_id: MessageId,
-        certificate_hash: CryptoHash,
         validators: Vec<(ValidatorName, String)>,
     ) -> Result<(), Error> {
-        let state = WorkerState::new(
-            "Local node".to_string(),
-            None,
+        let node_provider = self.context.lock().await.make_node_provider();
+        let chain_client = client::Client::new(
+            node_provider.clone(),
             self.storage.clone(),
+            100,
+            CrossChainMessageDelivery::Blocking,
+            false,
+            vec![message_id.chain_id, chain_id],
+            "Temporary client for fetching the parent chain",
             NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
-        )
-        .with_tracked_chains([message_id.chain_id, chain_id])
-        .with_allow_inactive_chains(true)
-        .with_allow_messages_from_deprecated_epochs(true);
-        let node_client = LocalNodeClient::new(state);
+        );
 
-        let nodes: Vec<_> = self
-            .context
-            .lock()
-            .await
-            .make_node_provider()
+        let nodes: Vec<_> = node_provider
             .make_nodes_from_list(validators)?
             .map(|(name, node)| RemoteNode { name, node })
             .collect();
         let target_height = message_id.height.try_add_one()?;
-        node_client
-            .download_certificates(&nodes, message_id.chain_id, target_height, &mut vec![])
+        chain_client
+            .download_certificates(&nodes, message_id.chain_id, target_height)
             .await?;
 
-        let certificate = self
-            .storage
-            .read_hashed_certificate_value(certificate_hash)
-            .await?;
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.inner() else {
-            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
-        };
+        let certificate = chain_client
+            .local_node()
+            .certificate_for(&message_id)
+            .await
+            .context("could not find OpenChain message")?;
+        let executed_block = certificate.executed_block();
+
         let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
             .message_by_id(&message_id)
             .map(|msg| &msg.message)
@@ -846,14 +842,8 @@ where
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
-        self.prepare_parent_chain(
-            chain_id,
-            public_key,
-            message_id,
-            certificate_hash,
-            validators.clone(),
-        )
-        .await?;
+        self.prepare_parent_chain(chain_id, public_key, message_id, validators.clone())
+            .await?;
         self.context
             .lock()
             .await
@@ -887,23 +877,6 @@ where
         Ok(chain_id)
     }
 
-    /// Submit pending block proposal signature
-    async fn submit_block_signature(
-        &self,
-        chain_id: ChainId,
-        height: BlockHeight,
-        signature: Signature,
-    ) -> Result<CryptoHash, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
-        let hash = client
-            .submit_extenal_signed_block_proposal(height, signature)
-            .await?
-            .value
-            .hash();
-        self.context.lock().await.update_wallet(&client).await?;
-        Ok(hash)
-    }
-
     /// Submit block proposal with signature
     async fn submit_block_and_signature(
         &self,
@@ -916,23 +889,6 @@ where
         validated_block_certificate_hash: Option<CryptoHash>,
     ) -> Result<CryptoHash, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
-
-        let certificate = if retry {
-            let certificate = self
-                .storage
-                .read_certificate(validated_block_certificate_hash.unwrap())
-                .await?;
-            if let CertificateValue::ValidatedBlock { .. } = certificate.value.clone().into_inner()
-            {
-                // DO NOTHING
-            } else {
-                return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
-            }
-            Some(certificate)
-        } else {
-            None
-        };
-
         let hash = client
             .submit_extenal_signed_block_proposal_and_signature(
                 height,
@@ -940,61 +896,12 @@ where
                 round,
                 signature,
                 retry,
-                certificate,
+                validated_block_certificate_hash,
             )
             .await?
-            .value
             .hash();
         self.context.lock().await.update_wallet(&client).await?;
         Ok(hash)
-    }
-
-    /// Transfers `amount` units of value from the given owner's account to the recipient.
-    /// If no owner is given, try to take the units out of the unattributed account.
-    /// Different from transfer, node service won't sign block in transfer_without_block_proposal
-    async fn transfer_without_block_proposal(
-        &self,
-        from_chain_id: ChainId,
-        from_public_key: Option<PublicKey>,
-        to_chain_id: ChainId,
-        to_public_key: Option<PublicKey>,
-        amount: Amount,
-    ) -> Result<ChainId, Error> {
-        let from_owner = match from_public_key {
-            Some(public_key) => Some(Owner::from(public_key)),
-            _ => None,
-        };
-        let to_owner = match to_public_key {
-            Some(public_key) => Some(Owner::from(public_key)),
-            _ => None,
-        };
-        let client = self.context.lock().await.make_chain_client(from_chain_id)?;
-        client
-            .transfer_without_block_proposal(
-                from_owner,
-                amount,
-                Recipient::Account(Account {
-                    chain_id: to_chain_id,
-                    owner: to_owner,
-                }),
-            )
-            .await?;
-        Ok(from_chain_id)
-    }
-
-    /// Requests a `RegisterApplications` message from another chain so the application can be used
-    /// on this one.
-    async fn request_application_without_block_proposal(
-        &self,
-        chain_id: ChainId,
-        application_id: UserApplicationId,
-        target_chain_id: Option<ChainId>,
-    ) -> Result<UserApplicationId, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
-        client
-            .request_application_without_block_proposal(application_id, target_chain_id)
-            .await?;
-        Ok(application_id)
     }
 
     /// Calculate block execution state hash
@@ -1122,32 +1029,13 @@ where
     async fn block_material(&self, chain_id: ChainId) -> Result<CandidateBlockMaterial, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
         let incoming_bundles = client.pending_message_bundles().await?;
-        let local_time = client.next_timestamp(&incoming_bundles).await;
+        let local_time = client.next_timestamp(&incoming_bundles, 0.into());
         let round = client.block_round().await?;
         Ok(CandidateBlockMaterial {
             incoming_bundles,
             local_time,
             round,
         })
-    }
-
-    /// Returns the next raw block proposal
-    async fn peek_candidate_raw_block_payload(
-        &self,
-        chain_id: ChainId,
-    ) -> Result<Option<RawBlockProposalPayload>, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
-        match client.peek_candidate_block_proposal().await {
-            Some(raw_block_proposal) => {
-                let mut message = Vec::new();
-                raw_block_proposal.content.write(&mut message);
-                Ok(Some(RawBlockProposalPayload {
-                    height: raw_block_proposal.content.block.height,
-                    payload_bytes: message,
-                }))
-            }
-            _ => Ok(None),
-        }
     }
 
     /// Returns the balance of given owner
@@ -1450,15 +1338,13 @@ where
     }
 
     /// Runs the node service.
-    #[tracing::instrument(name = "node_service", level = "info", skip(self), fields(port = ?self.port))]
+    #[instrument(name = "node_service", level = "info", skip(self), fields(port = ?self.port))]
     pub async fn run(&mut self) -> Result<(), anyhow::Error> {
         let port = self.port.get();
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
         let application_handler =
             axum::routing::get(util::graphiql).post(Self::application_handler);
         let blob_handler = axum::routing::get(Self::blob_handler);
-        let application_handler_without_block_proposal = axum::routing::get(util::graphiql)
-            .post(Self::application_handler_without_block_proposal);
 
         let app = Router::new()
             .route("/", index_handler)
@@ -1469,10 +1355,6 @@ where
             .route(
                 "/chains/:chain_id/applications/:application_id/blobs/:blob_id",
                 blob_handler,
-            )
-            .route(
-                "/checko/chains/:chain_id/applications/:application_id",
-                application_handler_without_block_proposal,
             )
             .route("/ready", axum::routing::get(|| async { "ready!" }))
             .route_service("/ws", GraphQLSubscription::new(self.schema()))
@@ -1568,7 +1450,7 @@ where
             })?;
         let hash = loop {
             let timeout = match client.execute_operations(operations.clone()).await? {
-                ClientOutcome::Committed(certificate) => break certificate.value.hash(),
+                ClientOutcome::Committed(certificate) => break certificate.hash(),
                 ClientOutcome::WaitForTimeout(timeout) => timeout,
             };
             let mut stream = client.subscribe().await.map_err(|_| {
@@ -1641,88 +1523,6 @@ where
                 service
                     .0
                     .user_application_mutation(application_id, &request, chain_id)
-                    .await?
-            }
-            OperationType::Subscription => return Err(NodeServiceError::UnsupportedQueryType),
-        };
-
-        Ok(response.into())
-    }
-
-    /// Handles mutations for user applications.
-    async fn user_application_mutation_without_block_proposal(
-        &self,
-        application_id: UserApplicationId,
-        request: &Request,
-        chain_id: ChainId,
-    ) -> Result<async_graphql::Response, NodeServiceError> {
-        debug!("Request: {:?}", &request);
-        let graphql_response = self
-            .user_application_query(application_id, request, chain_id)
-            .await?;
-        if graphql_response.is_err() {
-            let errors = graphql_response
-                .errors
-                .iter()
-                .map(|e| e.to_string())
-                .collect();
-            return Err(NodeServiceError::ApplicationServiceError { errors });
-        }
-        debug!("Response: {:?}", &graphql_response);
-        let bcs_bytes_list = bytes_from_response(graphql_response.data);
-        if bcs_bytes_list.is_empty() {
-            return Err(NodeServiceError::MalformedApplicationResponse);
-        }
-        let operations = bcs_bytes_list
-            .into_iter()
-            .map(|bytes| Operation::User {
-                application_id,
-                bytes,
-            })
-            .collect::<Vec<_>>();
-
-        let Ok(client) = self.context.lock().await.make_chain_client(chain_id) else {
-            return Err(NodeServiceError::UnknownChainId {
-                chain_id: chain_id.to_string(),
-            });
-        };
-        client
-            .execute_operations_without_block_proposal(operations.clone())
-            .await?;
-        Ok(async_graphql::Response::new(application_id.to_value()))
-    }
-
-    /// Executes a GraphQL query against an application.
-    /// Pattern matches on the `OperationType` of the query and routes the query
-    /// accordingly.
-    async fn application_handler_without_block_proposal(
-        Path((chain_id, application_id)): Path<(String, String)>,
-        service: Extension<Self>,
-        request: GraphQLRequest,
-    ) -> Result<GraphQLResponse, NodeServiceError> {
-        let mut request = request.into_inner();
-
-        let parsed_query = request.parsed_query()?;
-        let operation_type = operation_type(parsed_query)?;
-
-        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: UserApplicationId = application_id.parse()?;
-
-        let response = match operation_type {
-            OperationType::Query => {
-                service
-                    .0
-                    .user_application_query(application_id, &request, chain_id)
-                    .await?
-            }
-            OperationType::Mutation => {
-                service
-                    .0
-                    .user_application_mutation_without_block_proposal(
-                        application_id,
-                        &request,
-                        chain_id,
-                    )
                     .await?
             }
             OperationType::Subscription => return Err(NodeServiceError::UnsupportedQueryType),

@@ -17,7 +17,7 @@ use linera_core::{
 };
 use linera_version::VersionInfo;
 use tonic::{Code, IntoRequest, Request, Status};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 #[cfg(not(web))]
 use {
     super::GrpcProtoConversionError,
@@ -29,12 +29,9 @@ use super::{
         self, chain_info_result::Inner, validator_node_client::ValidatorNodeClient,
         SubscriptionRequest,
     },
-    transport, GrpcError, GRPC_MAX_MESSAGE_SIZE,
+    transport, GRPC_MAX_MESSAGE_SIZE,
 };
-use crate::{
-    config::ValidatorPublicNetworkConfig, node_provider::NodeOptions, HandleCertificateRequest,
-    HandleLiteCertRequest,
-};
+use crate::{HandleCertificateRequest, HandleLiteCertRequest, NodeOptions};
 
 #[derive(Clone)]
 pub struct GrpcClient {
@@ -46,23 +43,31 @@ pub struct GrpcClient {
 
 impl GrpcClient {
     pub fn new(
-        network: ValidatorPublicNetworkConfig,
-        options: NodeOptions,
-    ) -> Result<Self, GrpcError> {
-        let address = network.http_address();
-
-        let channel =
-            transport::create_channel(address.clone(), &transport::Options::from(&options))?;
+        address: String,
+        channel: transport::Channel,
+        retry_delay: Duration,
+        max_retries: u32,
+    ) -> Self {
         let client = ValidatorNodeClient::new(channel)
             .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE);
-
-        Ok(Self {
+        Self {
             address,
             client,
-            retry_delay: options.retry_delay,
-            max_retries: options.max_retries,
-        })
+            retry_delay,
+            max_retries,
+        }
+    }
+
+    pub fn create(address: String, node_options: NodeOptions) -> Self {
+        let options = (&node_options).into();
+        let channel = transport::create_channel(address.clone(), &options).unwrap();
+        Self::new(
+            address,
+            channel,
+            node_options.retry_delay,
+            node_options.max_retries,
+        )
     }
 
     /// Returns whether this gRPC status means the server stream should be reconnected to, or not.
@@ -259,7 +264,7 @@ impl ValidatorNode for GrpcClient {
         // terminates after unexpected or fatal errors.
         let notification_stream = endlessly_retrying_notification_stream
             .map(|result| {
-                Notification::try_from(result?).map_err(|err| {
+                Option::<Notification>::try_from(result?).map_err(|err| {
                     let message = format!("Could not deserialize notification: {}", err);
                     tonic::Status::new(Code::Internal, message)
                 })
@@ -279,7 +284,16 @@ impl ValidatorNode for GrpcClient {
                     true
                 })
             })
-            .filter_map(|result| future::ready(result.ok()));
+            .filter_map(|result| {
+                future::ready(match result {
+                    Ok(notification @ Some(_)) => notification,
+                    Ok(None) => None,
+                    Err(err) => {
+                        warn!("{}", err);
+                        None
+                    }
+                })
+            });
 
         Ok(Box::pin(notification_stream))
     }
@@ -296,7 +310,7 @@ impl ValidatorNode for GrpcClient {
         Ok(client_delegate!(self, get_genesis_config_hash, req)?.try_into()?)
     }
 
-    #[instrument(target = "grpc_client", skip_all, err, fields(address = self.address))]
+    #[instrument(target = "grpc_client", skip(self), err, fields(address = self.address))]
     async fn download_blob_content(&self, blob_id: BlobId) -> Result<BlobContent, NodeError> {
         let req = api::BlobId::try_from(blob_id)?;
         Ok(client_delegate!(self, download_blob_content, req)?.try_into()?)
@@ -317,16 +331,50 @@ impl ValidatorNode for GrpcClient {
     }
 
     #[instrument(target = "grpc_client", skip_all, err, fields(address = self.address))]
+    async fn download_certificates(
+        &self,
+        hashes: Vec<CryptoHash>,
+    ) -> Result<Vec<Certificate>, NodeError> {
+        let mut missing_hashes = hashes;
+        let mut certs_collected = Vec::with_capacity(missing_hashes.len());
+        loop {
+            // Macro doesn't compile if we pass `missing_hashes.clone()` directly to `client_delegate!`.
+            let missing = missing_hashes.clone();
+            let mut received: Vec<Certificate> =
+                client_delegate!(self, download_certificates, missing)?.try_into()?;
+
+            // In the case of the server not returning any certificates, we break the loop.
+            if received.is_empty() {
+                break;
+            }
+
+            // Honest validator should return certificates in the same order as the requested hashes.
+            missing_hashes = missing_hashes[received.len()..].to_vec();
+            certs_collected.append(&mut received);
+        }
+        Ok(certs_collected)
+    }
+
+    #[instrument(target = "grpc_client", skip(self), err, fields(address = self.address))]
     async fn blob_last_used_by(&self, blob_id: BlobId) -> Result<CryptoHash, NodeError> {
         let req = api::BlobId::try_from(blob_id)?;
         Ok(client_delegate!(self, blob_last_used_by, req)?.try_into()?)
+    }
+
+    #[instrument(target = "grpc_client", skip(self), err, fields(address = self.address))]
+    async fn blobs_last_used_by(
+        &self,
+        blob_ids: Vec<BlobId>,
+    ) -> Result<Vec<CryptoHash>, NodeError> {
+        let req = api::BlobIds::try_from(blob_ids)?;
+        Ok(client_delegate!(self, blobs_last_used_by, req)?.try_into()?)
     }
 }
 
 #[cfg(not(web))]
 #[async_trait::async_trait]
 impl mass_client::MassClient for GrpcClient {
-    #[tracing::instrument(skip_all, err)]
+    #[instrument(skip_all, err)]
     async fn send(
         &self,
         requests: Vec<RpcMessage>,

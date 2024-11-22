@@ -28,7 +28,7 @@ exclude = ["examples", "scripts"]
 resolver = "2"
 
 [workspace.package]
-version = "0.13.0"
+version = "0.14.0"
 authors = ["Linera <contact@linera.io>"]
 repository = "https://github.com/linera-io/linera-protocol"
 homepage = "https://linera.dev"
@@ -72,7 +72,7 @@ dashmap = "5.5.3"
 derive_more = "1.0.0"
 dirs = "5.0.1"
 dyn-clone = "1.0.17"
-ed25519-dalek = { version = "2.1.1", default-features = false, features = ["batch", "serde"] }
+ed25519-dalek = { version = "2.1.1", default-features = false, features = ["batch", "fast", "serde", "zeroize"] }
 either = "1.10.0"
 ethers = { version = "2.0.14", features = ["solc"] }
 flarch = "0.7.0"
@@ -135,13 +135,13 @@ tempfile = "3.10.1"
 test-case = "3.3.1"
 test-log = { version = "0.2.15", default-features = false, features = ["trace"] }
 test-strategy = "0.3.1"
-thiserror = "1.0.57"
+thiserror = "1.0.65"
 thiserror-context = "0.1.1"
 tonic = { version = "0.12.3", default-features = false }
 tonic-build = { version = "0.12.3", default-features = false }
-tonic-health = "0.12.3"
-tonic-reflection = "0.12.3"
-tonic-web = "0.12.3"
+tonic-health = "0.12"
+tonic-reflection = "0.12"
+tonic-web = "0.12"
 tonic-web-wasm-client = "0.6.0"
 tokio = "1.36.0"
 tokio-stream = "0.1.14"
@@ -161,40 +161,41 @@ wasm-bindgen-test = "0.3.42"
 wasm-encoder = "0.24.1"
 wasm-instrument = "0.4.0"
 wasm_thread = "0.3.0"
-wasmer = { package = "linera-wasmer", version = "4.4.0-linera.5", default-features = false }
-wasmer-compiler-singlepass = { package = "linera-wasmer-compiler-singlepass", version = "4.4.0-linera.5", default-features = false }
+wasmer = { package = "linera-wasmer", version = "4.4.0-linera.6", default-features = false }
+wasmer-compiler-singlepass = { package = "linera-wasmer-compiler-singlepass", version = "4.4.0-linera.6", default-features = false, features = ["std", "unwind", "avx"] }
 wasmparser = "0.101.1"
 wasmtime = { version = "25.0.0", default-features = false, features = ["cranelift", "runtime", "std"] }
 wasmtimer = "0.2.0"
 webassembly-test = "0.1.0"
 web-sys = "0.3.69"
+js-sys = "0.3.70"
 web-time = "1.1.0"
 wit-bindgen = "0.24.0"
 zstd = "0.13.2"
 serde_with = "3.11.0"
 
-linera-base = { version = "0.13.0", path = "./linera-base" }
-linera-chain = { version = "0.13.0", path = "./linera-chain" }
-linera-client = { version = "0.13.0", path = "./linera-client" }
-linera-core = { version = "0.13.0", path = "./linera-core", default-features = false }
-linera-ethereum = { version = "0.13.0", path = "./linera-ethereum", default-features = false }
-linera-execution = { version = "0.13.0", path = "./linera-execution", default-features = false }
-linera-indexer = { version = "0.13.0", path = "./linera-indexer/lib" }
-linera-indexer-graphql-client = { version = "0.13.0", path = "./linera-indexer/graphql-client" }
-linera-indexer-plugins = { version = "0.13.0", path = "./linera-indexer/plugins" }
-linera-rpc = { version = "0.13.0", path = "./linera-rpc" }
-linera-sdk = { version = "0.13.0", path = "./linera-sdk" }
-linera-storage = { version = "0.13.0", path = "./linera-storage", default-features = false }
-linera-storage-service = { version = "0.13.0", path = "./linera-storage-service", default-features = false }
-linera-version = { version = "0.13.0", path = "./linera-version" }
-linera-views = { version = "0.13.0", path = "./linera-views", default-features = false }
-linera-views-derive = { version = "0.13.0", path = "./linera-views-derive" }
-linera-witty = { version = "0.13.0", path = "./linera-witty" }
-linera-witty-macros = { version = "0.13.0", path = "./linera-witty-macros" }
-linera-witty-test-modules  = { version = "0.13.0", path = "./linera-witty/test-modules" }
-linera-sdk-derive = { version = "0.13.0", path = "./linera-sdk-derive" }
-linera-service = { version = "0.13.0", path = "./linera-service" }
-linera-service-graphql-client = { version = "0.13.0", path = "./linera-service-graphql-client" }
+linera-base = { version = "0.14.0", path = "./linera-base" }
+linera-chain = { version = "0.14.0", path = "./linera-chain" }
+linera-client = { version = "0.14.0", path = "./linera-client" }
+linera-core = { version = "0.14.0", path = "./linera-core", default-features = false }
+linera-ethereum = { version = "0.14.0", path = "./linera-ethereum", default-features = false }
+linera-execution = { version = "0.14.0", path = "./linera-execution", default-features = false }
+linera-indexer = { version = "0.14.0", path = "./linera-indexer/lib" }
+linera-indexer-graphql-client = { version = "0.14.0", path = "./linera-indexer/graphql-client" }
+linera-indexer-plugins = { version = "0.14.0", path = "./linera-indexer/plugins" }
+linera-rpc = { version = "0.14.0", path = "./linera-rpc" }
+linera-sdk = { version = "0.14.0", path = "./linera-sdk" }
+linera-storage = { version = "0.14.0", path = "./linera-storage", default-features = false }
+linera-storage-service = { version = "0.14.0", path = "./linera-storage-service", default-features = false }
+linera-version = { version = "0.14.0", path = "./linera-version" }
+linera-views = { version = "0.14.0", path = "./linera-views", default-features = false }
+linera-views-derive = { version = "0.14.0", path = "./linera-views-derive" }
+linera-witty = { version = "0.14.0", path = "./linera-witty" }
+linera-witty-macros = { version = "0.14.0", path = "./linera-witty-macros" }
+linera-witty-test-modules  = { version = "0.14.0", path = "./linera-witty/test-modules" }
+linera-sdk-derive = { version = "0.14.0", path = "./linera-sdk-derive" }
+linera-service = { version = "0.14.0", path = "./linera-service", default-features = false }
+linera-service-graphql-client = { version = "0.14.0", path = "./linera-service-graphql-client" }
 
 counter = { path = "./examples/counter" }
 meta-counter = { path = "./examples/meta-counter" }

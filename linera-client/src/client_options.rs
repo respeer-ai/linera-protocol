@@ -1,7 +1,13 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::HashSet, env, fmt, iter, num::NonZeroU16, path::PathBuf, time::Duration};
+use std::{
+    collections::HashSet,
+    env, fmt, iter,
+    num::{NonZeroU16, NonZeroUsize},
+    path::PathBuf,
+    time::Duration,
+};
 
 use chrono::{DateTime, Utc};
 use linera_base::{
@@ -14,7 +20,8 @@ use linera_base::{
 };
 use linera_core::client::BlanketMessagePolicy;
 use linera_execution::{
-    committee::ValidatorName, ResourceControlPolicy, WasmRuntime, WithWasmDefault as _,
+    committee::ValidatorName, ResourceControlPolicy, ResourceLimit, WasmRuntime,
+    WithWasmDefault as _,
 };
 #[cfg(not(feature = "no-storage"))]
 use linera_views::store::CommonStoreConfig;
@@ -99,6 +106,10 @@ pub struct ClientOptions {
     /// The WebAssembly runtime to use.
     #[arg(long)]
     pub wasm_runtime: Option<WasmRuntime>,
+
+    /// The maximal number of chains loaded in memory at a given time.
+    #[arg(long, default_value = "40")]
+    pub max_loaded_chains: NonZeroUsize,
 
     /// The maximal number of simultaneous queries to the database
     #[arg(long)]
@@ -395,7 +406,6 @@ pub enum ClientCommand {
     /// It can still reject incoming messages, so they bounce back to the sender.
     CloseChain {
         /// Chain ID (must be one of our chains)
-        #[arg(long = "from")]
         chain_id: ChainId,
     },
 
@@ -408,7 +418,7 @@ pub enum ClientCommand {
     /// linera local-balance` for a consolidated balance.
     LocalBalance {
         /// The account to read, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the
-        /// chain balance. By defaults, we read the chain balance of the default chain in
+        /// chain balance. By default, we read the chain balance of the default chain in
         /// the wallet.
         account: Option<Account>,
     },
@@ -420,7 +430,7 @@ pub enum ClientCommand {
     /// validators yet. Call `linera sync` first to do so.
     QueryBalance {
         /// The account to query, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the
-        /// chain balance. By defaults, we read the chain balance of the default chain in
+        /// chain balance. By default, we read the chain balance of the default chain in
         /// the wallet.
         account: Option<Account>,
     },
@@ -431,7 +441,7 @@ pub enum ClientCommand {
     /// This command is deprecated. Use `linera sync && linera query-balance` instead.
     SyncBalance {
         /// The account to query, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the
-        /// chain balance. By defaults, we read the chain balance of the default chain in
+        /// chain balance. By default, we read the chain balance of the default chain in
         /// the wallet.
         account: Option<Account>,
     },
@@ -452,13 +462,20 @@ pub enum ClientCommand {
     },
 
     /// Show the version and genesis config hash of a new validator, and print a warning if it is
-    /// incompatible.
+    /// incompatible. Also print some information about the given chain while we are at it.
     QueryValidator {
         /// The new validator's address.
         address: String,
+        /// The chain to query. If omitted, query the default chain of the wallet.
+        chain_id: Option<ChainId>,
+        /// The public key of the validator. If given, the signature of the chain query
+        /// info will be checked.
+        #[arg(long)]
+        name: Option<ValidatorName>,
     },
 
-    /// Show the current set of validators for a chain.
+    /// Show the current set of validators for a chain. Also print some information about
+    /// the given chain while we are at it.
     QueryValidators {
         /// The chain to query. If omitted, query the default chain of the wallet.
         chain_id: Option<ChainId>,
@@ -523,7 +540,7 @@ pub enum ClientCommand {
         #[arg(long)]
         byte_stored: Option<Amount>,
 
-        /// Set the base price of sending a operation from a block..
+        /// Set the base price of sending an operation from a block..
         #[arg(long)]
         operation: Option<Amount>,
 
@@ -541,19 +558,28 @@ pub enum ClientCommand {
 
         /// Set the maximum amount of fuel per block.
         #[arg(long)]
-        maximum_fuel_per_block: Option<u64>,
+        maximum_fuel_per_block: Option<ResourceLimit>,
 
-        /// Set the maximum size of an executed block.
+        /// Set the maximum size of an executed block, in bytes.
         #[arg(long)]
-        maximum_executed_block_size: Option<u64>,
+        maximum_executed_block_size: Option<ResourceLimit>,
+
+        /// Set the maximum size of data blobs, compressed bytecode and other binary blobs,
+        /// in bytes.
+        #[arg(long)]
+        maximum_blob_size: Option<ResourceLimit>,
+
+        /// Set the maximum size of decompressed contract or service bytecode, in bytes.
+        #[arg(long)]
+        maximum_bytecode_size: Option<ResourceLimit>,
 
         /// Set the maximum read data per block.
         #[arg(long)]
-        maximum_bytes_read_per_block: Option<u64>,
+        maximum_bytes_read_per_block: Option<ResourceLimit>,
 
         /// Set the maximum write data per block.
         #[arg(long)]
-        maximum_bytes_written_per_block: Option<u64>,
+        maximum_bytes_written_per_block: Option<ResourceLimit>,
     },
 
     /// Send one transfer per chain in bulk mode
@@ -637,7 +663,7 @@ pub enum ClientCommand {
         #[arg(long, default_value = "0")]
         byte_stored_price: Amount,
 
-        /// Set the base price of sending a operation from a block..
+        /// Set the base price of sending an operation from a block..
         #[arg(long, default_value = "0")]
         operation_price: Amount,
 
@@ -655,19 +681,28 @@ pub enum ClientCommand {
 
         /// Set the maximum amount of fuel per block.
         #[arg(long)]
-        maximum_fuel_per_block: Option<u64>,
+        maximum_fuel_per_block: ResourceLimit,
 
         /// Set the maximum size of an executed block.
         #[arg(long)]
-        maximum_executed_block_size: Option<u64>,
+        maximum_executed_block_size: ResourceLimit,
+
+        /// Set the maximum size of decompressed contract or service bytecode, in bytes.
+        #[arg(long)]
+        maximum_bytecode_size: ResourceLimit,
+
+        /// Set the maximum size of data blobs, compressed bytecode and other binary blobs,
+        /// in bytes.
+        #[arg(long)]
+        maximum_blob_size: ResourceLimit,
 
         /// Set the maximum read data per block.
         #[arg(long)]
-        maximum_bytes_read_per_block: Option<u64>,
+        maximum_bytes_read_per_block: ResourceLimit,
 
         /// Set the maximum write data per block.
         #[arg(long)]
-        maximum_bytes_written_per_block: Option<u64>,
+        maximum_bytes_written_per_block: ResourceLimit,
 
         /// Force this wallet to generate keys using a PRNG and a given seed. USE FOR
         /// TESTING ONLY.
@@ -868,6 +903,75 @@ pub enum ClientCommand {
     /// Manage a local Linera Network.
     #[command(subcommand)]
     Net(NetCommand),
+
+    /// Operation on the storage.
+    #[command(subcommand)]
+    Storage(DatabaseToolCommand),
+}
+
+#[derive(Clone, clap::Parser)]
+pub enum DatabaseToolCommand {
+    /// Delete all the namespaces of the database
+    #[command(name = "delete_all")]
+    DeleteAll {
+        /// Storage configuration for the blockchain history.
+        #[arg(long = "storage")]
+        storage_config: String,
+    },
+
+    /// Delete a single namespace from the database
+    #[command(name = "delete_namespace")]
+    DeleteNamespace {
+        /// Storage configuration for the blockchain history.
+        #[arg(long = "storage")]
+        storage_config: String,
+    },
+
+    /// Check existence of a namespace in the database
+    #[command(name = "check_existence")]
+    CheckExistence {
+        /// Storage configuration for the blockchain history.
+        #[arg(long = "storage")]
+        storage_config: String,
+    },
+
+    /// Check absence of a namespace in the database
+    #[command(name = "check_absence")]
+    CheckAbsence {
+        /// Storage configuration for the blockchain history.
+        #[arg(long = "storage")]
+        storage_config: String,
+    },
+
+    /// Initialize a namespace in the database
+    #[command(name = "initialize")]
+    Initialize {
+        /// Storage configuration for the blockchain history.
+        #[arg(long = "storage")]
+        storage_config: String,
+    },
+
+    /// List the namespaces of the database
+    #[command(name = "list_namespaces")]
+    ListNamespaces {
+        /// Storage configuration for the blockchain history.
+        #[arg(long = "storage")]
+        storage_config: String,
+    },
+}
+
+impl DatabaseToolCommand {
+    pub fn storage_config(&self) -> Result<StorageConfigNamespace, Error> {
+        let storage_config = match self {
+            DatabaseToolCommand::DeleteAll { storage_config } => storage_config,
+            DatabaseToolCommand::DeleteNamespace { storage_config } => storage_config,
+            DatabaseToolCommand::CheckExistence { storage_config } => storage_config,
+            DatabaseToolCommand::CheckAbsence { storage_config } => storage_config,
+            DatabaseToolCommand::Initialize { storage_config } => storage_config,
+            DatabaseToolCommand::ListNamespaces { storage_config } => storage_config,
+        };
+        Ok(storage_config.parse::<StorageConfigNamespace>()?)
+    }
 }
 
 #[derive(Clone, clap::Parser)]
@@ -881,7 +985,7 @@ pub enum NetCommand {
         /// The number of initial "root" chains created in the genesis config on top of
         /// the default "admin" chain. All initial chains belong to the first "admin"
         /// wallet.
-        #[arg(long, default_value = "10")]
+        #[arg(long, default_value = "2")]
         other_initial_chains: u32,
 
         /// The initial amount of native tokens credited in the initial "root" chains,
@@ -925,9 +1029,13 @@ pub enum NetCommand {
         path: Option<String>,
 
         /// Run with a specific storage.
-        /// If none, then a linera-storage-service is spanned on a random free port.
+        /// If none, then a linera-storage-service is started on a random free port.
         #[arg(long)]
-        storage_config_namespace: Option<String>,
+        storage: Option<String>,
+
+        /// External protocol used, either grpc or grpcs.
+        #[arg(long, default_value = "grpc")]
+        external_protocol: String,
     },
 
     /// Print a bash helper script to make `linera net up` easier to use. The script is
@@ -946,13 +1054,12 @@ pub enum ResourceControlPolicyConfig {
 
 impl ResourceControlPolicyConfig {
     pub fn into_policy(self) -> ResourceControlPolicy {
-        use ResourceControlPolicyConfig::*;
         match self {
-            Default => ResourceControlPolicy::default(),
-            OnlyFuel => ResourceControlPolicy::only_fuel(),
-            FuelAndBlock => ResourceControlPolicy::fuel_and_block(),
-            AllCategories => ResourceControlPolicy::all_categories(),
-            Devnet => ResourceControlPolicy::devnet(),
+            ResourceControlPolicyConfig::Default => ResourceControlPolicy::default(),
+            ResourceControlPolicyConfig::OnlyFuel => ResourceControlPolicy::only_fuel(),
+            ResourceControlPolicyConfig::FuelAndBlock => ResourceControlPolicy::fuel_and_block(),
+            ResourceControlPolicyConfig::AllCategories => ResourceControlPolicy::all_categories(),
+            ResourceControlPolicyConfig::Devnet => ResourceControlPolicy::devnet(),
         }
     }
 }
@@ -974,7 +1081,13 @@ impl fmt::Display for ResourceControlPolicyConfig {
 #[derive(Clone, clap::Subcommand)]
 pub enum WalletCommand {
     /// Show the contents of the wallet.
-    Show { chain_id: Option<ChainId> },
+    Show {
+        /// The chain to show the metadata.
+        chain_id: Option<ChainId>,
+        /// Only print a non-formatted list of the wallet's chain IDs.
+        #[arg(long)]
+        short: bool,
+    },
 
     /// Change the wallet default chain.
     SetDefault { chain_id: ChainId },

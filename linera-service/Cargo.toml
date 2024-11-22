@@ -13,14 +13,19 @@ version.workspace = true
 
 [features]
 ethereum = []
-default = ["wasmer", "rocksdb"]
+default = ["wasmer", "rocksdb", "storage-service"]
 test = [
     "linera-base/test",
     "linera-views/test",
     "linera-execution/test",
     "dep:stdext",
 ]
-benchmark = ["linera-base/test", "linera-client/benchmark", "dep:linera-sdk"]
+benchmark = [
+    "linera-base/test",
+    "linera-client/benchmark",
+    "linera-chain/benchmark",
+    "dep:linera-sdk",
+]
 wasmer = ["linera-client/wasmer", "linera-execution/wasmer", "linera-storage/wasmer"]
 wasmtime = [
     "linera-client/wasmtime",
@@ -93,8 +98,8 @@ local-ip-address = "0.6.1"
 pathdiff = { workspace = true, optional = true }
 port-selector.workspace = true
 prometheus = { workspace = true, optional = true }
+prost = { workspace = true }
 rand.workspace = true
-rcgen.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
@@ -112,7 +117,6 @@ tonic-web.workspace = true
 tower.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["fmt"] }
 
 [build-dependencies]
 cfg_aliases.workspace = true
@@ -134,7 +138,7 @@ linera-ethereum.workspace = true
 linera-execution = { workspace = true, features = ["test"] }
 linera-rpc = { workspace = true, features = ["test"] }
 linera-sdk = { workspace = true, features = ["wasmer", "test"] }
-linera-service = { path = ".", features = ["test"] }
+linera-service = { path = ".", default-features = false, features = ["test"] }
 linera-storage = { workspace = true, features = ["test"] }
 linera-views = { workspace = true, features = ["test"] }
 matching-engine.workspace = true
@@ -148,10 +152,6 @@ test-case.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 test-strategy.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
-
-[[bin]]
-name = "linera-db"
-path = "src/database_tool.rs"
 
 [[bin]]
 name = "linera"

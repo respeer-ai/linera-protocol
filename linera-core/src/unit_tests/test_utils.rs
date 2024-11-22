@@ -5,6 +5,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     num::NonZeroUsize,
     sync::Arc,
+    vec,
 };
 
 use async_trait::async_trait;
@@ -15,16 +16,18 @@ use futures::{
 use linera_base::{
     crypto::*,
     data_types::*,
-    identifiers::{BlobId, ChainDescription, ChainId},
+    identifiers::{BlobId, ChainDescription, ChainId, UserApplicationId},
 };
-use linera_chain::data_types::{
-    BlockProposal, Certificate, HashedCertificateValue, LiteCertificate,
+use linera_chain::{
+    data_types::{BlockProposal, Certificate, HashedCertificateValue, LiteCertificate},
+    types::ConfirmedBlockCertificate,
 };
 use linera_execution::{
     committee::{Committee, ValidatorName},
-    ResourceControlPolicy, WasmRuntime,
+    test_utils::{register_mock_applications_internal, MockApplication},
+    ExecutionRuntimeContext, ExecutionStateView, ResourceControlPolicy, WasmRuntime,
 };
-use linera_storage::{DbStorage, Storage, TestClock};
+use linera_storage::{ChainRuntimeContext, DbStorage, Storage, TestClock};
 #[cfg(all(not(target_arch = "wasm32"), feature = "storage-service"))]
 use linera_storage_service::client::ServiceStoreClient;
 use linera_version::VersionInfo;
@@ -33,7 +36,8 @@ use linera_views::dynamo_db::DynamoDbStore;
 #[cfg(feature = "scylladb")]
 use linera_views::scylla_db::ScyllaDbStore;
 use linera_views::{
-    memory::MemoryStore, random::generate_test_namespace, store::TestKeyValueStore as _,
+    context::Context, memory::MemoryStore, random::generate_test_namespace,
+    store::TestKeyValueStore as _,
 };
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -50,7 +54,7 @@ use crate::{
         CrossChainMessageDelivery, NodeError, NotificationStream, ValidatorNode,
         ValidatorNodeProvider,
     },
-    notifier::Notifier,
+    notifier::ChannelNotifier,
     worker::{NetworkActions, Notification, WorkerState},
 };
 
@@ -77,7 +81,7 @@ where
 {
     state: WorkerState<S>,
     fault_type: FaultType,
-    notifier: Notifier<Notification>,
+    notifier: Arc<ChannelNotifier<Notification>>,
 }
 
 #[derive(Clone)]
@@ -174,11 +178,33 @@ where
             validator.do_download_certificate(hash, sender)
         })
         .await
+        .map(Into::into)
+    }
+
+    async fn download_certificates(
+        &self,
+        hashes: Vec<CryptoHash>,
+    ) -> Result<Vec<Certificate>, NodeError> {
+        self.spawn_and_receive(move |validator, sender| {
+            validator.do_download_certificates(hashes, sender)
+        })
+        .await
+        .map(|certs| certs.into_iter().map(Certificate::from).collect())
     }
 
     async fn blob_last_used_by(&self, blob_id: BlobId) -> Result<CryptoHash, NodeError> {
         self.spawn_and_receive(move |validator, sender| {
             validator.do_blob_last_used_by(blob_id, sender)
+        })
+        .await
+    }
+
+    async fn blobs_last_used_by(
+        &self,
+        blob_ids: Vec<BlobId>,
+    ) -> Result<Vec<CryptoHash>, NodeError> {
+        self.spawn_and_receive(move |validator, sender| {
+            validator.do_blobs_last_used_by(blob_ids, sender)
         })
         .await
     }
@@ -192,7 +218,7 @@ where
         let client = LocalValidator {
             fault_type: FaultType::Honest,
             state,
-            notifier: Notifier::default(),
+            notifier: Arc::new(ChannelNotifier::default()),
         };
         Self {
             name,
@@ -292,7 +318,6 @@ where
     async fn handle_certificate(
         certificate: Certificate,
         validator: &mut MutexGuard<'_, LocalValidator<S>>,
-        notifications: &mut Vec<Notification>,
         blobs: Vec<Blob>,
     ) -> Option<Result<ChainInfoResponse, NodeError>> {
         match validator.fault_type {
@@ -307,7 +332,7 @@ where
                     .fully_handle_certificate_with_notifications(
                         certificate,
                         blobs,
-                        Some(notifications),
+                        &validator.notifier,
                     )
                     .await
                     .map_err(Into::into),
@@ -338,11 +363,10 @@ where
         validator: &mut MutexGuard<'_, LocalValidator<S>>,
         blobs: Vec<Blob>,
     ) -> Result<ChainInfoResponse, NodeError> {
-        let mut notifications = Vec::new();
         let is_validated = certificate.value().is_validated();
         let handle_certificate_result =
-            Self::handle_certificate(certificate, validator, &mut notifications, blobs).await;
-        let result = match handle_certificate_result {
+            Self::handle_certificate(certificate, validator, blobs).await;
+        match handle_certificate_result {
             Some(Err(NodeError::BlobsNotFound(_) | NodeError::BlobNotFoundOnRead(_))) => {
                 handle_certificate_result.expect("handle_certificate_result should be Some")
             }
@@ -365,9 +389,7 @@ where
                     error: "offline".to_string(),
                 }),
             },
-        };
-        validator.notifier.handle_notifications(&notifications);
-        result
+        }
     }
 
     async fn do_handle_certificate(
@@ -448,18 +470,33 @@ where
     async fn do_download_certificate(
         self,
         hash: CryptoHash,
-        sender: oneshot::Sender<Result<Certificate, NodeError>>,
-    ) -> Result<(), Result<Certificate, NodeError>> {
+        sender: oneshot::Sender<Result<ConfirmedBlockCertificate, NodeError>>,
+    ) -> Result<(), Result<ConfirmedBlockCertificate, NodeError>> {
         let validator = self.client.lock().await;
         let certificate = validator
             .state
             .storage_client()
             .read_certificate(hash)
             .await
-            .map(Into::into)
             .map_err(Into::into);
 
         sender.send(certificate)
+    }
+
+    async fn do_download_certificates(
+        self,
+        hashes: Vec<CryptoHash>,
+        sender: oneshot::Sender<Result<Vec<ConfirmedBlockCertificate>, NodeError>>,
+    ) -> Result<(), Result<Vec<ConfirmedBlockCertificate>, NodeError>> {
+        let validator = self.client.lock().await;
+        let certificates = validator
+            .state
+            .storage_client()
+            .read_certificates(hashes)
+            .await
+            .map_err(Into::into);
+
+        sender.send(certificates)
     }
 
     async fn do_blob_last_used_by(
@@ -477,6 +514,23 @@ where
             .map_err(Into::into);
 
         sender.send(certificate_hash)
+    }
+
+    async fn do_blobs_last_used_by(
+        self,
+        blob_ids: Vec<BlobId>,
+        sender: oneshot::Sender<Result<Vec<CryptoHash>, NodeError>>,
+    ) -> Result<(), Result<Vec<CryptoHash>, NodeError>> {
+        let validator = self.client.lock().await;
+        let blob_states = validator
+            .state
+            .storage_client()
+            .read_blob_states(&blob_ids)
+            .await;
+        let hashes = blob_states
+            .map(|states| states.into_iter().map(|state| state.last_used_by).collect())
+            .map_err(Into::into);
+        sender.send(hashes)
     }
 }
 
@@ -782,6 +836,7 @@ where
             false,
             [chain_id],
             format!("Client node for {:.8}", chain_id),
+            NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
         ));
         Ok(builder.create_chain_client(
             chain_id,
@@ -803,7 +858,7 @@ where
         chain_id: ChainId,
         block_height: BlockHeight,
         target_count: usize,
-    ) -> Option<Certificate> {
+    ) -> Option<ConfirmedBlockCertificate> {
         let query =
             ChainInfoQuery::new(chain_id).with_sent_certificate_hashes_in_range(BlockHeightRange {
                 start: block_height,
@@ -818,6 +873,7 @@ where
                         mut requested_sent_certificate_hashes,
                         ..
                     } = *response.info;
+                    debug_assert!(requested_sent_certificate_hashes.len() <= 1);
                     if let Some(cert_hash) = requested_sent_certificate_hashes.pop() {
                         if let Ok(cert) = validator.download_certificate(cert_hash).await {
                             if cert.value().is_confirmed()
@@ -826,7 +882,7 @@ where
                             {
                                 cert.check(&self.initial_committee).unwrap();
                                 count += 1;
-                                certificate = Some(cert);
+                                certificate = Some(cert.try_into().unwrap());
                             }
                         }
                     }
@@ -1133,4 +1189,28 @@ impl StorageBuilder for ScyllaDbStorageBuilder {
     fn clock(&self) -> &TestClock {
         &self.clock
     }
+}
+
+/// Creates `count` [`MockApplication`]s and registers them in the provided [`ExecutionStateView`].
+///
+/// Returns an iterator over pairs of [`UserApplicationId`]s and their respective
+/// [`MockApplication`]s.
+pub async fn register_mock_applications<C, S>(
+    state: &mut ExecutionStateView<C>,
+    count: u64,
+    storage: S,
+) -> anyhow::Result<vec::IntoIter<(UserApplicationId, MockApplication, Blob, Blob)>>
+where
+    C: Context<Extra = ChainRuntimeContext<S>> + Clone + Send + Sync + 'static,
+    C::Extra: ExecutionRuntimeContext,
+    S: Storage + Clone + Send + Sync + 'static,
+{
+    let mock_applications = register_mock_applications_internal(state, count).await?;
+    for (_id, _mock_application, contract_blob, service_blob) in &mock_applications {
+        storage
+            .write_blobs(&[contract_blob.clone(), service_blob.clone()])
+            .await?;
+    }
+
+    Ok(mock_applications.into_iter())
 }

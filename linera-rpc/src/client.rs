@@ -165,12 +165,36 @@ impl ValidatorNode for Client {
         })
     }
 
+    async fn download_certificates(
+        &self,
+        hashes: Vec<CryptoHash>,
+    ) -> Result<Vec<Certificate>, NodeError> {
+        Ok(match self {
+            Client::Grpc(grpc_client) => grpc_client.download_certificates(hashes).await?,
+
+            #[cfg(with_simple_network)]
+            Client::Simple(simple_client) => simple_client.download_certificates(hashes).await?,
+        })
+    }
+
     async fn blob_last_used_by(&self, blob_id: BlobId) -> Result<CryptoHash, NodeError> {
         Ok(match self {
             Client::Grpc(grpc_client) => grpc_client.blob_last_used_by(blob_id).await?,
 
             #[cfg(with_simple_network)]
             Client::Simple(simple_client) => simple_client.blob_last_used_by(blob_id).await?,
+        })
+    }
+
+    async fn blobs_last_used_by(
+        &self,
+        blob_ids: Vec<BlobId>,
+    ) -> Result<Vec<CryptoHash>, NodeError> {
+        Ok(match self {
+            Client::Grpc(grpc_client) => grpc_client.blobs_last_used_by(blob_ids).await?,
+
+            #[cfg(with_simple_network)]
+            Client::Simple(simple_client) => simple_client.blobs_last_used_by(blob_ids).await?,
         })
     }
 }

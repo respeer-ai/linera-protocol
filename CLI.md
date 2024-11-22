@@ -48,6 +48,13 @@ This document contains the help content for the `linera` command-line program.
 * [`linera net`↴](#linera-net)
 * [`linera net up`↴](#linera-net-up)
 * [`linera net helper`↴](#linera-net-helper)
+* [`linera storage`↴](#linera-storage)
+* [`linera storage delete_all`↴](#linera-storage-delete_all)
+* [`linera storage delete_namespace`↴](#linera-storage-delete_namespace)
+* [`linera storage check_existence`↴](#linera-storage-check_existence)
+* [`linera storage check_absence`↴](#linera-storage-check_absence)
+* [`linera storage initialize`↴](#linera-storage-initialize)
+* [`linera storage list_namespaces`↴](#linera-storage-list_namespaces)
 
 ## `linera`
 
@@ -68,8 +75,8 @@ A Byzantine-fault tolerant sidechain with low-latency finality and high throughp
 * `sync-balance` — (DEPRECATED) Synchronize the local state of the chain with a quorum validators, then query the local balance
 * `sync` — Synchronize the local state of the chain with a quorum validators
 * `process-inbox` — Process all pending incoming messages from the inbox of the given chain by creating as many blocks as needed to execute all (non-failing) messages. Failing messages will be marked as rejected and may bounce to their sender depending on their configuration
-* `query-validator` — Show the version and genesis config hash of a new validator, and print a warning if it is incompatible
-* `query-validators` — Show the current set of validators for a chain
+* `query-validator` — Show the version and genesis config hash of a new validator, and print a warning if it is incompatible. Also print some information about the given chain while we are at it
+* `query-validators` — Show the current set of validators for a chain. Also print some information about the given chain while we are at it
 * `set-validator` — Add or modify a validator (admin only)
 * `remove-validator` — Remove a validator (admin only)
 * `finalize-committee` — Deprecates all committees except the last one
@@ -90,6 +97,7 @@ A Byzantine-fault tolerant sidechain with low-latency finality and high throughp
 * `wallet` — Show the contents of the wallet
 * `project` — Manage Linera projects
 * `net` — Manage a local Linera Network
+* `storage` — Operation on the storage
 
 ###### **Options:**
 
@@ -106,6 +114,9 @@ A Byzantine-fault tolerant sidechain with low-latency finality and high throughp
 
   Default value: `10`
 * `--wasm-runtime <WASM_RUNTIME>` — The WebAssembly runtime to use
+* `--max-loaded-chains <MAX_LOADED_CHAINS>` — The maximal number of chains loaded in memory at a given time
+
+  Default value: `40`
 * `--max-concurrent-queries <MAX_CONCURRENT_QUERIES>` — The maximal number of simultaneous queries to the database
 * `--max-stream-queries <MAX_STREAM_QUERIES>` — The maximal number of simultaneous stream queries to the database
 
@@ -256,11 +267,11 @@ Close an existing chain.
 
 A closed chain cannot execute operations or accept messages anymore. It can still reject incoming messages, so they bounce back to the sender.
 
-**Usage:** `linera close-chain --from <CHAIN_ID>`
+**Usage:** `linera close-chain <CHAIN_ID>`
 
-###### **Options:**
+###### **Arguments:**
 
-* `--from <CHAIN_ID>` — Chain ID (must be one of our chains)
+* `<CHAIN_ID>` — Chain ID (must be one of our chains)
 
 
 
@@ -274,7 +285,7 @@ NOTE: The local balance does not reflect messages that are waiting to be picked 
 
 ###### **Arguments:**
 
-* `<ACCOUNT>` — The account to read, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the chain balance. By defaults, we read the chain balance of the default chain in the wallet
+* `<ACCOUNT>` — The account to read, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the chain balance. By default, we read the chain balance of the default chain in the wallet
 
 
 
@@ -288,7 +299,7 @@ NOTE: The balance does not reflect messages that have not been synchronized from
 
 ###### **Arguments:**
 
-* `<ACCOUNT>` — The account to query, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the chain balance. By defaults, we read the chain balance of the default chain in the wallet
+* `<ACCOUNT>` — The account to query, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the chain balance. By default, we read the chain balance of the default chain in the wallet
 
 
 
@@ -302,7 +313,7 @@ This command is deprecated. Use `linera sync && linera query-balance` instead.
 
 ###### **Arguments:**
 
-* `<ACCOUNT>` — The account to query, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the chain balance. By defaults, we read the chain balance of the default chain in the wallet
+* `<ACCOUNT>` — The account to query, written as `CHAIN-ID:OWNER` or simply `CHAIN-ID` for the chain balance. By default, we read the chain balance of the default chain in the wallet
 
 
 
@@ -332,19 +343,24 @@ Process all pending incoming messages from the inbox of the given chain by creat
 
 ## `linera query-validator`
 
-Show the version and genesis config hash of a new validator, and print a warning if it is incompatible
+Show the version and genesis config hash of a new validator, and print a warning if it is incompatible. Also print some information about the given chain while we are at it
 
-**Usage:** `linera query-validator <ADDRESS>`
+**Usage:** `linera query-validator [OPTIONS] <ADDRESS> [CHAIN_ID]`
 
 ###### **Arguments:**
 
 * `<ADDRESS>` — The new validator's address
+* `<CHAIN_ID>` — The chain to query. If omitted, query the default chain of the wallet
+
+###### **Options:**
+
+* `--name <NAME>` — The public key of the validator. If given, the signature of the chain query info will be checked
 
 
 
 ## `linera query-validators`
 
-Show the current set of validators for a chain
+Show the current set of validators for a chain. Also print some information about the given chain while we are at it
 
 **Usage:** `linera query-validators [CHAIN_ID]`
 
@@ -406,12 +422,14 @@ View or update the resource control policy
 * `--byte-read <BYTE_READ>` — Set the price per byte read
 * `--byte-written <BYTE_WRITTEN>` — Set the price per byte written
 * `--byte-stored <BYTE_STORED>` — Set the price per byte stored
-* `--operation <OPERATION>` — Set the base price of sending a operation from a block..
+* `--operation <OPERATION>` — Set the base price of sending an operation from a block..
 * `--operation-byte <OPERATION_BYTE>` — Set the additional price for each byte in the argument of a user operation
 * `--message <MESSAGE>` — Set the base price of sending a message from a block..
 * `--message-byte <MESSAGE_BYTE>` — Set the additional price for each byte in the argument of a user message
 * `--maximum-fuel-per-block <MAXIMUM_FUEL_PER_BLOCK>` — Set the maximum amount of fuel per block
-* `--maximum-executed-block-size <MAXIMUM_EXECUTED_BLOCK_SIZE>` — Set the maximum size of an executed block
+* `--maximum-executed-block-size <MAXIMUM_EXECUTED_BLOCK_SIZE>` — Set the maximum size of an executed block, in bytes
+* `--maximum-blob-size <MAXIMUM_BLOB_SIZE>` — Set the maximum size of data blobs, compressed bytecode and other binary blobs, in bytes
+* `--maximum-bytecode-size <MAXIMUM_BYTECODE_SIZE>` — Set the maximum size of decompressed contract or service bytecode, in bytes
 * `--maximum-bytes-read-per-block <MAXIMUM_BYTES_READ_PER_BLOCK>` — Set the maximum read data per block
 * `--maximum-bytes-written-per-block <MAXIMUM_BYTES_WRITTEN_PER_BLOCK>` — Set the maximum write data per block
 
@@ -459,7 +477,7 @@ Create genesis configuration for a Linera deployment. Create initial user chains
 * `--byte-stored-price <BYTE_STORED_PRICE>` — Set the price per byte stored
 
   Default value: `0`
-* `--operation-price <OPERATION_PRICE>` — Set the base price of sending a operation from a block..
+* `--operation-price <OPERATION_PRICE>` — Set the base price of sending an operation from a block..
 
   Default value: `0`
 * `--operation-byte-price <OPERATION_BYTE_PRICE>` — Set the additional price for each byte in the argument of a user operation
@@ -473,6 +491,8 @@ Create genesis configuration for a Linera deployment. Create initial user chains
   Default value: `0`
 * `--maximum-fuel-per-block <MAXIMUM_FUEL_PER_BLOCK>` — Set the maximum amount of fuel per block
 * `--maximum-executed-block-size <MAXIMUM_EXECUTED_BLOCK_SIZE>` — Set the maximum size of an executed block
+* `--maximum-bytecode-size <MAXIMUM_BYTECODE_SIZE>` — Set the maximum size of decompressed contract or service bytecode, in bytes
+* `--maximum-blob-size <MAXIMUM_BLOB_SIZE>` — Set the maximum size of data blobs, compressed bytecode and other binary blobs, in bytes
 * `--maximum-bytes-read-per-block <MAXIMUM_BYTES_READ_PER_BLOCK>` — Set the maximum read data per block
 * `--maximum-bytes-written-per-block <MAXIMUM_BYTES_WRITTEN_PER_BLOCK>` — Set the maximum write data per block
 * `--testing-prng-seed <TESTING_PRNG_SEED>` — Force this wallet to generate keys using a PRNG and a given seed. USE FOR TESTING ONLY
@@ -699,11 +719,15 @@ Show the contents of the wallet
 
 Show the contents of the wallet
 
-**Usage:** `linera wallet show [CHAIN_ID]`
+**Usage:** `linera wallet show [OPTIONS] [CHAIN_ID]`
 
 ###### **Arguments:**
 
-* `<CHAIN_ID>`
+* `<CHAIN_ID>` — The chain to show the metadata
+
+###### **Options:**
+
+* `--short` — Only print a non-formatted list of the wallet's chain IDs
 
 
 
@@ -851,7 +875,7 @@ Start a Local Linera Network
 * `--extra-wallets <EXTRA_WALLETS>` — The number of extra wallets and user chains to initialise. Default is 0
 * `--other-initial-chains <OTHER_INITIAL_CHAINS>` — The number of initial "root" chains created in the genesis config on top of the default "admin" chain. All initial chains belong to the first "admin" wallet
 
-  Default value: `10`
+  Default value: `2`
 * `--initial-amount <INITIAL_AMOUNT>` — The initial amount of native tokens credited in the initial "root" chains, including the default "admin" chain
 
   Default value: `1000000`
@@ -869,7 +893,10 @@ Start a Local Linera Network
 
 * `--testing-prng-seed <TESTING_PRNG_SEED>` — Force this wallet to generate keys using a PRNG and a given seed. USE FOR TESTING ONLY
 * `--path <PATH>` — Run with a specific path where the wallet and validator input files are. If none, then a temporary directory is created
-* `--storage-config-namespace <STORAGE_CONFIG_NAMESPACE>` — Run with a specific storage. If none, then a linera-storage-service is spanned on a random free port
+* `--storage <STORAGE>` — Run with a specific storage. If none, then a linera-storage-service is started on a random free port
+* `--external-protocol <EXTERNAL_PROTOCOL>` — External protocol used, either grpc or grpcs
+
+  Default value: `grpc`
 
 
 
@@ -878,6 +905,95 @@ Start a Local Linera Network
 Print a bash helper script to make `linera net up` easier to use. The script is meant to be installed in `~/.bash_profile` or sourced when needed
 
 **Usage:** `linera net helper`
+
+
+
+## `linera storage`
+
+Operation on the storage
+
+**Usage:** `linera storage <COMMAND>`
+
+###### **Subcommands:**
+
+* `delete_all` — Delete all the namespaces of the database
+* `delete_namespace` — Delete a single namespace from the database
+* `check_existence` — Check existence of a namespace in the database
+* `check_absence` — Check absence of a namespace in the database
+* `initialize` — Initialize a namespace in the database
+* `list_namespaces` — List the namespaces of the database
+
+
+
+## `linera storage delete_all`
+
+Delete all the namespaces of the database
+
+**Usage:** `linera storage delete_all --storage <STORAGE_CONFIG>`
+
+###### **Options:**
+
+* `--storage <STORAGE_CONFIG>` — Storage configuration for the blockchain history
+
+
+
+## `linera storage delete_namespace`
+
+Delete a single namespace from the database
+
+**Usage:** `linera storage delete_namespace --storage <STORAGE_CONFIG>`
+
+###### **Options:**
+
+* `--storage <STORAGE_CONFIG>` — Storage configuration for the blockchain history
+
+
+
+## `linera storage check_existence`
+
+Check existence of a namespace in the database
+
+**Usage:** `linera storage check_existence --storage <STORAGE_CONFIG>`
+
+###### **Options:**
+
+* `--storage <STORAGE_CONFIG>` — Storage configuration for the blockchain history
+
+
+
+## `linera storage check_absence`
+
+Check absence of a namespace in the database
+
+**Usage:** `linera storage check_absence --storage <STORAGE_CONFIG>`
+
+###### **Options:**
+
+* `--storage <STORAGE_CONFIG>` — Storage configuration for the blockchain history
+
+
+
+## `linera storage initialize`
+
+Initialize a namespace in the database
+
+**Usage:** `linera storage initialize --storage <STORAGE_CONFIG>`
+
+###### **Options:**
+
+* `--storage <STORAGE_CONFIG>` — Storage configuration for the blockchain history
+
+
+
+## `linera storage list_namespaces`
+
+List the namespaces of the database
+
+**Usage:** `linera storage list_namespaces --storage <STORAGE_CONFIG>`
+
+###### **Options:**
+
+* `--storage <STORAGE_CONFIG>` — Storage configuration for the blockchain history
 
 
 

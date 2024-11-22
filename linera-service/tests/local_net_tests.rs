@@ -22,9 +22,12 @@ use linera_base::{
 };
 use linera_service::{
     cli_wrappers::{
-        local_net::{get_node_port, Database, LocalNetConfig, PathProvider, ProcessInbox},
-        ClientWrapper, FaucetOption, LineraNet, LineraNetConfig, Network,
+        local_net::{
+            get_node_port, Database, LocalNet, LocalNetConfig, PathProvider, ProcessInbox,
+        },
+        ClientWrapper, FaucetOption, LineraNet, LineraNetConfig, Network, OnClientDrop,
     },
+    faucet::ClaimOutcome,
     test_name,
 };
 use test_case::test_case;
@@ -70,11 +73,10 @@ impl Drop for RestoreVarOnDrop {
 #[test_log::test(tokio::test)]
 async fn test_end_to_end_reconfiguration(config: LocalNetConfig) -> Result<()> {
     use linera_base::{crypto::KeyPair, identifiers::Owner};
-    use linera_service::cli_wrappers::local_net::LocalNet;
     let _guard = INTEGRATION_TEST_GUARD.lock().await;
     tracing::info!("Starting test {}", test_name!());
 
-    let network = config.network;
+    let network = config.network.external;
     let (mut net, client) = config.instantiate().await?;
 
     let faucet_client = net.make_client().await;
@@ -103,7 +105,9 @@ async fn test_end_to_end_reconfiguration(config: LocalNetConfig) -> Result<()> {
         .await?;
     let port = get_node_port().await;
     let node_service_2 = match network {
-        Network::Grpc => Some(client_2.run_node_service(port, ProcessInbox::Skip).await?),
+        Network::Grpc | Network::Grpcs => {
+            Some(client_2.run_node_service(port, ProcessInbox::Skip).await?)
+        }
         Network::Tcp | Network::Udp => None,
     };
 
@@ -124,11 +128,7 @@ async fn test_end_to_end_reconfiguration(config: LocalNetConfig) -> Result<()> {
     net.start_validator(4).await?;
     net.start_validator(5).await?;
 
-    let address = format!(
-        "{}:localhost:{}",
-        network.external_short(),
-        LocalNet::proxy_port(4)
-    );
+    let address = format!("{}:localhost:{}", network.short(), LocalNet::proxy_port(4));
     assert_eq!(
         client.query_validator(&address).await?,
         net.genesis_config()?.hash()
@@ -234,6 +234,227 @@ async fn test_end_to_end_reconfiguration(config: LocalNetConfig) -> Result<()> {
     Ok(())
 }
 
+/// Test if it's possible to receive epoch change messages for past epochs.
+///
+/// The epoch change messages are protected, and can't be rejected.
+#[cfg_attr(feature = "storage-service", test_case(LocalNetConfig::new_test(Database::Service, Network::Grpc) ; "storage_service_grpc"))]
+#[cfg_attr(feature = "storage-service", test_case(LocalNetConfig::new_test(Database::Service, Network::Tcp) ; "storage_service_tcp"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Grpc) ; "aws_grpc"))]
+#[cfg_attr(feature = "scylladb", test_case(LocalNetConfig::new_test(Database::ScyllaDb, Network::Tcp) ; "scylladb_tcp"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Tcp) ; "aws_tcp"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Udp) ; "aws_udp"))]
+#[test_log::test(tokio::test)]
+async fn test_end_to_end_receipt_of_old_create_committee_messages(
+    config: LocalNetConfig,
+) -> Result<()> {
+    let _guard = INTEGRATION_TEST_GUARD.lock().await;
+    tracing::info!("Starting test {}", test_name!());
+
+    let network = config.network.external;
+    let (mut net, client) = config.instantiate().await?;
+
+    let faucet_client = net.make_client().await;
+    faucet_client.wallet_init(&[], FaucetOption::None).await?;
+
+    let faucet_chain = client
+        .open_and_assign(&faucet_client, Amount::from_tokens(1_000u128))
+        .await?;
+
+    if matches!(network, Network::Grpc) {
+        let mut faucet_service = faucet_client
+            .run_faucet(None, faucet_chain, Amount::from_tokens(2))
+            .await?;
+
+        faucet_service.ensure_is_running()?;
+
+        let faucet = faucet_service.instance();
+        assert_eq!(faucet.current_validators().await?.len(), 4);
+
+        faucet_service.terminate().await?;
+    }
+
+    client.query_validators(None).await?;
+
+    // Start a new validator
+    net.generate_validator_config(4).await?;
+    net.start_validator(4).await?;
+
+    let address = format!("{}:localhost:{}", network.short(), LocalNet::proxy_port(4));
+    assert_eq!(
+        client.query_validator(&address).await?,
+        net.genesis_config()?.hash()
+    );
+
+    // Add 5th validator to the network
+    client
+        .set_validator(net.validator_name(4).unwrap(), LocalNet::proxy_port(4), 100)
+        .await?;
+
+    client.query_validators(None).await?;
+
+    // Ensure the faucet is on the new epoch
+    faucet_client.process_inbox(faucet_chain).await?;
+
+    let mut faucet_service = faucet_client
+        .run_faucet(None, faucet_chain, Amount::from_tokens(2))
+        .await?;
+
+    faucet_service.ensure_is_running()?;
+
+    let faucet = faucet_service.instance();
+
+    if matches!(network, Network::Grpc) {
+        assert_eq!(faucet.current_validators().await?.len(), 5);
+    }
+
+    // Create a new chain starting on the new epoch
+    let new_owner_key = client.keygen().await?;
+    let ClaimOutcome {
+        chain_id,
+        message_id,
+        ..
+    } = faucet.claim(&new_owner_key).await?;
+    client.assign(new_owner_key, message_id).await?;
+
+    // Attempt to receive the existing epoch change message
+    client.process_inbox(chain_id).await?;
+
+    net.ensure_is_running().await?;
+    net.terminate().await?;
+
+    Ok(())
+}
+
+/// Test if it's possible to receive epoch change messages for past epochs, even if they have been
+/// deprecated.
+///
+/// The epoch change messages are protected, and can't be rejected.
+#[cfg_attr(feature = "storage-service", test_case(LocalNetConfig::new_test(Database::Service, Network::Grpc) ; "storage_service_grpc"))]
+#[cfg_attr(feature = "storage-service", test_case(LocalNetConfig::new_test(Database::Service, Network::Tcp) ; "storage_service_tcp"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Grpc) ; "aws_grpc"))]
+#[cfg_attr(feature = "scylladb", test_case(LocalNetConfig::new_test(Database::ScyllaDb, Network::Tcp) ; "scylladb_tcp"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Tcp) ; "aws_tcp"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Udp) ; "aws_udp"))]
+#[test_log::test(tokio::test)]
+async fn test_end_to_end_receipt_of_old_remove_committee_messages(
+    config: LocalNetConfig,
+) -> Result<()> {
+    let _guard = INTEGRATION_TEST_GUARD.lock().await;
+    tracing::info!("Starting test {}", test_name!());
+
+    let network = config.network.external;
+    let (mut net, client) = config.instantiate().await?;
+
+    let faucet_client = net.make_client().await;
+    faucet_client.wallet_init(&[], FaucetOption::None).await?;
+
+    let faucet_chain = client
+        .open_and_assign(&faucet_client, Amount::from_tokens(1_000u128))
+        .await?;
+
+    if matches!(network, Network::Grpc) {
+        let mut faucet_service = faucet_client
+            .run_faucet(None, faucet_chain, Amount::from_tokens(2))
+            .await?;
+
+        faucet_service.ensure_is_running()?;
+
+        let faucet = faucet_service.instance();
+        assert_eq!(faucet.current_validators().await?.len(), 4);
+
+        faucet_service.terminate().await?;
+    }
+
+    client.query_validators(None).await?;
+
+    // Start a new validator
+    net.generate_validator_config(4).await?;
+    net.start_validator(4).await?;
+
+    let address = format!("{}:localhost:{}", network.short(), LocalNet::proxy_port(4));
+    assert_eq!(
+        client.query_validator(&address).await?,
+        net.genesis_config()?.hash()
+    );
+
+    // Add 5th validator to the network
+    client
+        .set_validator(net.validator_name(4).unwrap(), LocalNet::proxy_port(4), 100)
+        .await?;
+    client.finalize_committee().await?;
+
+    client.query_validators(None).await?;
+
+    // Ensure the faucet is on the new epoch
+    faucet_client.process_inbox(faucet_chain).await?;
+
+    if matches!(network, Network::Grpc) {
+        let mut faucet_service = faucet_client
+            .run_faucet(None, faucet_chain, Amount::from_tokens(2))
+            .await?;
+
+        faucet_service.ensure_is_running()?;
+
+        let faucet = faucet_service.instance();
+        assert_eq!(faucet.current_validators().await?.len(), 5);
+
+        faucet_service.terminate().await?;
+    }
+
+    // We need the epoch before the latest to still be active, so that it can send all the epoch
+    // change messages in a batch where the latest message is signed by a committee that the
+    // receiving chain trusts.
+
+    // Start another new validator
+    net.generate_validator_config(5).await?;
+    net.start_validator(5).await?;
+
+    let address = format!("{}:localhost:{}", network.short(), LocalNet::proxy_port(5));
+    assert_eq!(
+        client.query_validator(&address).await?,
+        net.genesis_config()?.hash()
+    );
+
+    // Add 6th validator to the network
+    client
+        .set_validator(net.validator_name(5).unwrap(), LocalNet::proxy_port(5), 100)
+        .await?;
+
+    client.query_validators(None).await?;
+
+    // Ensure the faucet is on the new epoch
+    faucet_client.process_inbox(faucet_chain).await?;
+
+    let mut faucet_service = faucet_client
+        .run_faucet(None, faucet_chain, Amount::from_tokens(2))
+        .await?;
+
+    faucet_service.ensure_is_running()?;
+
+    let faucet = faucet_service.instance();
+
+    if matches!(network, Network::Grpc) {
+        assert_eq!(faucet.current_validators().await?.len(), 6);
+    }
+
+    // Create a new chain starting on the new epoch
+    let new_owner_key = client.keygen().await?;
+    let ClaimOutcome {
+        chain_id,
+        message_id,
+        ..
+    } = faucet.claim(&new_owner_key).await?;
+    client.assign(new_owner_key, message_id).await?;
+
+    // Attempt to receive the existing epoch change messages
+    client.process_inbox(chain_id).await?;
+
+    net.ensure_is_running().await?;
+    net.terminate().await?;
+
+    Ok(())
+}
+
 #[cfg_attr(feature = "storage-service", test_case(LocalNetConfig::new_test(Database::Service, Network::Grpc) ; "storage_service_grpc"))]
 #[cfg_attr(feature = "scylladb", test_case(LocalNetConfig::new_test(Database::ScyllaDb, Network::Grpc) ; "scylladb_grpc"))]
 #[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Grpc) ; "aws_grpc"))]
@@ -271,7 +492,7 @@ async fn test_end_to_end_retry_notification_stream(config: LocalNetConfig) -> Re
         for i in 0..10 {
             // Add a new block on the chain, triggering a notification.
             client1
-                .transfer(Amount::from_tokens(1), chain, ChainId::root(9))
+                .transfer(Amount::from_tokens(1), chain, ChainId::root(1))
                 .await?;
             linera_base::time::timer::sleep(Duration::from_secs(i)).await;
             height += 1;
@@ -313,7 +534,7 @@ async fn test_end_to_end_retry_pending_block(config: LocalNetConfig) -> Result<(
         net.remove_validator(i)?;
     }
     let result = client
-        .transfer_with_silent_logs(Amount::from_tokens(2), chain_id, ChainId::root(5))
+        .transfer_with_silent_logs(Amount::from_tokens(2), chain_id, ChainId::root(1))
         .await;
     assert!(result.is_err());
     // The transfer didn't get confirmed.
@@ -361,7 +582,7 @@ async fn test_project_publish(database: Database, network: Network) -> Result<()
     let project_dir = tmp_dir.path().join("init-test");
 
     client
-        .project_publish(project_dir, vec![], None, &())
+        .project_publish(project_dir, vec![], None, &0)
         .await?;
     let chain = client.load_wallet()?.default_chain().unwrap();
 
@@ -419,7 +640,13 @@ async fn test_project_new() -> Result<()> {
     let _rustflags_override = override_disable_warnings_as_errors();
     let path_provider = PathProvider::create_temporary_directory()?;
     let id = 0;
-    let client = ClientWrapper::new(path_provider, Network::Grpc, None, id);
+    let client = ClientWrapper::new(
+        path_provider,
+        Network::Grpc,
+        None,
+        id,
+        OnClientDrop::LeakChains,
+    );
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let linera_root = manifest_dir
         .parent()
@@ -437,7 +664,13 @@ async fn test_project_new() -> Result<()> {
 async fn test_project_test() -> Result<()> {
     let path_provider = PathProvider::create_temporary_directory()?;
     let id = 0;
-    let client = ClientWrapper::new(path_provider, Network::Grpc, None, id);
+    let client = ClientWrapper::new(
+        path_provider,
+        Network::Grpc,
+        None,
+        id,
+        OnClientDrop::LeakChains,
+    );
     client
         .project_test(&ClientWrapper::example_path("counter")?)
         .await?;
@@ -537,7 +770,7 @@ async fn test_end_to_end_benchmark(mut config: LocalNetConfig) -> Result<()> {
 
     let (mut net, client) = config.instantiate().await?;
 
-    assert_eq!(client.load_wallet()?.num_chains(), 2);
+    assert_eq!(client.load_wallet()?.num_chains(), 3);
     // Launch local benchmark using all user chains and creating additional ones.
     client.benchmark(2, 4, 10, None).await?;
     assert_eq!(client.load_wallet()?.num_chains(), 4);

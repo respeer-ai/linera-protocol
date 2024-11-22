@@ -15,7 +15,8 @@ use linera_base::{
 use linera_execution::{
     test_utils::{register_mock_applications, ExpectedCall, SystemExecutionState},
     ContractRuntime, ExecutionError, ExecutionOutcome, Message, MessageContext,
-    RawExecutionOutcome, ResourceControlPolicy, ResourceController, TransactionTracker,
+    RawExecutionOutcome, ResourceControlPolicy, ResourceController, ResourceLimit,
+    TransactionTracker,
 };
 use test_case::test_case;
 
@@ -130,7 +131,7 @@ async fn test_fee_consumption(
     }
 
     let mut applications = register_mock_applications(&mut view, 1).await.unwrap();
-    let (application_id, application) = applications
+    let (application_id, application, _contract_blob, _service_blob) = applications
         .next()
         .expect("Caller mock application should be registered");
 
@@ -146,10 +147,12 @@ async fn test_fee_consumption(
         operation_byte: Amount::from_tokens(23),
         message: Amount::from_tokens(29),
         message_byte: Amount::from_tokens(31),
-        maximum_fuel_per_block: 4_868_145_137,
-        maximum_executed_block_size: 37,
-        maximum_bytes_read_per_block: 41,
-        maximum_bytes_written_per_block: 43,
+        maximum_fuel_per_block: ResourceLimit(4_868_145_137),
+        maximum_executed_block_size: ResourceLimit(37),
+        maximum_blob_size: ResourceLimit(41),
+        maximum_bytecode_size: ResourceLimit(43),
+        maximum_bytes_read_per_block: ResourceLimit(47),
+        maximum_bytes_written_per_block: ResourceLimit(53),
     };
 
     let consumed_fees = spends

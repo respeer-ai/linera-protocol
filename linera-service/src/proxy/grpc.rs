@@ -9,6 +9,7 @@
 use std::sync::LazyLock;
 use std::{
     fmt::Debug,
+    marker::PhantomData,
     net::SocketAddr,
     sync::Arc,
     task::{Context, Poll},
@@ -20,7 +21,7 @@ use async_trait::async_trait;
 use futures::{future::BoxFuture, FutureExt as _};
 use linera_base::identifiers::ChainId;
 use linera_client::config::GenesisConfig;
-use linera_core::{notifier::Notifier, JoinSetExt as _};
+use linera_core::{notifier::ChannelNotifier, JoinSetExt as _};
 use linera_rpc::{
     config::{
         ShardConfig, TlsConfig, ValidatorInternalNetworkConfig, ValidatorPublicNetworkConfig,
@@ -30,16 +31,18 @@ use linera_rpc::{
             notifier_service_server::{NotifierService, NotifierServiceServer},
             validator_node_server::{ValidatorNode, ValidatorNodeServer},
             validator_worker_client::ValidatorWorkerClient,
-            BlobContent, BlobId, BlockProposal, Certificate, CertificateValue, ChainInfoQuery,
-            ChainInfoResult, CryptoHash, HandleCertificateRequest, LiteCertificate, Notification,
+            BlobContent, BlobId, BlobIds, BlockProposal, Certificate, CertificateValue,
+            CertificatesBatchRequest, CertificatesBatchResponse, ChainInfoQuery, ChainInfoResult,
+            CryptoHash, CryptoHashes, HandleCertificateRequest, LiteCertificate, Notification,
             SubscriptionRequest, VersionInfo,
         },
         pool::GrpcConnectionPool,
-        GrpcProxyable, GRPC_MAX_MESSAGE_SIZE,
+        GrpcProtoConversionError, GrpcProxyable, GRPC_CHUNKED_MESSAGE_FILL_LIMIT,
+        GRPC_MAX_MESSAGE_SIZE,
     },
 };
 use linera_storage::Storage;
-use rcgen::generate_simple_self_signed;
+use prost::Message;
 use tokio::{select, task::JoinSet};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -48,7 +51,7 @@ use tonic::{
     Request, Response, Status,
 };
 use tower::{builder::ServiceBuilder, Layer, Service};
-use tracing::{debug, info, instrument, Instrument as _};
+use tracing::{debug, info, instrument, Instrument as _, Level};
 #[cfg(with_metrics)]
 use {
     linera_base::prometheus_util,
@@ -69,13 +72,11 @@ static PROXY_REQUEST_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
             50.0, 100.0, 200.0, 300.0, 400.0,
         ]),
     )
-    .expect("Counter creation should not fail")
 });
 
 #[cfg(with_metrics)]
 static PROXY_REQUEST_COUNT: LazyLock<IntCounterVec> = LazyLock::new(|| {
     prometheus_util::register_int_counter_vec("proxy_request_count", "Proxy request count", &[])
-        .expect("Counter creation should not fail")
 });
 
 #[cfg(with_metrics)]
@@ -85,7 +86,6 @@ static PROXY_REQUEST_SUCCESS: LazyLock<IntCounterVec> = LazyLock::new(|| {
         "Proxy request success",
         &["method_name"],
     )
-    .expect("Counter creation should not fail")
 });
 
 #[cfg(with_metrics)]
@@ -95,7 +95,6 @@ static PROXY_REQUEST_ERROR: LazyLock<IntCounterVec> = LazyLock::new(|| {
         "Proxy request error",
         &["method_name"],
     )
-    .expect("Counter creation should not fail")
 });
 
 #[derive(Clone)]
@@ -154,7 +153,7 @@ struct GrpcProxyInner<S> {
     internal_config: ValidatorInternalNetworkConfig,
     genesis_config: GenesisConfig,
     worker_connection_pool: GrpcConnectionPool,
-    notifier: Notifier<Result<Notification, Status>>,
+    notifier: ChannelNotifier<Result<Notification, Status>>,
     tls: TlsConfig,
     storage: S,
 }
@@ -179,7 +178,7 @@ where
             worker_connection_pool: GrpcConnectionPool::default()
                 .with_connect_timeout(connect_timeout)
                 .with_timeout(timeout),
-            notifier: Notifier::default(),
+            notifier: ChannelNotifier::default(),
             tls,
             storage,
         }))
@@ -288,9 +287,8 @@ where
     fn public_server(&self) -> Result<Server> {
         match self.0.tls {
             TlsConfig::Tls => {
-                let cert = generate_simple_self_signed(vec![self.0.public_config.host.clone()])?;
-                let identity =
-                    Identity::from_pem(cert.serialize_pem()?, cert.serialize_private_key_pem());
+                use linera_rpc::{CERT_PEM, KEY_PEM};
+                let identity = Identity::from_pem(CERT_PEM, KEY_PEM);
                 let tls_config = ServerTlsConfig::new().identity(identity);
                 Ok(Server::builder().tls_config(tls_config)?)
             }
@@ -404,7 +402,12 @@ where
             .into_iter()
             .map(ChainId::try_from)
             .collect::<Result<Vec<ChainId>, _>>()?;
-        let rx = self.0.notifier.subscribe(chain_ids);
+        // The empty notification seems to be needed in some cases to force
+        // completion of HTTP2 headers.
+        let rx = self
+            .0
+            .notifier
+            .subscribe_with_ack(chain_ids, Ok(Notification::default()));
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
 
@@ -461,16 +464,57 @@ where
         request: Request<CryptoHash>,
     ) -> Result<Response<Certificate>, Status> {
         let hash = request.into_inner().try_into()?;
-        let certificate = self
+        let certificate: linera_chain::data_types::Certificate = self
             .0
             .storage
             .read_certificate(hash)
             .await
-            .map_err(|err| Status::from_error(Box::new(err)))?;
+            .map_err(|err| Status::from_error(Box::new(err)))?
+            .into();
         Ok(Response::new(certificate.try_into()?))
     }
 
     #[instrument(skip_all, err(Display))]
+    async fn download_certificates(
+        &self,
+        request: Request<CertificatesBatchRequest>,
+    ) -> Result<Response<CertificatesBatchResponse>, Status> {
+        let hashes: Vec<linera_base::crypto::CryptoHash> = request
+            .into_inner()
+            .hashes
+            .into_iter()
+            .map(linera_base::crypto::CryptoHash::try_from)
+            .collect::<Result<Vec<linera_base::crypto::CryptoHash>, _>>()?;
+
+        // Use 70% of the max message size as a buffer capacity.
+        // Leave 30% as overhead.
+        let mut grpc_message_limiter: GrpcMessageLimiter<linera_chain::data_types::Certificate> =
+            GrpcMessageLimiter::new(GRPC_CHUNKED_MESSAGE_FILL_LIMIT);
+
+        let mut certificates = vec![];
+
+        'outer: for batch in hashes.chunks(100) {
+            for certificate in self
+                .0
+                .storage
+                .read_certificates(batch.to_vec())
+                .await
+                .map_err(|err| Status::from_error(Box::new(err)))?
+            {
+                if grpc_message_limiter.fits::<Certificate>(certificate.clone().into())? {
+                    certificates.push(linera_chain::data_types::Certificate::from(certificate));
+                } else {
+                    break 'outer;
+                }
+            }
+        }
+
+        Ok(Response::new(CertificatesBatchResponse::try_from(
+            certificates,
+        )?))
+    }
+
+    #[instrument(skip_all, err(level = Level::WARN))]
     async fn blob_last_used_by(
         &self,
         request: Request<BlobId>,
@@ -483,6 +527,25 @@ where
             .await
             .map_err(|err| Status::from_error(Box::new(err)))?;
         Ok(Response::new(blob_state.last_used_by.into()))
+    }
+
+    #[instrument(skip_all, err(level = Level::WARN))]
+    async fn blobs_last_used_by(
+        &self,
+        request: Request<BlobIds>,
+    ) -> Result<Response<CryptoHashes>, Status> {
+        let blob_ids: Vec<linera_base::identifiers::BlobId> = request.into_inner().try_into()?;
+        let blob_states = self
+            .0
+            .storage
+            .read_blob_states(&blob_ids)
+            .await
+            .map_err(|err| Status::from_error(Box::new(err)))?;
+        let results = blob_states
+            .into_iter()
+            .map(|blob_state| blob_state.last_used_by)
+            .collect::<Vec<_>>();
+        Ok(Response::new(results.into()))
     }
 }
 
@@ -499,7 +562,105 @@ where
             .clone()
             .ok_or_else(|| Status::invalid_argument("Missing field: chain_id."))?
             .try_into()?;
-        self.0.notifier.notify(&chain_id, &Ok(notification));
+        self.0.notifier.notify_chain(&chain_id, &Ok(notification));
         Ok(Response::new(()))
+    }
+}
+
+/// A message limiter that keeps track of the remaining capacity in bytes.
+struct GrpcMessageLimiter<T> {
+    remaining: usize,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> GrpcMessageLimiter<T> {
+    fn new(limit: usize) -> Self {
+        Self {
+            remaining: limit,
+            _phantom: PhantomData,
+        }
+    }
+
+    #[cfg(test)]
+    fn empty() -> Self {
+        Self::new(0)
+    }
+
+    // Returns true if the element, after serialising to proto bytes, fits within the remaining capacity.
+    fn fits<U>(&mut self, el: T) -> Result<bool, GrpcProtoConversionError>
+    where
+        U: TryFrom<T, Error = GrpcProtoConversionError> + Message,
+    {
+        let required = U::try_from(el).map(|proto| proto.encoded_len())?;
+        if required > self.remaining {
+            return Ok(false);
+        }
+        self.remaining -= required;
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod proto_message_cap {
+    use linera_base::crypto::{KeyPair, Signature};
+    use linera_chain::data_types::{
+        BlockExecutionOutcome, Certificate, ExecutedBlock, HashedCertificateValue,
+    };
+    use linera_execution::committee::ValidatorName;
+    use linera_sdk::base::{ChainId, TestString};
+
+    use super::{CertificatesBatchResponse, GrpcMessageLimiter};
+
+    fn test_certificate() -> Certificate {
+        let keypair = KeyPair::generate();
+        let validator = ValidatorName(keypair.public());
+        let signature = Signature::new(&TestString::new("Test"), &keypair);
+        let executed_block = ExecutedBlock {
+            block: linera_chain::test::make_first_block(ChainId::root(0)),
+            outcome: BlockExecutionOutcome::default(),
+        };
+        let signatures = vec![(validator, signature)];
+        Certificate::new(
+            HashedCertificateValue::new_confirmed(executed_block),
+            Default::default(),
+            signatures,
+        )
+    }
+
+    #[test]
+    fn takes_up_to_limit() {
+        let certificate = test_certificate();
+        let single_cert_size = prost::Message::encoded_len(
+            &CertificatesBatchResponse::try_from(vec![certificate.clone()]).unwrap(),
+        );
+        let certificates = vec![certificate.clone(), certificate.clone()];
+
+        let mut empty_limiter = GrpcMessageLimiter::empty();
+        assert!(!empty_limiter
+            .fits::<super::Certificate>(certificate.clone())
+            .unwrap());
+
+        let mut single_message_limiter = GrpcMessageLimiter::new(single_cert_size);
+        assert_eq!(
+            certificates
+                .clone()
+                .into_iter()
+                .take_while(|cert| single_message_limiter
+                    .fits::<super::Certificate>(cert.clone())
+                    .unwrap())
+                .collect::<Vec<_>>(),
+            vec![certificate.clone()]
+        );
+
+        let mut double_message_limiter = GrpcMessageLimiter::new(single_cert_size * 2);
+        assert_eq!(
+            certificates
+                .into_iter()
+                .take_while(|cert| double_message_limiter
+                    .fits::<super::Certificate>(cert.clone())
+                    .unwrap())
+                .collect::<Vec<_>>(),
+            vec![certificate.clone(), certificate.clone()]
+        );
     }
 }

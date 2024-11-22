@@ -1,20 +1,25 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, sync::Arc};
+#[cfg(with_testing)]
+use std::num::NonZeroUsize;
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use futures::Future;
 use linera_base::{
     crypto::{KeyPair, PublicKey},
-    data_types::{BlockHeight, Timestamp},
-    identifiers::{Account, ChainId},
+    data_types::{Blob, BlockHeight, Timestamp},
+    identifiers::{Account, BlobId, ChainId},
     ownership::ChainOwnership,
     time::{Duration, Instant},
 };
-use linera_chain::data_types::Certificate;
+use linera_chain::types::ConfirmedBlockCertificate;
 use linera_core::{
-    client::{ChainClient, Client, MessagePolicy},
+    client::{BlanketMessagePolicy, ChainClient, Client, MessagePolicy},
     data_types::ClientOutcome,
     join_set_ext::{JoinSet, JoinSetExt as _},
     node::CrossChainMessageDelivery,
@@ -33,7 +38,9 @@ use {
         data_types::Amount,
         identifiers::{AccountOwner, ApplicationId, Owner},
     },
-    linera_chain::data_types::{Block, BlockProposal, ExecutedBlock, SignatureAggregator, Vote},
+    linera_chain::data_types::{
+        Block, BlockProposal, Certificate, ExecutedBlock, SignatureAggregator, Vote,
+    },
     linera_core::data_types::ChainInfoQuery,
     linera_execution::{
         committee::Epoch,
@@ -45,10 +52,7 @@ use {
         simple::SimpleMassClient, RpcMessage,
     },
     linera_sdk::abis::fungible,
-    std::{
-        collections::{HashMap, HashSet},
-        iter,
-    },
+    std::{collections::HashMap, iter},
     tracing::{error, trace},
 };
 #[cfg(feature = "fs")]
@@ -58,6 +62,7 @@ use {
         data_types::{BlobBytes, Bytecode},
         identifiers::BytecodeId,
     },
+    linera_core::client::create_bytecode_blobs,
     std::{fs, path::PathBuf},
 };
 
@@ -86,8 +91,9 @@ where
     pub recv_timeout: Duration,
     pub retry_delay: Duration,
     pub max_retries: u32,
-    pub options: ClientOptions,
     pub chain_listeners: JoinSet,
+    pub blanket_message_policy: BlanketMessagePolicy,
+    pub restrict_chain_ids_to: Option<HashSet<ChainId>>,
 }
 
 #[cfg_attr(not(web), async_trait)]
@@ -209,6 +215,7 @@ where
             options.long_lived_services,
             chain_ids,
             name,
+            options.max_loaded_chains,
         );
 
         ClientContext {
@@ -218,8 +225,53 @@ where
             recv_timeout: options.recv_timeout,
             retry_delay: options.retry_delay,
             max_retries: options.max_retries,
-            options,
             chain_listeners: JoinSet::default(),
+            blanket_message_policy: options.blanket_message_policy,
+            restrict_chain_ids_to: options.restrict_chain_ids_to,
+        }
+    }
+
+    #[cfg(with_testing)]
+    pub fn new_test_client_context(storage: S, wallet: W) -> Self {
+        let send_recv_timeout = Duration::from_millis(4000);
+        let retry_delay = Duration::from_millis(1000);
+        let max_retries = 10;
+
+        let node_options = NodeOptions {
+            send_timeout: send_recv_timeout,
+            recv_timeout: send_recv_timeout,
+            retry_delay,
+            max_retries,
+        };
+        let node_provider = NodeProvider::new(node_options);
+        let delivery = CrossChainMessageDelivery::new(true);
+        let chain_ids = wallet.chain_ids();
+        let name = match chain_ids.len() {
+            0 => "Client node".to_string(),
+            1 => format!("Client node for {:.8}", chain_ids[0]),
+            n => format!("Client node for {:.8} and {} others", chain_ids[0], n - 1),
+        };
+        let client = Client::new(
+            node_provider,
+            storage,
+            10,
+            delivery,
+            false,
+            chain_ids,
+            name,
+            NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
+        );
+
+        ClientContext {
+            client: Arc::new(client),
+            wallet: WalletState::new(wallet),
+            send_timeout: send_recv_timeout,
+            recv_timeout: send_recv_timeout,
+            retry_delay,
+            max_retries,
+            chain_listeners: JoinSet::default(),
+            blanket_message_policy: BlanketMessagePolicy::Accept,
+            restrict_chain_ids_to: None,
         }
     }
 
@@ -256,12 +308,10 @@ where
             chain.next_block_height,
             chain.pending_block.clone(),
             chain.pending_blobs.clone(),
-            chain.pending_raw_block.clone(),
-            chain.pending_operations.clone(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
-            self.options.blanket_message_policy,
-            self.options.restrict_chain_ids_to.clone(),
+            self.blanket_message_policy,
+            self.restrict_chain_ids_to.clone(),
         );
         Ok(chain_client)
     }
@@ -314,6 +364,29 @@ where
         key_pair: Option<KeyPair>,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
+        self.update_wallet_for_new_chain_internal(chain_id, key_pair, timestamp, BTreeMap::new())
+            .await
+    }
+
+    #[cfg(test)]
+    pub async fn update_wallet_for_new_chain_with_pending_blobs(
+        &mut self,
+        chain_id: ChainId,
+        key_pair: Option<KeyPair>,
+        timestamp: Timestamp,
+        pending_blobs: BTreeMap<BlobId, Blob>,
+    ) -> Result<(), Error> {
+        self.update_wallet_for_new_chain_internal(chain_id, key_pair, timestamp, pending_blobs)
+            .await
+    }
+
+    async fn update_wallet_for_new_chain_internal(
+        &mut self,
+        chain_id: ChainId,
+        key_pair: Option<KeyPair>,
+        timestamp: Timestamp,
+        pending_blobs: BTreeMap<BlobId, Blob>,
+    ) -> Result<(), Error> {
         if self.wallet.get(chain_id).is_none() {
             self.mutate_wallet(|w| {
                 w.insert(UserChain {
@@ -323,9 +396,7 @@ where
                     timestamp,
                     next_block_height: BlockHeight::ZERO,
                     pending_block: None,
-                    pending_blobs: BTreeMap::new(),
-                    pending_raw_block: None,
-                    pending_operations: Vec::new(),
+                    pending_blobs,
                 })
             })
             .await?;
@@ -337,7 +408,7 @@ where
     pub async fn process_inbox(
         &mut self,
         chain_client: &ChainClient<NodeProvider, S>,
-    ) -> Result<Vec<Certificate>, Error> {
+    ) -> Result<Vec<ConfirmedBlockCertificate>, Error> {
         let mut certificates = Vec::new();
         // Try processing the inbox optimistically without waiting for validator notifications.
         let (new_certificates, maybe_timeout) = {
@@ -500,23 +571,24 @@ where
         service: PathBuf,
     ) -> Result<BytecodeId, Error> {
         info!("Loading bytecode files");
-        let contract_bytecode: Bytecode = Bytecode::load_from_file(&contract)
+        let contract_bytecode = Bytecode::load_from_file(&contract)
             .await
             .with_context(|| format!("failed to load contract bytecode from {:?}", &contract))?;
-        let service_bytecode = Bytecode::load_from_file(&service).await.context(format!(
-            "failed to load service bytecode from {:?}",
-            &service
-        ))?;
+        let service_bytecode = Bytecode::load_from_file(&service)
+            .await
+            .with_context(|| format!("failed to load service bytecode from {:?}", &service))?;
 
         info!("Publishing bytecode");
+        let (contract_blob, service_blob, bytecode_id) =
+            create_bytecode_blobs(contract_bytecode, service_bytecode).await;
         let (bytecode_id, _) = self
             .apply_client_command(chain_client, |chain_client| {
-                let contract_bytecode = contract_bytecode.clone();
-                let service_bytecode = service_bytecode.clone();
+                let contract_blob = contract_blob.clone();
+                let service_blob = service_blob.clone();
                 let chain_client = chain_client.clone();
                 async move {
                     chain_client
-                        .publish_bytecode(contract_bytecode, service_bytecode)
+                        .publish_bytecode_blobs(contract_blob, service_blob, bytecode_id)
                         .await
                         .context("Failed to publish bytecode")
                 }
@@ -652,10 +724,7 @@ where
                 .execute_without_prepare(operations)
                 .await?
                 .expect("should execute block with OpenChain operations");
-            let executed_block = certificate
-                .value()
-                .executed_block()
-                .expect("certificate should be confirmed block");
+            let executed_block = certificate.executed_block();
             let timestamp = executed_block.block.timestamp;
             for i in 0..num_new_chains {
                 let message_id = executed_block
@@ -915,9 +984,11 @@ where
                         self.recv_timeout,
                     ))
                 }
-                NetworkProtocol::Grpc { .. } => Box::new(
-                    GrpcClient::new(config.network.clone(), self.make_node_options()).unwrap(),
-                ),
+                NetworkProtocol::Grpc { .. } => {
+                    let node_options = self.make_node_options();
+                    let address = config.network.http_address();
+                    Box::new(GrpcClient::create(address, node_options))
+                }
             };
 
             validator_clients.push(client);
@@ -930,7 +1001,7 @@ where
         // Replay the certificates locally.
         for certificate in certificates {
             // No required certificates from other chains: This is only used with benchmark.
-            node.handle_certificate(certificate, vec![], &mut vec![])
+            node.handle_certificate(certificate, vec![], &())
                 .await
                 .unwrap();
         }
@@ -1146,8 +1217,6 @@ where
             chain.next_block_height,
             chain.pending_block.clone(),
             chain.pending_blobs.clone(),
-            chain.pending_raw_block.clone(),
-            chain.pending_operations.clone(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
             self.options.blanket_message_policy,

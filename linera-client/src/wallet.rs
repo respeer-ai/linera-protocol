@@ -13,8 +13,7 @@ use linera_base::{
     identifiers::{BlobId, ChainDescription, ChainId},
 };
 use linera_chain::data_types::Block;
-use linera_core::{client::ChainClient, data_types::RawBlockProposal, node::ValidatorNodeProvider};
-use linera_execution::Operation;
+use linera_core::{client::ChainClient, node::ValidatorNodeProvider};
 use linera_storage::Storage;
 use rand::Rng as _;
 use serde::{Deserialize, Serialize};
@@ -159,8 +158,6 @@ impl Wallet {
             next_block_height: BlockHeight(0),
             pending_block: None,
             pending_blobs: BTreeMap::new(),
-            pending_raw_block: None,
-            pending_operations: Vec::new(),
         };
         self.insert(user_chain);
         Ok(())
@@ -180,8 +177,6 @@ impl Wallet {
             next_block_height: BlockHeight(0),
             pending_block: None,
             pending_blobs: BTreeMap::new(),
-            pending_raw_block: None,
-            pending_operations: Vec::new(),
         };
         self.insert(user_chain);
         Ok(())
@@ -226,8 +221,6 @@ impl Wallet {
                 timestamp: state.timestamp(),
                 pending_block: state.pending_block().clone(),
                 pending_blobs: state.pending_blobs().clone(),
-                pending_raw_block: state.pending_raw_block.clone(),
-                pending_operations: state.pending_operations.clone(),
             },
         );
     }
@@ -260,8 +253,6 @@ pub struct UserChain {
     pub next_block_height: BlockHeight,
     pub pending_block: Option<Block>,
     pub pending_blobs: BTreeMap<BlobId, Blob>,
-    pub pending_raw_block: Option<RawBlockProposal>,
-    pub pending_operations: Vec<Operation>,
 }
 
 impl UserChain {
@@ -280,8 +271,6 @@ impl UserChain {
             next_block_height: BlockHeight::ZERO,
             pending_block: None,
             pending_blobs: BTreeMap::new(),
-            pending_raw_block: None,
-            pending_operations: Vec::new(),
         }
     }
 
@@ -296,8 +285,6 @@ impl UserChain {
             next_block_height: BlockHeight::ZERO,
             pending_block: None,
             pending_blobs: BTreeMap::new(),
-            pending_raw_block: None,
-            pending_operations: Vec::new(),
         }
     }
 }

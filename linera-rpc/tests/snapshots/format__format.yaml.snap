@@ -151,23 +151,16 @@ CertificateValue:
   ENUM:
     0:
       ValidatedBlock:
-        STRUCT:
-          - executed_block:
-              TYPENAME: ExecutedBlock
+        NEWTYPE:
+          TYPENAME: ValidatedBlock
     1:
       ConfirmedBlock:
-        STRUCT:
-          - executed_block:
-              TYPENAME: ExecutedBlock
+        NEWTYPE:
+          TYPENAME: ConfirmedBlock
     2:
       Timeout:
-        STRUCT:
-          - chain_id:
-              TYPENAME: ChainId
-          - height:
-              TYPENAME: BlockHeight
-          - epoch:
-              TYPENAME: Epoch
+        NEWTYPE:
+          TYPENAME: Timeout
 ChainAndHeight:
   STRUCT:
     - chain_id:
@@ -266,10 +259,10 @@ ChainManagerInfo:
           TYPENAME: BlockProposal
     - requested_locked:
         OPTION:
-          TYPENAME: Certificate
+          TYPENAME: ValidatedBlockCertificate
     - timeout:
         OPTION:
-          TYPENAME: Certificate
+          TYPENAME: TimeoutCertificate
     - pending:
         OPTION:
           TYPENAME: LiteVote
@@ -342,6 +335,10 @@ Committee:
 CompressedBytecode:
   STRUCT:
     - compressed_bytes: BYTES
+ConfirmedBlock:
+  STRUCT:
+    - executed_block:
+        TYPENAME: ExecutedBlock
 CrateVersion:
   STRUCT:
     - major: U32
@@ -604,6 +601,10 @@ NodeError:
       InvalidCertificateForBlob:
         NEWTYPE:
           TYPENAME: BlobId
+    22:
+      LocalError:
+        STRUCT:
+          - error: STR
 OpenChainConfig:
   STRUCT:
     - ownership:
@@ -740,6 +741,8 @@ ResourceControlPolicy:
         TYPENAME: Amount
     - maximum_fuel_per_block: U64
     - maximum_executed_block_size: U64
+    - maximum_bytecode_size: U64
+    - maximum_blob_size: U64
     - maximum_bytes_read_per_block: U64
     - maximum_bytes_written_per_block: U64
 Round:
@@ -786,50 +789,70 @@ RpcMessage:
         NEWTYPE:
           TYPENAME: CryptoHash
     7:
+      DownloadCertificates:
+        NEWTYPE:
+          SEQ:
+            TYPENAME: CryptoHash
+    8:
       BlobLastUsedBy:
         NEWTYPE:
           TYPENAME: BlobId
-    8:
-      VersionInfoQuery: UNIT
     9:
-      GenesisConfigHashQuery: UNIT
+      BlobsLastUsedBy:
+        NEWTYPE:
+          SEQ:
+            TYPENAME: BlobId
     10:
+      VersionInfoQuery: UNIT
+    11:
+      GenesisConfigHashQuery: UNIT
+    12:
       Vote:
         NEWTYPE:
           TYPENAME: LiteVote
-    11:
+    13:
       ChainInfoResponse:
         NEWTYPE:
           TYPENAME: ChainInfoResponse
-    12:
+    14:
       Error:
         NEWTYPE:
           TYPENAME: NodeError
-    13:
+    15:
       VersionInfoResponse:
         NEWTYPE:
           TYPENAME: VersionInfo
-    14:
+    16:
       GenesisConfigHashResponse:
         NEWTYPE:
           TYPENAME: CryptoHash
-    15:
+    17:
       DownloadBlobContentResponse:
         NEWTYPE:
           TYPENAME: BlobContent
-    16:
+    18:
       DownloadCertificateValueResponse:
         NEWTYPE:
           TYPENAME: CertificateValue
-    17:
+    19:
       DownloadCertificateResponse:
         NEWTYPE:
           TYPENAME: Certificate
-    18:
+    20:
+      DownloadCertificatesResponse:
+        NEWTYPE:
+          SEQ:
+            TYPENAME: Certificate
+    21:
       BlobLastUsedByResponse:
         NEWTYPE:
           TYPENAME: CryptoHash
-    19:
+    22:
+      BlobsLastUsedByResponse:
+        NEWTYPE:
+          SEQ:
+            TYPENAME: CryptoHash
+    23:
       CrossChainRequest:
         NEWTYPE:
           TYPENAME: CrossChainRequest
@@ -1013,6 +1036,25 @@ SystemOperation:
           TYPENAME: AdminOperation
 TimeDelta:
   NEWTYPESTRUCT: U64
+Timeout:
+  STRUCT:
+    - chain_id:
+        TYPENAME: ChainId
+    - height:
+        TYPENAME: BlockHeight
+    - epoch:
+        TYPENAME: Epoch
+TimeoutCertificate:
+  STRUCT:
+    - value:
+        TYPENAME: Timeout
+    - round:
+        TYPENAME: Round
+    - signatures:
+        SEQ:
+          TUPLE:
+            - TYPENAME: ValidatorName
+            - TYPENAME: Signature
 TimeoutConfig:
   STRUCT:
     - fast_round_duration:
@@ -1036,6 +1078,21 @@ UserApplicationDescription:
     - required_application_ids:
         SEQ:
           TYPENAME: ApplicationId
+ValidatedBlock:
+  STRUCT:
+    - executed_block:
+        TYPENAME: ExecutedBlock
+ValidatedBlockCertificate:
+  STRUCT:
+    - value:
+        TYPENAME: ValidatedBlock
+    - round:
+        TYPENAME: Round
+    - signatures:
+        SEQ:
+          TUPLE:
+            - TYPENAME: ValidatorName
+            - TYPENAME: Signature
 ValidatorName:
   NEWTYPESTRUCT:
     TYPENAME: PublicKey

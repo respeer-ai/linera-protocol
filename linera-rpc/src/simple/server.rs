@@ -307,9 +307,13 @@ where
             | RpcMessage::DownloadCertificateValue(_)
             | RpcMessage::DownloadCertificateValueResponse(_)
             | RpcMessage::BlobLastUsedBy(_)
+            | RpcMessage::BlobsLastUsedBy(_)
             | RpcMessage::BlobLastUsedByResponse(_)
+            | RpcMessage::BlobsLastUsedByResponse(_)
             | RpcMessage::DownloadCertificate(_)
-            | RpcMessage::DownloadCertificateResponse(_) => Err(NodeError::UnexpectedMessage),
+            | RpcMessage::DownloadCertificates(_)
+            | RpcMessage::DownloadCertificateResponse(_)
+            | RpcMessage::DownloadCertificatesResponse(_) => Err(NodeError::UnexpectedMessage),
         };
 
         self.server.packets_processed += 1;

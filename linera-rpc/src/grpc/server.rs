@@ -27,7 +27,7 @@ use tokio::{sync::oneshot, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tower::{builder::ServiceBuilder, Layer, Service};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, trace, warn};
 #[cfg(with_metrics)]
 use {
     linera_base::prometheus_util,
@@ -61,13 +61,11 @@ static SERVER_REQUEST_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
         &[],
         Some(vec![0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0]),
     )
-    .expect("Counter creation should not fail")
 });
 
 #[cfg(with_metrics)]
 static SERVER_REQUEST_COUNT: LazyLock<IntCounterVec> = LazyLock::new(|| {
     prometheus_util::register_int_counter_vec("server_request_count", "Server request count", &[])
-        .expect("Counter creation should not fail")
 });
 
 #[cfg(with_metrics)]
@@ -77,7 +75,6 @@ static SERVER_REQUEST_SUCCESS: LazyLock<IntCounterVec> = LazyLock::new(|| {
         "Server request success",
         &["method_name"],
     )
-    .expect("Counter creation should not fail")
 });
 
 #[cfg(with_metrics)]
@@ -87,7 +84,6 @@ static SERVER_REQUEST_ERROR: LazyLock<IntCounterVec> = LazyLock::new(|| {
         "Server request error",
         &["method_name"],
     )
-    .expect("Counter creation should not fail")
 });
 
 #[cfg(with_metrics)]
@@ -98,7 +94,6 @@ static SERVER_REQUEST_LATENCY_PER_REQUEST_TYPE: LazyLock<HistogramVec> = LazyLoc
         &["method_name"],
         Some(vec![0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0]),
     )
-    .expect("Counter creation should not fail")
 });
 
 #[derive(Clone)]
@@ -312,7 +307,7 @@ where
 
         for request in actions.cross_chain_requests {
             let shard_id = self.network.get_shard_id(request.target_chain_id());
-            tracing::trace!(
+            trace!(
                 source_shard_id = self.shard_id,
                 target_shard_id = shard_id,
                 "Scheduling cross-chain query",
@@ -325,7 +320,7 @@ where
         }
 
         for notification in actions.notifications {
-            tracing::trace!("Scheduling notification query");
+            trace!("Scheduling notification query");
             if let Err(error) = notification_sender.try_send(notification) {
                 error!(%error, "dropping notification");
                 break;
@@ -352,7 +347,7 @@ where
         receiver
             .for_each_concurrent(max_concurrent_tasks, |(cross_chain_request, shard_id)| {
                 let shard = network.shard(shard_id);
-                let remote_address = format!("http://{}", shard.address());
+                let remote_address = shard.http_address();
 
                 let pool = pool.clone();
                 let nickname = nickname.clone();
@@ -395,7 +390,7 @@ where
                                 );
                             }
                             _ => {
-                                tracing::trace!(
+                                trace!(
                                     from_shard = this_shard,
                                     to_shard = shard_id,
                                     "Sent cross-chain query",
@@ -441,7 +436,7 @@ where
     ) -> Result<Response<ChainInfoResult>, Status> {
         let start = Instant::now();
         let proposal = request.into_inner().try_into()?;
-        tracing::trace!(?proposal, "Handling block proposal");
+        trace!(?proposal, "Handling block proposal");
         Ok(Response::new(
             match self.state.clone().handle_block_proposal(proposal).await {
                 Ok((info, actions)) => {
@@ -473,7 +468,7 @@ where
             certificate,
             wait_for_outgoing_messages,
         } = request.into_inner().try_into()?;
-        tracing::trace!(?certificate, "Handling lite certificate");
+        trace!(?certificate, "Handling lite certificate");
         let (sender, receiver) = wait_for_outgoing_messages.then(oneshot::channel).unzip();
         match self
             .state
@@ -508,7 +503,7 @@ where
         }
     }
 
-    #[instrument(target = "grpc_server", skip_all, err, fields(nickname = self.state.nickname(), chain_id = ?request.get_ref().chain_id(), ?request))]
+    #[instrument(target = "grpc_server", skip_all, err, fields(nickname = self.state.nickname(), chain_id = ?request.get_ref().chain_id()))]
     async fn handle_certificate(
         &self,
         request: Request<api::HandleCertificateRequest>,
@@ -519,6 +514,7 @@ where
             blobs,
             wait_for_outgoing_messages,
         } = request.into_inner().try_into()?;
+        trace!(?certificate, "Handling certificate");
         let (sender, receiver) = wait_for_outgoing_messages.then(oneshot::channel).unzip();
         match self
             .state
@@ -556,7 +552,7 @@ where
     ) -> Result<Response<ChainInfoResult>, Status> {
         let start = Instant::now();
         let query = request.into_inner().try_into()?;
-        tracing::trace!(?query, "Handling chain info query");
+        trace!(?query, "Handling chain info query");
         match self.state.clone().handle_chain_info_query(query).await {
             Ok((info, actions)) => {
                 Self::log_request_success_and_latency(start, "handle_chain_info_query");
@@ -583,7 +579,7 @@ where
     ) -> Result<Response<()>, Status> {
         let start = Instant::now();
         let request = request.into_inner().try_into()?;
-        tracing::trace!(?request, "Handling cross-chain request");
+        trace!(?request, "Handling cross-chain request");
         match self.state.clone().handle_cross_chain_request(request).await {
             Ok(actions) => {
                 Self::log_request_success_and_latency(start, "handle_cross_chain_request");

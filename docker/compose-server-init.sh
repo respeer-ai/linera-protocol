@@ -1,7 +1,7 @@
 #!/bin/sh
 
 while true; do
-  ./linera-db check_existence --storage "scylladb:tcp:scylla:9042"
+  ./linera storage check_existence --storage "scylladb:tcp:scylla:9042"
   status=$?
 
   if [ $status -eq 0 ]; then
@@ -13,7 +13,6 @@ while true; do
       --storage scylladb:tcp:scylla:9042 \
       --genesis /config/genesis.json; then
       echo "Initialization successful."
-      touch /shared/init_done
       exit 0
     else
       echo "Initialization failed, retrying in 5 seconds..."

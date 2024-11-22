@@ -94,7 +94,18 @@ impl ValidatorNode for DummyValidatorNode {
         Err(NodeError::UnexpectedMessage)
     }
 
+    async fn download_certificates(
+        &self,
+        _: Vec<CryptoHash>,
+    ) -> Result<Vec<Certificate>, NodeError> {
+        Err(NodeError::UnexpectedMessage)
+    }
+
     async fn blob_last_used_by(&self, _: BlobId) -> Result<CryptoHash, NodeError> {
+        Err(NodeError::UnexpectedMessage)
+    }
+
+    async fn blobs_last_used_by(&self, _: Vec<BlobId>) -> Result<Vec<CryptoHash>, NodeError> {
         Err(NodeError::UnexpectedMessage)
     }
 }

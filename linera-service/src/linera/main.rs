@@ -6,7 +6,7 @@
 #![deny(clippy::large_futures)]
 
 use std::{
-    borrow::Cow, collections::HashMap, env, num::NonZeroUsize, path::PathBuf, sync::Arc,
+    borrow::Cow, collections::HashMap, env, num::NonZeroUsize, path::PathBuf, process, sync::Arc,
     time::Instant,
 };
 
@@ -21,21 +21,26 @@ use linera_base::{
     identifiers::{ChainDescription, ChainId, MessageId, Owner},
     ownership::ChainOwnership,
 };
-use linera_chain::data_types::{CertificateValue, ExecutedBlock};
+#[cfg(feature = "benchmark")]
+use linera_chain::{data_types::CertificateValue, types::ConfirmedBlock};
 use linera_client::{
     chain_listener::ClientContext as _,
     client_context::ClientContext,
-    client_options::{ClientCommand, ClientOptions, NetCommand, ProjectCommand, WalletCommand},
+    client_options::{
+        ClientCommand, ClientOptions, DatabaseToolCommand, NetCommand, ProjectCommand,
+        WalletCommand,
+    },
     config::{CommitteeConfig, GenesisConfig},
     persistent::{self, Persist},
     storage::Runnable,
     wallet::{UserChain, Wallet},
 };
 use linera_core::{
+    client,
     data_types::{ChainInfoQuery, ClientOutcome},
-    local_node::{LocalNodeClient, RemoteNode},
-    node::ValidatorNodeProvider,
-    worker::{Reason, WorkerState},
+    node::{CrossChainMessageDelivery, ValidatorNodeProvider},
+    remote_node::RemoteNode,
+    worker::Reason,
     JoinSetExt as _,
 };
 use linera_execution::{
@@ -50,9 +55,10 @@ use linera_service::{
     util, wallet,
 };
 use linera_storage::Storage;
+use linera_views::store::CommonStoreConfig;
 use serde_json::Value;
 use tokio::task::JoinSet;
-use tracing::{debug, info, warn, Instrument as _};
+use tracing::{debug, error, info, warn, Instrument as _};
 
 mod net_up_utils;
 
@@ -62,7 +68,6 @@ use {
     linera_core::data_types::ChainInfoResponse,
     linera_rpc::{HandleCertificateRequest, RpcMessage},
     std::collections::HashSet,
-    tracing::error,
 };
 
 use crate::persistent::PersistExt as _;
@@ -168,13 +173,7 @@ impl Runnable for Job {
                     .await
                     .context("Failed to open chain")?;
                 let id = ChainId::child(message_id);
-                let timestamp = match certificate.value() {
-                    CertificateValue::ConfirmedBlock {
-                        executed_block: ExecutedBlock { block, .. },
-                        ..
-                    } => block.timestamp,
-                    _ => panic!("Unexpected certificate."),
-                };
+                let timestamp = certificate.executed_block().block.timestamp;
                 context
                     .update_wallet_for_new_chain(id, key_pair, timestamp)
                     .await?;
@@ -218,13 +217,7 @@ impl Runnable for Job {
                 // No key pair. This chain can be assigned explicitly using the assign command.
                 let key_pair = None;
                 let id = ChainId::child(message_id);
-                let timestamp = match certificate.value() {
-                    CertificateValue::ConfirmedBlock {
-                        executed_block: ExecutedBlock { block, .. },
-                        ..
-                    } => block.timestamp,
-                    _ => panic!("Unexpected certificate."),
-                };
+                let timestamp = certificate.executed_block().block.timestamp;
                 context
                     .update_wallet_for_new_chain(id, key_pair, timestamp)
                     .await?;
@@ -361,7 +354,11 @@ impl Runnable for Job {
                 );
             }
 
-            QueryValidator { address } => {
+            QueryValidator {
+                address,
+                chain_id,
+                name,
+            } => {
                 use linera_core::node::ValidatorNode as _;
 
                 let node = context.make_node_provider().make_node(&address)?;
@@ -369,28 +366,59 @@ impl Runnable for Job {
                     Ok(version_info)
                         if version_info.is_compatible_with(&linera_version::VERSION_INFO) =>
                     {
-                        info!("Version information for new validator: {}", version_info);
+                        info!(
+                            "Version information for validator {address}: {}",
+                            version_info
+                        );
                     }
-                    Ok(version_info) => warn!(
+                    Ok(version_info) => error!(
                         "Validator version {} is not compatible with local version {}.",
                         version_info,
                         linera_version::VERSION_INFO
                     ),
                     Err(error) => {
-                        warn!("Failed to get version information for new validator:\n{error}")
+                        error!(
+                            "Failed to get version information for validator {address}:\n{error}"
+                        )
                     }
                 }
+
                 let genesis_config_hash = context.wallet().genesis_config().hash();
                 match node.get_genesis_config_hash().await {
                     Ok(hash) if hash == genesis_config_hash => {}
-                    Ok(hash) => warn!(
+                    Ok(hash) => error!(
                         "Validator's genesis config hash {} does not match our own: {}.",
                         hash, genesis_config_hash
                     ),
                     Err(error) => {
-                        warn!("Failed to get genesis config hash for new validator:\n{error}")
+                        error!(
+                            "Failed to get genesis config hash for validator {address}:\n{error}"
+                        )
                     }
                 }
+
+                let chain_id = chain_id.unwrap_or_else(|| context.default_chain());
+                let query = linera_core::data_types::ChainInfoQuery::new(chain_id);
+                match node.handle_chain_info_query(query).await {
+                    Ok(response) => {
+                        info!(
+                            "Validator {address} sees chain {chain_id} at block height {} and epoch {:?}",
+                            response.info.next_block_height,
+                            response.info.epoch,
+                        );
+                        if let Some(name) = name {
+                            if response.check(&name).is_ok() {
+                                info!("Signature for public key {name} is OK.");
+                            } else {
+                                error!("Signature for public key {name} is NOT OK.");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to get chain info for validator {address} and chain {chain_id}:\n{e}");
+                    }
+                }
+
                 println!("{}", genesis_config_hash);
             }
 
@@ -399,32 +427,47 @@ impl Runnable for Job {
 
                 let chain_id = chain_id.unwrap_or_else(|| context.default_chain());
                 let chain_client = context.make_chain_client(chain_id)?;
-                info!(
-                    "Querying the validators of the current epoch of chain {}",
-                    chain_id
-                );
-                let time_start = Instant::now();
+                info!("Querying validators about chain {}", chain_id);
                 let result = chain_client.local_committee().await;
                 context.update_and_save_wallet(&chain_client).await?;
                 let committee = result.context("Failed to get local committee")?;
-                let time_total = time_start.elapsed();
-                info!("Validators obtained after {} ms", time_total.as_millis());
-                info!("{:?}", committee.validators());
+                info!(
+                    "Using the local set of validators: {:?}",
+                    committee.validators()
+                );
                 let node_provider = context.make_node_provider();
                 for (name, state) in committee.validators() {
-                    match node_provider
-                        .make_node(&state.network_address)?
-                        .get_version_info()
-                        .await
-                    {
+                    let address = &state.network_address;
+                    let node = node_provider.make_node(address)?;
+                    match node.get_version_info().await {
                         Ok(version_info) => {
                             info!(
-                                "Version information for validator {name:?}:{}",
+                                "Version information for validator {name:?} at {address}:{}",
                                 version_info
                             );
                         }
                         Err(e) => {
-                            warn!("Failed to get version information for validator {name:?}:\n{e}")
+                            error!("Failed to get version information for validator {name:?} at {address}:\n{e}");
+                            continue;
+                        }
+                    }
+                    let query = linera_core::data_types::ChainInfoQuery::new(chain_id);
+                    match node.handle_chain_info_query(query).await {
+                        Ok(response) => {
+                            info!(
+                                "Validator {name:?} at {address} sees chain {chain_id} at block height {} and epoch {:?}",
+                                response.info.next_block_height,
+                                response.info.epoch,
+                            );
+                            if response.check(name).is_ok() {
+                                info!("Signature for public key {name} is OK.");
+                            } else {
+                                error!("Signature for public key {name} is NOT OK.");
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to get chain info for validator {name:?} at {address} and chain {chain_id}:\n{e}");
+                            continue;
                         }
                     }
                 }
@@ -457,7 +500,7 @@ impl Runnable for Job {
                             linera_version::VERSION_INFO
                         ),
                         Err(error) => bail!(
-                            "Failed to get version information for validator {name:?}:\n{error}"
+                            "Failed to get version information for validator {name:?} at {address}:\n{error}"
                         ),
                     }
                     let genesis_config_hash = context.wallet().genesis_config().hash();
@@ -469,7 +512,7 @@ impl Runnable for Job {
                             genesis_config_hash
                         ),
                         Err(error) => bail!(
-                            "Failed to get genesis config hash for validator {name:?}:\n{error}"
+                            "Failed to get genesis config hash for validator {name:?} at {address}:\n{error}"
                         ),
                     }
                 }
@@ -480,7 +523,7 @@ impl Runnable for Job {
                     .await
                     .unwrap()
                     .into_iter()
-                    .filter_map(|c| c.value().executed_block().map(|e| e.messages().len()))
+                    .map(|c| c.executed_block().messages().len())
                     .sum::<usize>();
                 info!("Subscribed {} chains to new committees", n);
                 let maybe_certificate = context
@@ -527,6 +570,8 @@ impl Runnable for Job {
                                     message_byte,
                                     maximum_fuel_per_block,
                                     maximum_executed_block_size,
+                                    maximum_blob_size,
+                                    maximum_bytecode_size,
                                     maximum_bytes_read_per_block,
                                     maximum_bytes_written_per_block,
                                 } => {
@@ -571,6 +616,12 @@ impl Runnable for Job {
                                     {
                                         policy.maximum_executed_block_size =
                                             maximum_executed_block_size;
+                                    }
+                                    if let Some(maximum_bytecode_size) = maximum_bytecode_size {
+                                        policy.maximum_bytecode_size = maximum_bytecode_size;
+                                    }
+                                    if let Some(maximum_blob_size) = maximum_blob_size {
+                                        policy.maximum_blob_size = maximum_blob_size;
                                     }
                                     if let Some(maximum_bytes_read_per_block) =
                                         maximum_bytes_read_per_block
@@ -670,10 +721,9 @@ impl Runnable for Job {
                         let executed_block = context
                             .stage_block_execution(proposal.content.block.clone())
                             .await?;
-                        let value =
-                            HashedCertificateValue::from(CertificateValue::ConfirmedBlock {
-                                executed_block,
-                            });
+                        let value = HashedCertificateValue::from(CertificateValue::ConfirmedBlock(
+                            ConfirmedBlock::new(executed_block),
+                        ));
                         values.insert(value.hash(), value);
                     }
                 }
@@ -1082,7 +1132,12 @@ impl Runnable for Job {
                     .await??;
             }
 
-            CreateGenesisConfig { .. } | Keygen | Net(_) | Wallet(_) | HelpMarkdown => {
+            CreateGenesisConfig { .. }
+            | Keygen
+            | Net(_)
+            | Storage { .. }
+            | Wallet(_)
+            | HelpMarkdown => {
                 unreachable!()
             }
         }
@@ -1102,33 +1157,32 @@ impl Job {
     where
         S: Storage + Clone + Send + Sync + 'static,
     {
-        let state = WorkerState::new(
-            "Local node".to_string(),
-            None,
+        let node_provider = context.make_node_provider();
+        let client = client::Client::new(
+            node_provider.clone(),
             storage,
-            NonZeroUsize::new(10).expect("Chain worker limit should not be zero"),
-        )
-        .with_tracked_chains([message_id.chain_id, chain_id])
-        .with_allow_inactive_chains(true)
-        .with_allow_messages_from_deprecated_epochs(true);
-        let node_client = LocalNodeClient::new(state);
+            100,
+            CrossChainMessageDelivery::Blocking,
+            false,
+            vec![message_id.chain_id, chain_id],
+            "Temporary client for fetching the parent chain",
+            NonZeroUsize::new(20).expect("Chain worker limit should not be zero"),
+        );
 
         // Take the latest committee we know of.
         let admin_chain_id = context.wallet.genesis_admin_chain();
         let query = ChainInfoQuery::new(admin_chain_id).with_committees();
         let nodes: Vec<_> = if let Some(validators) = validators {
-            context
-                .make_node_provider()
+            node_provider
                 .make_nodes_from_list(validators)?
                 .map(|(name, node)| RemoteNode { name, node })
                 .collect()
         } else {
-            let info = node_client.handle_chain_info_query(query).await?;
+            let info = client.local_node().handle_chain_info_query(query).await?;
             let committee = info
                 .latest_committee()
                 .context("Invalid chain info response; missing latest committee")?;
-            context
-                .make_node_provider()
+            node_provider
                 .make_nodes(committee)?
                 .map(|(name, node)| RemoteNode { name, node })
                 .collect()
@@ -1136,22 +1190,18 @@ impl Job {
 
         // Download the parent chain.
         let target_height = message_id.height.try_add_one()?;
-        node_client
-            .download_certificates(&nodes, message_id.chain_id, target_height, &mut vec![])
+        client
+            .download_certificates(&nodes, message_id.chain_id, target_height)
             .await
             .context("Failed to download parent chain")?;
 
         // The initial timestamp for the new chain is taken from the block with the message.
-        let certificate = node_client
+        let certificate = client
+            .local_node()
             .certificate_for(&message_id)
             .await
             .context("could not find OpenChain message")?;
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
-            bail!(
-                "Unexpected certificate. Please make sure you are connecting to the right \
-                network and are using a current software version."
-            );
-        };
+        let executed_block = certificate.executed_block();
         let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
             .message_by_id(&message_id)
             .map(|msg| &msg.message)
@@ -1213,7 +1263,7 @@ impl Job {
             };
             let certificate = storage.read_certificate(hash).await?;
             let committee = committees
-                .get(&certificate.value().epoch())
+                .get(&certificate.executed_block().block.epoch)
                 .ok_or_else(|| anyhow!("tip of chain {chain_id} is outdated."))?;
             certificate.check(committee)?;
         }
@@ -1258,11 +1308,20 @@ fn main() -> anyhow::Result<()> {
         span.record("wallet_id", wallet_id);
     }
 
-    runtime
+    let result = runtime
         .enable_all()
         .build()
         .expect("Failed to create Tokio runtime")
-        .block_on(run(&options).instrument(span))
+        .block_on(run(&options).instrument(span));
+
+    let error_code = match result {
+        Ok(code) => code,
+        Err(msg) => {
+            tracing::error!("Error is {:?}", msg);
+            2
+        }
+    };
+    process::exit(error_code);
 }
 
 /// Returns the log file name to use based on the [`ClientCommand`] that will run.
@@ -1302,16 +1361,17 @@ fn log_file_name_for(command: &ClientCommand) -> Cow<'static, str> {
         ClientCommand::Net { .. } => "net".into(),
         ClientCommand::Project { .. } => "project".into(),
         ClientCommand::Watch { .. } => "watch".into(),
+        ClientCommand::Storage { .. } => "storage".into(),
         ClientCommand::Service { port, .. } => format!("service-{port}").into(),
         ClientCommand::Faucet { .. } => "faucet".into(),
     }
 }
 
-async fn run(options: &ClientOptions) -> anyhow::Result<()> {
+async fn run(options: &ClientOptions) -> Result<i32, anyhow::Error> {
     match &options.command {
         ClientCommand::HelpMarkdown => {
             clap_markdown::print_help_markdown::<ClientOptions>();
-            Ok(())
+            Ok(0)
         }
 
         ClientCommand::CreateGenesisConfig {
@@ -1334,6 +1394,8 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
             message_byte_price,
             maximum_fuel_per_block,
             maximum_executed_block_size,
+            maximum_blob_size,
+            maximum_bytecode_size,
             maximum_bytes_read_per_block,
             maximum_bytes_written_per_block,
             testing_prng_seed,
@@ -1341,11 +1403,6 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
         } => {
             let committee_config: CommitteeConfig = util::read_json(committee_config_path)
                 .expect("Unable to read committee config file");
-            let maximum_fuel_per_block = maximum_fuel_per_block.unwrap_or(u64::MAX);
-            let maximum_bytes_read_per_block = maximum_bytes_read_per_block.unwrap_or(u64::MAX);
-            let maximum_bytes_written_per_block =
-                maximum_bytes_written_per_block.unwrap_or(u64::MAX);
-            let maximum_executed_block_size = maximum_executed_block_size.unwrap_or(u64::MAX);
             let policy = ResourceControlPolicy {
                 block: *block_price,
                 fuel_unit: *fuel_unit_price,
@@ -1358,10 +1415,12 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                 operation: *operation_price,
                 message_byte: *message_byte_price,
                 message: *message_price,
-                maximum_fuel_per_block,
-                maximum_executed_block_size,
-                maximum_bytes_read_per_block,
-                maximum_bytes_written_per_block,
+                maximum_fuel_per_block: *maximum_fuel_per_block,
+                maximum_executed_block_size: *maximum_executed_block_size,
+                maximum_blob_size: *maximum_blob_size,
+                maximum_bytecode_size: *maximum_bytecode_size,
+                maximum_bytes_read_per_block: *maximum_bytes_read_per_block,
+                maximum_bytes_written_per_block: *maximum_bytes_written_per_block,
             };
             let timestamp = start_timestamp
                 .map(|st| {
@@ -1381,7 +1440,7 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
             )?;
             let mut rng = Box::<dyn CryptoRng>::from(*testing_prng_seed);
             let mut chains = vec![];
-            for i in 0..*num_other_initial_chains {
+            for i in 0..=*num_other_initial_chains {
                 let description = ChainDescription::Root(i);
                 // Create keys.
                 let chain = UserChain::make_initial(&mut rng, description, timestamp);
@@ -1397,21 +1456,23 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                 .mutate(|wallet| wallet.extend(chains))
                 .await?;
             options.initialize_storage().boxed().await?;
-            Ok(())
+            Ok(0)
         }
 
         ClientCommand::Project(project_command) => match project_command {
             ProjectCommand::New { name, linera_root } => {
                 Project::create_new(name, linera_root.as_ref().map(AsRef::as_ref))?;
-                Ok(())
+                Ok(0)
             }
             ProjectCommand::Test { path } => {
                 let path = path.clone().unwrap_or_else(|| env::current_dir().unwrap());
                 let project = Project::from_existing_project(path)?;
-                Ok(project.test().await?)
+                project.test().await?;
+                Ok(0)
             }
             ProjectCommand::PublishAndCreate { .. } => {
-                options.run_with_storage(Job(options.clone())).await?
+                options.run_with_storage(Job(options.clone())).await??;
+                Ok(0)
             }
         },
 
@@ -1423,7 +1484,7 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                 .mutate(|w| w.add_unassigned_key_pair(key_pair))
                 .await?;
             println!("{}", public);
-            Ok(())
+            Ok(0)
         }
 
         ClientCommand::Net(net_command) => match net_command {
@@ -1439,7 +1500,8 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                 kubernetes: true,
                 binaries,
                 path: _,
-                storage_config_namespace: _,
+                storage: _,
+                external_protocol: _,
             } => {
                 net_up_utils::handle_net_up_kubernetes(
                     *extra_wallets,
@@ -1452,7 +1514,8 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                     policy_config.into_policy(),
                 )
                 .boxed()
-                .await
+                .await?;
+                Ok(0)
             }
 
             NetCommand::Up {
@@ -1464,7 +1527,8 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                 testing_prng_seed,
                 policy_config,
                 path,
-                storage_config_namespace,
+                storage,
+                external_protocol,
                 ..
             } => {
                 net_up_utils::handle_net_up_service(
@@ -1476,10 +1540,12 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                     *testing_prng_seed,
                     policy_config.into_policy(),
                     path,
-                    storage_config_namespace,
+                    storage,
+                    external_protocol.clone(),
                 )
                 .boxed()
-                .await
+                .await?;
+                Ok(0)
             }
 
             NetCommand::Helper => {
@@ -1489,14 +1555,62 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                        testing with a local Linera network"
                 );
                 println!("{}", include_str!("../../template/linera_net_helper.sh"));
-                Ok(())
+                Ok(0)
             }
         },
 
+        ClientCommand::Storage(command) => {
+            let storage_config = command.storage_config()?;
+            let common_config = CommonStoreConfig::default();
+            let full_storage_config = storage_config.add_common_config(common_config).await?;
+            match command {
+                DatabaseToolCommand::DeleteAll { .. } => {
+                    full_storage_config.delete_all().await?;
+                }
+                DatabaseToolCommand::DeleteNamespace { .. } => {
+                    full_storage_config.delete_namespace().await?;
+                }
+                DatabaseToolCommand::CheckExistence { .. } => {
+                    let test = full_storage_config.test_existence().await?;
+                    if test {
+                        tracing::info!("The database does exist");
+                        return Ok(0);
+                    } else {
+                        tracing::info!("The database does not exist");
+                        return Ok(1);
+                    }
+                }
+                DatabaseToolCommand::CheckAbsence { .. } => {
+                    let test = full_storage_config.test_existence().await?;
+                    if test {
+                        tracing::info!("The database does exist");
+                        return Ok(1);
+                    } else {
+                        tracing::info!("The database does not exist");
+                        return Ok(0);
+                    }
+                }
+                DatabaseToolCommand::Initialize { .. } => {
+                    full_storage_config.initialize().await?;
+                }
+                DatabaseToolCommand::ListNamespaces { .. } => {
+                    let namespaces = full_storage_config.list_all().await?;
+                    println!("The list of namespaces is {:?}", namespaces);
+                }
+            }
+            Ok(0)
+        }
+
         ClientCommand::Wallet(wallet_command) => match wallet_command {
-            WalletCommand::Show { chain_id } => {
-                wallet::pretty_print(&*options.wallet().await?, *chain_id);
-                Ok(())
+            WalletCommand::Show { chain_id, short } => {
+                if *short {
+                    for chain_id in options.wallet().await?.chains.keys() {
+                        println!("{chain_id}");
+                    }
+                } else {
+                    wallet::pretty_print(&*options.wallet().await?, *chain_id);
+                }
+                Ok(0)
             }
 
             WalletCommand::SetDefault { chain_id } => {
@@ -1505,7 +1619,7 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                     .await?
                     .mutate(|w| w.set_default_chain(*chain_id))
                     .await??;
-                Ok(())
+                Ok(0)
             }
 
             WalletCommand::ForgetKeys { chain_id } => {
@@ -1514,7 +1628,7 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                     .await?
                     .mutate(|w| w.forget_keys(chain_id))
                     .await??;
-                Ok(())
+                Ok(0)
             }
 
             WalletCommand::ForgetChain { chain_id } => {
@@ -1523,7 +1637,7 @@ async fn run(options: &ClientOptions) -> anyhow::Result<()> {
                     .await?
                     .mutate(|w| w.forget_chain(chain_id))
                     .await??;
-                Ok(())
+                Ok(0)
             }
 
             WalletCommand::Init {
@@ -1581,10 +1695,13 @@ Make sure to use a Linera client compatible with this network.
                     );
                     options.run_with_storage(Job(options.clone())).await??;
                 }
-                Ok(())
+                Ok(0)
             }
         },
 
-        _ => options.run_with_storage(Job(options.clone())).await?,
+        _ => {
+            options.run_with_storage(Job(options.clone())).await??;
+            Ok(0)
+        }
     }
 }

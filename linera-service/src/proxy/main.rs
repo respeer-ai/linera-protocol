@@ -44,11 +44,11 @@ pub struct ProxyOptions {
     /// Path to server configuration.
     config_path: PathBuf,
 
-    /// Timeout for sending queries (us)
+    /// Timeout for sending queries (ms)
     #[arg(long = "send-timeout-ms", default_value = "4000", value_parser = util::parse_millis)]
     send_timeout: Duration,
 
-    /// Timeout for receiving responses (us)
+    /// Timeout for receiving responses (ms)
     #[arg(long = "recv-timeout-ms", default_value = "4000", value_parser = util::parse_millis)]
     recv_timeout: Duration,
 
@@ -314,8 +314,19 @@ where
             DownloadCertificate(hash) => {
                 Ok(Some(self.storage.read_certificate(*hash).await?.into()))
             }
+            DownloadCertificates(hashes) => {
+                Ok(Some(self.storage.read_certificates(*hashes).await?.into()))
+            }
             BlobLastUsedBy(blob_id) => Ok(Some(RpcMessage::BlobLastUsedByResponse(Box::new(
                 self.storage.read_blob_state(*blob_id).await?.last_used_by,
+            )))),
+            BlobsLastUsedBy(blob_ids) => Ok(Some(RpcMessage::BlobsLastUsedByResponse(Box::new(
+                self.storage
+                    .read_blob_states(&blob_ids)
+                    .await?
+                    .into_iter()
+                    .map(|blob_state| blob_state.last_used_by)
+                    .collect::<Vec<_>>(),
             )))),
             BlockProposal(_)
             | LiteCertificate(_)
@@ -329,8 +340,10 @@ where
             | GenesisConfigHashResponse(_)
             | DownloadBlobContentResponse(_)
             | BlobLastUsedByResponse(_)
+            | BlobsLastUsedByResponse(_)
             | DownloadCertificateValueResponse(_)
-            | DownloadCertificateResponse(_) => {
+            | DownloadCertificateResponse(_)
+            | DownloadCertificatesResponse(_) => {
                 Err(anyhow::Error::from(NodeError::UnexpectedMessage))
             }
         }

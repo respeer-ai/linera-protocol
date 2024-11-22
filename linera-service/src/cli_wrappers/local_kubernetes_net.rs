@@ -28,7 +28,7 @@ use crate::cli_wrappers::{
     kubectl::KubectlInstance,
     local_net::PathProvider,
     util::get_github_root,
-    ClientWrapper, LineraNet, LineraNetConfig, Network,
+    ClientWrapper, LineraNet, LineraNetConfig, Network, OnClientDrop,
 };
 
 #[cfg(with_testing)]
@@ -91,7 +91,7 @@ impl SharedLocalKubernetesNetTestingConfig {
         Self(LocalKubernetesNetConfig {
             network,
             testing_prng_seed: Some(37),
-            num_other_initial_chains: 10,
+            num_other_initial_chains: 2,
             initial_amount: Amount::from_tokens(2000),
             num_initial_validators: 4,
             num_shards: 4,
@@ -167,10 +167,10 @@ impl LineraNetConfig for SharedLocalKubernetesNetTestingConfig {
 
         let mut net = net.clone();
         let client = net.make_client().await;
-        // The tests assume we've created a genesis config with 10
+        // The tests assume we've created a genesis config with 2
         // chains with 10 tokens each.
         client.wallet_init(&[], FaucetOption::None).await.unwrap();
-        for _ in 0..10 {
+        for _ in 0..2 {
             initial_client
                 .open_and_assign(&client, Amount::from_tokens(10))
                 .await
@@ -257,6 +257,7 @@ impl LineraNet for LocalKubernetesNet {
             self.network,
             self.testing_prng_seed,
             self.next_client_id,
+            OnClientDrop::LeakChains,
         );
         if let Some(seed) = self.testing_prng_seed {
             self.testing_prng_seed = Some(seed + 1);

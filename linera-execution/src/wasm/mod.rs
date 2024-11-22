@@ -20,20 +20,18 @@ mod wasmer;
 #[cfg(with_wasmtime)]
 mod wasmtime;
 
-use std::sync::Arc;
-#[cfg(with_metrics)]
-use std::sync::LazyLock;
-
 use linera_base::data_types::Bytecode;
-#[cfg(with_metrics)]
-use linera_base::prometheus_util::{self, MeasureLatency};
-#[cfg(with_metrics)]
-use prometheus::HistogramVec;
 use thiserror::Error;
 #[cfg(with_wasmer)]
 use wasmer::{WasmerContractInstance, WasmerServiceInstance};
 #[cfg(with_wasmtime)]
 use wasmtime::{WasmtimeContractInstance, WasmtimeServiceInstance};
+#[cfg(with_metrics)]
+use {
+    linera_base::prometheus_util::{self, MeasureLatency},
+    prometheus::HistogramVec,
+    std::sync::LazyLock,
+};
 
 use self::sanitizer::sanitize;
 pub use self::{
@@ -55,7 +53,6 @@ static CONTRACT_INSTANTIATION_LATENCY: LazyLock<HistogramVec> = LazyLock::new(||
             0.000_1, 0.000_3, 0.001, 0.002_5, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
         ]),
     )
-    .expect("Histogram creation should not fail")
 });
 
 #[cfg(with_metrics)]
@@ -68,7 +65,6 @@ static SERVICE_INSTANTIATION_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| 
             0.000_1, 0.000_3, 0.001, 0.002_5, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
         ]),
     )
-    .expect("Histogram creation should not fail")
 });
 
 /// A user contract in a compiled WebAssembly module.
@@ -80,7 +76,7 @@ pub enum WasmContractModule {
         module: ::wasmer::Module,
     },
     #[cfg(with_wasmtime)]
-    Wasmtime { module: Arc<::wasmtime::Module> },
+    Wasmtime { module: ::wasmtime::Module },
 }
 
 impl WasmContractModule {
@@ -152,9 +148,9 @@ impl UserContractModule for WasmContractModule {
 #[derive(Clone)]
 pub enum WasmServiceModule {
     #[cfg(with_wasmer)]
-    Wasmer { module: Arc<::wasmer::Module> },
+    Wasmer { module: ::wasmer::Module },
     #[cfg(with_wasmtime)]
-    Wasmtime { module: Arc<::wasmtime::Module> },
+    Wasmtime { module: ::wasmtime::Module },
 }
 
 impl WasmServiceModule {
@@ -214,6 +210,67 @@ impl UserServiceModule for WasmServiceModule {
         Ok(instance)
     }
 }
+
+#[cfg(web)]
+const _: () = {
+    use js_sys::wasm_bindgen::JsValue;
+
+    impl TryFrom<JsValue> for WasmServiceModule {
+        type Error = JsValue;
+
+        fn try_from(value: JsValue) -> Result<Self, JsValue> {
+            // TODO(#2775): be generic over possible implementations
+
+            cfg_if::cfg_if! {
+                if #[cfg(with_wasmer)] {
+                    Ok(Self::Wasmer {
+                        module: value.try_into()?,
+                    })
+                } else {
+                    Err(value)
+                }
+            }
+        }
+    }
+
+    impl From<WasmServiceModule> for JsValue {
+        fn from(module: WasmServiceModule) -> JsValue {
+            match module {
+                #[cfg(with_wasmer)]
+                WasmServiceModule::Wasmer { module } => ::wasmer::Module::clone(&module).into(),
+            }
+        }
+    }
+
+    impl TryFrom<JsValue> for WasmContractModule {
+        type Error = JsValue;
+
+        fn try_from(value: JsValue) -> Result<Self, JsValue> {
+            // TODO(#2775): be generic over possible implementations
+            cfg_if::cfg_if! {
+                if #[cfg(with_wasmer)] {
+                    Ok(Self::Wasmer {
+                        module: value.try_into()?,
+                        engine: Default::default(),
+                    })
+                } else {
+                    Err(value)
+                }
+            }
+        }
+    }
+
+    impl From<WasmContractModule> for JsValue {
+        fn from(module: WasmContractModule) -> JsValue {
+            match module {
+                #[cfg(with_wasmer)]
+                WasmContractModule::Wasmer { module, engine: _ } => {
+                    ::wasmer::Module::clone(&module).into()
+                }
+            }
+        }
+    }
+};
 
 /// Errors that can occur when executing a user application in a WebAssembly module.
 #[cfg(any(with_wasmer, with_wasmtime))]

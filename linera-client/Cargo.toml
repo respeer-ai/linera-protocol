@@ -108,7 +108,7 @@ fungible.workspace = true
 linera-alloy = { workspace = true, default-features = false, features = [ "rpc-types-eth" ] }
 linera-base = { workspace = true, features = ["test"] }
 linera-chain = { workspace = true, features = ["test"] }
-linera-client = { path = ".", features = ["test"] }
+linera-client = { path = ".", default-features = false, features = ["test"] }
 linera-core = { workspace = true, features = ["test"] }
 linera-ethereum.workspace = true
 linera-execution = { workspace = true, features = ["test"] }
@@ -121,6 +121,7 @@ non-fungible.workspace = true
 proptest.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 social.workspace = true
+tempfile.workspace = true
 test-case.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 test-strategy.workspace = true

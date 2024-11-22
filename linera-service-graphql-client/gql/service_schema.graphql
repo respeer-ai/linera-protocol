@@ -413,11 +413,10 @@ type ExecutedBlock {
 	outcome: BlockExecutionOutcome!
 }
 
-type ExecutedBlockMaterial {
-	executedBlock: ExecutedBlock!
-	validatedBlockCertificateHash: CryptoHash
-	retry: Boolean!
-}
+"""
+Executed block material which could be signed by client.
+"""
+scalar ExecutedBlockMaterial
 
 type ExecutionStateView {
 	system: SystemExecutionStateView!
@@ -715,24 +714,9 @@ type MutationRoot {
 	"""
 	walletInitWithoutKeypair(publicKey: PublicKey!, signature: Signature!, faucetUrl: String!, chainId: ChainId!, messageId: MessageId!, certificateHash: CryptoHash!): ChainId!
 	"""
-	Submit pending block proposal signature
-	"""
-	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): CryptoHash!
-	"""
 	Submit block proposal with signature
 	"""
 	submitBlockAndSignature(chainId: ChainId!, height: BlockHeight!, executedBlock: UserExecutedBlock!, round: Round!, signature: Signature!, retry: Boolean!, validatedBlockCertificateHash: CryptoHash): CryptoHash!
-	"""
-	Transfers `amount` units of value from the given owner's account to the recipient.
-	If no owner is given, try to take the units out of the unattributed account.
-	Different from transfer, node service won't sign block in transfer_without_block_proposal
-	"""
-	transferWithoutBlockProposal(fromChainId: ChainId!, fromPublicKey: PublicKey, toChainId: ChainId!, toPublicKey: PublicKey, amount: Amount!): ChainId!
-	"""
-	Requests a `RegisterApplications` message from another chain so the application can be used
-	on this one.
-	"""
-	requestApplicationWithoutBlockProposal(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): ApplicationId!
 	"""
 	Calculate block execution state hash
 	"""
@@ -869,10 +853,6 @@ type QueryRoot {
 	"""
 	blockMaterial(chainId: ChainId!): CandidateBlockMaterial!
 	"""
-	Returns the next raw block proposal
-	"""
-	peekCandidateRawBlockPayload(chainId: ChainId!): RawBlockProposalPayload
-	"""
 	Returns the balance of given owner
 	"""
 	balance(chainId: ChainId!, publicKey: PublicKey): Amount!
@@ -896,11 +876,6 @@ type QueueView_MessageBundle_f4399f0b {
 
 type QueueView_TimestampedBundleInInbox_5a630c55 {
 	entries(count: Int): [TimestampedBundleInInbox!]!
-}
-
-type RawBlockProposalPayload {
-	height: BlockHeight!
-	payloadBytes: [Int!]!
 }
 
 """
@@ -977,21 +952,34 @@ input ResourceControlPolicy {
 	"""
 	The maximum amount of fuel a block can consume.
 	"""
-	maximumFuelPerBlock: Int!
+	maximumFuelPerBlock: ResourceLimit!
 	"""
 	The maximum size of an executed block. This includes the block proposal itself as well as
 	the execution outcome.
 	"""
-	maximumExecutedBlockSize: Int!
+	maximumExecutedBlockSize: ResourceLimit!
+	"""
+	The maximum size of decompressed contract or service bytecode, in bytes.
+	"""
+	maximumBytecodeSize: ResourceLimit!
+	"""
+	The maximum size of a blob.
+	"""
+	maximumBlobSize: ResourceLimit!
 	"""
 	The maximum data to read per block
 	"""
-	maximumBytesReadPerBlock: Int!
+	maximumBytesReadPerBlock: ResourceLimit!
 	"""
 	The maximum data to write per block
 	"""
-	maximumBytesWrittenPerBlock: Int!
+	maximumBytesWrittenPerBlock: ResourceLimit!
 }
+
+"""
+A maximal value for the usage of a resource.
+"""
+scalar ResourceLimit
 
 """
 A number to identify successive attempts to decide a value in a consensus protocol.

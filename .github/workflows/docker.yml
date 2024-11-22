@@ -2,13 +2,15 @@ name: Docker
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'devnet_*', 'testnet_*' ]
   pull_request:
     branches:
       - "**"
     paths:
       - 'docker/Dockerfile'
+      - 'docker/docker-compose.yml'
       - 'docker/compose.sh'
+      - 'docker/docker-compose.yml'
       - 'Cargo.toml'
       - '.github/workflows/docker.yml'
   workflow_dispatch:
@@ -28,6 +30,7 @@ env:
   RUSTFLAGS: -D warnings
   RUSTUP_MAX_RETRIES: 10
   RUST_LOG: warn
+  DOCKER_COMPOSE_WAIT: "true"
 
 permissions:
   contents: read
@@ -46,17 +49,29 @@ jobs:
         uses: arduino/setup-protoc@v1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
+      # TODO(#2709): Uncomment once this workflow runs in a custom runner
+      # - name: Update aio-max-nr
+        # run: echo 1048576 > /proc/sys/fs/aio-max-nr
       - name: Build client binary
         run: |
           cargo install --path linera-service --bin linera --bin linera-server --debug
-      - name: Build Docker image
-        run: docker build . -f docker/Dockerfile -t linera
+      # TODO(#2709): Remove this step once this workflow runs in a custom runner
+      - name: Patch Docker compose file to run ScyllaDB in developer mode
+        run: |
+          sed -i -e '/SCYLLA_AUTO_CONF/{N;s/command:/  SCYLLA_ENABLE_EXPERIMENTAL: 1/p;N;N;N;N;d}' \
+            docker/docker-compose.yml
       - name: Run Compose
-        run: cd docker && ./compose.sh &
+        run: |
+          cd docker
+          ./compose.sh
+      # TODO(#2709): Uncomment once this workflow runs in a custom runner
+      # - name: Setup upterm session
+        # uses: lhotari/action-upterm@v1
       - name: Sync
         uses: nick-fields/retry@v2
         with:
           # Docker compose can take some time to start
-          max_attempts: 5
+          max_attempts: 10
           timeout_minutes: 2
-          command: sleep 60 && linera --wallet docker/wallet.json --storage rocksdb:docker/linera.db sync-balance
+          retry_wait_seconds: 10
+          command: linera --wallet docker/wallet.json --storage rocksdb:docker/linera.db sync-balance

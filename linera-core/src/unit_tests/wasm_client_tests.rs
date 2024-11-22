@@ -26,9 +26,10 @@ use linera_base::{
     },
     ownership::{ChainOwnership, TimeoutConfig},
 };
-use linera_chain::data_types::{CertificateValue, EventRecord, MessageAction, OutgoingMessage};
+use linera_chain::data_types::{EventRecord, MessageAction, OutgoingMessage};
 use linera_execution::{
-    Message, MessageKind, Operation, ResourceControlPolicy, SystemMessage, WasmRuntime,
+    Message, MessageKind, Operation, ResourceControlPolicy, ResourceLimit, SystemMessage,
+    WasmRuntime,
 };
 use serde_json::json;
 use test_case::test_case;
@@ -41,7 +42,10 @@ use crate::client::client_tests::RocksDbStorageBuilder;
 use crate::client::client_tests::ScyllaDbStorageBuilder;
 #[cfg(feature = "storage-service")]
 use crate::client::client_tests::ServiceStorageBuilder;
-use crate::client::client_tests::{MemoryStorageBuilder, StorageBuilder, TestBuilder};
+use crate::client::{
+    client_tests::{MemoryStorageBuilder, StorageBuilder, TestBuilder},
+    ChainClientError,
+};
 
 #[cfg_attr(feature = "wasmer", test_case(WasmRuntime::Wasmer ; "wasmer"))]
 #[cfg_attr(feature = "wasmtime", test_case(WasmRuntime::Wasmtime ; "wasmtime"))]
@@ -90,9 +94,25 @@ async fn run_test_create_application<B>(storage_builder: B) -> anyhow::Result<()
 where
     B: StorageBuilder,
 {
+    let (contract_path, service_path) =
+        linera_execution::wasm_test::get_example_bytecode_paths("counter")?;
+    let contract_bytecode = Bytecode::load_from_file(contract_path).await?;
+    let service_bytecode = Bytecode::load_from_file(service_path).await?;
+    let contract_compressed_len = contract_bytecode.compress().compressed_bytes.len();
+    let service_compressed_len = service_bytecode.compress().compressed_bytes.len();
+
+    let mut policy = ResourceControlPolicy::all_categories();
+    policy.maximum_bytecode_size = ResourceLimit(
+        contract_bytecode
+            .bytes
+            .len()
+            .max(service_bytecode.bytes.len()) as u64,
+    );
+    policy.maximum_blob_size =
+        ResourceLimit(contract_compressed_len.max(service_compressed_len) as u64);
     let mut builder = TestBuilder::new(storage_builder, 4, 1)
         .await?
-        .with_policy(ResourceControlPolicy::all_categories());
+        .with_policy(policy.clone());
     let publisher = builder
         .add_initial_chain(ChainDescription::Root(0), Amount::from_tokens(3))
         .await?;
@@ -100,14 +120,8 @@ where
         .add_initial_chain(ChainDescription::Root(1), Amount::ONE)
         .await?;
 
-    let (contract_path, service_path) =
-        linera_execution::wasm_test::get_example_bytecode_paths("counter")?;
-
     let (bytecode_id, _cert) = publisher
-        .publish_bytecode(
-            Bytecode::load_from_file(contract_path).await?,
-            Bytecode::load_from_file(service_path).await?,
-        )
+        .publish_bytecode(contract_bytecode, service_bytecode)
         .await
         .unwrap()
         .unwrap();
@@ -147,6 +161,18 @@ where
     // Creating the application used fuel because of the `instantiate` call.
     let balance_after_init = creator.local_balance().await?;
     assert!(balance_after_init < balance_after_messaging);
+
+    let large_bytecode = Bytecode::new(vec![0; *policy.maximum_bytecode_size as usize + 1]);
+    let small_bytecode = Bytecode::new(vec![]);
+    // Publishing bytecode that exceeds the limit fails.
+    let result = publisher
+        .publish_bytecode(large_bytecode.clone(), small_bytecode.clone())
+        .await;
+    assert_matches!(result, Err(ChainClientError::LocalNodeError(_)));
+    let result = publisher
+        .publish_bytecode(small_bytecode, large_bytecode)
+        .await;
+    assert_matches!(result, Err(ChainClientError::LocalNodeError(_)));
 
     Ok(())
 }
@@ -306,7 +332,7 @@ where
         .unwrap()
         .unwrap();
     assert_eq!(
-        certificate.value().executed_block().unwrap().outcome.events,
+        certificate.executed_block().outcome.events,
         vec![
             Vec::new(),
             vec![EventRecord {
@@ -328,7 +354,7 @@ where
         .await
         .unwrap()
         .unwrap();
-    let executed_block = cert.value().executed_block().unwrap();
+    let executed_block = cert.executed_block();
     let responses = &executed_block.outcome.oracle_responses;
     let [_, responses] = &responses[..] else {
         panic!("Unexpected oracle responses: {:?}", responses);
@@ -377,14 +403,14 @@ where
     let mut certs = receiver.process_inbox().await.unwrap().0;
     assert_eq!(certs.len(), 1);
     let cert = certs.pop().unwrap();
-    let incoming_bundles = &cert.value().block().unwrap().incoming_bundles;
+    let incoming_bundles = &cert.executed_block().block.incoming_bundles;
     assert_eq!(incoming_bundles.len(), 1);
     assert_eq!(incoming_bundles[0].action, MessageAction::Reject);
     assert_eq!(
         incoming_bundles[0].bundle.messages[0].kind,
         MessageKind::Simple
     );
-    let messages = cert.value().messages().unwrap();
+    let messages = cert.executed_block().messages();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].len(), 0);
 
@@ -404,7 +430,7 @@ where
     let mut certs = receiver.process_inbox().await.unwrap().0;
     assert_eq!(certs.len(), 1);
     let cert = certs.pop().unwrap();
-    let incoming_bundles = &cert.value().block().unwrap().incoming_bundles;
+    let incoming_bundles = &cert.executed_block().block.incoming_bundles;
     assert_eq!(incoming_bundles.len(), 1);
     assert_eq!(incoming_bundles[0].action, MessageAction::Reject);
     assert_eq!(
@@ -415,7 +441,7 @@ where
         incoming_bundles[0].bundle.messages[1].kind,
         MessageKind::Tracked
     );
-    let messages = cert.value().messages().unwrap();
+    let messages = cert.executed_block().messages();
     assert_eq!(messages.len(), 1);
 
     // The bounced message is marked as "bouncing" in the Wasm context and succeeds.
@@ -426,7 +452,7 @@ where
     let mut certs = creator.process_inbox().await.unwrap().0;
     assert_eq!(certs.len(), 1);
     let cert = certs.pop().unwrap();
-    let incoming_bundles = &cert.value().block().unwrap().incoming_bundles;
+    let incoming_bundles = &cert.executed_block().block.incoming_bundles;
     assert_eq!(incoming_bundles.len(), 2);
     // First message is the grant refund for the successful message sent before.
     assert_eq!(incoming_bundles[0].action, MessageAction::Accept);
@@ -559,7 +585,7 @@ where
         .unwrap()
         .unwrap();
 
-    let messages = cert.value().messages().unwrap();
+    let messages = cert.executed_block().messages();
     {
         let OutgoingMessage {
             destination,
@@ -583,12 +609,7 @@ where
         .unwrap();
     let certs = receiver.process_inbox().await.unwrap().0;
     assert_eq!(certs.len(), 1);
-    let messages = match certs[0].value() {
-        CertificateValue::ConfirmedBlock { executed_block, .. } => {
-            &executed_block.block.incoming_bundles
-        }
-        _ => panic!("Unexpected value"),
-    };
+    let messages = &certs[0].executed_block().block.incoming_bundles;
     assert!(messages.iter().any(|msg| matches!(
         &msg.bundle.messages[0].message,
         Message::System(SystemMessage::RegisterApplications { applications })
@@ -620,12 +641,7 @@ where
         .unwrap();
     let certs = receiver.process_inbox().await.unwrap().0;
     assert_eq!(certs.len(), 1);
-    let messages = match certs[0].value() {
-        CertificateValue::ConfirmedBlock { executed_block, .. } => {
-            &executed_block.block.incoming_bundles
-        }
-        _ => panic!("Unexpected value"),
-    };
+    let messages = &certs[0].executed_block().block.incoming_bundles;
     assert!(messages
         .iter()
         .flat_map(|msg| &msg.bundle.messages)
@@ -786,12 +802,7 @@ where
     assert_eq!(certs.len(), 1);
 
     // There should be a message receiving the new post.
-    let messages = match certs[0].value() {
-        CertificateValue::ConfirmedBlock { executed_block, .. } => {
-            &executed_block.block.incoming_bundles
-        }
-        _ => panic!("Unexpected value"),
-    };
+    let messages = &certs[0].executed_block().block.incoming_bundles;
     assert!(messages
         .iter()
         .any(|msg| matches!(&msg.bundle.messages[0].message, Message::User { .. })));
@@ -879,7 +890,7 @@ async fn test_memory_fuel_limit(wasm_runtime: WasmRuntime) -> anyhow::Result<()>
         TestBuilder::new(storage_builder, 4, 1)
             .await?
             .with_policy(ResourceControlPolicy {
-                maximum_fuel_per_block: 30_000,
+                maximum_fuel_per_block: ResourceLimit(30_000),
                 ..ResourceControlPolicy::default()
             });
     let publisher = builder

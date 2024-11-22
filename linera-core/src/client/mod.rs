@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    collections::{hash_map, BTreeMap, HashMap, HashSet},
+    collections::{hash_map, BTreeMap, BTreeSet, HashMap, HashSet},
     convert::Infallible,
     iter,
     num::NonZeroUsize,
@@ -11,14 +11,15 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use chain_state::ChainState;
+use chain_client_state::ChainClientState;
 use dashmap::{
     mapref::one::{MappedRef as DashMapMappedRef, Ref as DashMapRef, RefMut as DashMapRefMut},
     DashMap,
 };
 use futures::{
-    future::{self, FusedFuture, Future},
+    future::{self, try_join_all, FusedFuture, Future},
     stream::{self, AbortHandle, FusedStream, FuturesUnordered, StreamExt},
+    TryStreamExt as _,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use linera_base::data_types::Bytecode;
@@ -39,10 +40,11 @@ use linera_base::{
 };
 use linera_chain::{
     data_types::{
-        Block, BlockProposal, Certificate, CertificateValue, ExecutedBlock, HashedCertificateValue,
-        IncomingBundle, LiteCertificate, LiteVote, MessageAction, PostedMessage, ProposalContent,
+        Block, BlockProposal, Certificate, ChainAndHeight, ExecutedBlock, HashedCertificateValue,
+        IncomingBundle, LiteCertificate, LiteVote, MessageAction, ProposalContent,
     },
     manager::ChainManagerInfo,
+    types::{ConfirmedBlockCertificate, ValidatedBlockCertificate},
     ChainError, ChainExecutionContext, ChainStateView,
 };
 use linera_execution::{
@@ -51,33 +53,33 @@ use linera_execution::{
         AdminOperation, OpenChainConfig, Recipient, SystemChannel, SystemOperation,
         CREATE_APPLICATION_MESSAGE_INDEX, OPEN_CHAIN_MESSAGE_INDEX,
     },
-    ExecutionError, Message, Operation, Query, Response, SystemExecutionError, SystemMessage,
-    SystemQuery, SystemResponse,
+    ExecutionError, Operation, Query, Response, SystemExecutionError, SystemQuery, SystemResponse,
 };
 use linera_storage::{Clock as _, Storage};
 use linera_views::views::ViewError;
+use rand::prelude::SliceRandom as _;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::OwnedRwLockReadGuard;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, info, warn, Instrument as _};
+use tracing::{debug, error, info, instrument, warn, Instrument as _};
 
 use crate::{
     data_types::{
-        BlockHeightRange, ChainInfo, ChainInfoQuery, ChainInfoResponse, ClientOutcome,
-        RawBlockProposal, RoundTimeout,
+        BlockHeightRange, ChainInfo, ChainInfoQuery, ChainInfoResponse, ClientOutcome, RoundTimeout,
     },
-    local_node::{LocalNodeClient, LocalNodeError, RemoteNode},
+    local_node::{LocalNodeClient, LocalNodeError},
     node::{
         CrossChainMessageDelivery, NodeError, NotificationStream, ValidatorNode,
         ValidatorNodeProvider,
     },
-    notifier::Notifier,
+    notifier::ChannelNotifier,
+    remote_node::RemoteNode,
     updater::{communicate_with_quorum, CommunicateAction, CommunicationError, ValidatorUpdater},
     worker::{Notification, Reason, WorkerError, WorkerState},
 };
 
-mod chain_state;
+mod chain_client_state;
 #[cfg(test)]
 #[path = "../unit_tests/client_tests.rs"]
 mod client_tests;
@@ -100,7 +102,6 @@ mod metrics {
                     25.0, 50.0, 100.0, 250.0, 500.0,
                 ]),
             )
-            .expect("Histogram creation should not fail")
         });
 
     pub static PREPARE_CHAIN_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
@@ -113,7 +114,6 @@ mod metrics {
                 25.0, 50.0, 100.0, 250.0, 500.0,
             ]),
         )
-        .expect("Histogram creation should not fail")
     });
 
     pub static SYNCHRONIZE_CHAIN_STATE_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
@@ -126,7 +126,6 @@ mod metrics {
                 25.0, 50.0, 100.0, 250.0, 500.0,
             ]),
         )
-        .expect("Histogram creation should not fail")
     });
 
     pub static EXECUTE_BLOCK_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
@@ -139,7 +138,6 @@ mod metrics {
                 25.0, 50.0, 100.0, 250.0, 500.0,
             ]),
         )
-        .expect("Histogram creation should not fail")
     });
 
     pub static FIND_RECEIVED_CERTIFICATES_LATENCY: LazyLock<HistogramVec> = LazyLock::new(|| {
@@ -152,7 +150,6 @@ mod metrics {
                 25.0, 50.0, 100.0, 250.0, 500.0,
             ]),
         )
-        .expect("Histogram creation should not fail")
     });
 }
 
@@ -176,17 +173,20 @@ where
     // TODO(#2412): Merge with set of chains the client is receiving notifications from validators
     tracked_chains: Arc<RwLock<HashSet<ChainId>>>,
     /// References to clients waiting for chain notifications.
-    notifier: Arc<Notifier<Notification>>,
+    notifier: Arc<ChannelNotifier<Notification>>,
     /// A copy of the storage client so that we don't have to lock the local node client
     /// to retrieve it.
     storage: Storage,
     /// Chain state for the managed chains.
-    chains: DashMap<ChainId, ChainState>,
+    chains: DashMap<ChainId, ChainClientState>,
+    /// The maximum active chain workers.
+    max_loaded_chains: NonZeroUsize,
 }
 
 impl<P, S: Storage + Clone> Client<P, S> {
     /// Creates a new `Client` with a new cache and notifiers.
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(level = "trace", skip_all)]
     pub fn new(
         validator_node_provider: P,
         storage: S,
@@ -195,13 +195,14 @@ impl<P, S: Storage + Clone> Client<P, S> {
         long_lived_services: bool,
         tracked_chains: impl IntoIterator<Item = ChainId>,
         name: impl Into<String>,
+        max_loaded_chains: NonZeroUsize,
     ) -> Self {
         let tracked_chains = Arc::new(RwLock::new(tracked_chains.into_iter().collect()));
         let state = WorkerState::new_for_client(
             name.into(),
             storage.clone(),
             tracked_chains.clone(),
-            NonZeroUsize::new(200).expect("Chain worker limit should not be zero"),
+            max_loaded_chains,
         )
         .with_long_lived_services(long_lived_services)
         .with_allow_inactive_chains(true)
@@ -216,25 +217,26 @@ impl<P, S: Storage + Clone> Client<P, S> {
             message_policy: MessagePolicy::new(BlanketMessagePolicy::Accept, None),
             cross_chain_message_delivery,
             tracked_chains,
-            notifier: Arc::new(Notifier::default()),
+            notifier: Arc::new(ChannelNotifier::default()),
             storage,
+            max_loaded_chains,
         }
     }
 
     /// Returns the storage client used by this client's local node.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn storage_client(&self) -> &S {
         &self.storage
     }
 
     /// Returns a reference to the [`LocalNodeClient`] of the client.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn local_node(&self) -> &LocalNodeClient<S> {
         &self.local_node
     }
 
     /// Adds a chain to the set of chains tracked by the local node.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn track_chain(&self, chain_id: ChainId) {
         self.tracked_chains
             .write()
@@ -243,7 +245,7 @@ impl<P, S: Storage + Clone> Client<P, S> {
     }
 
     /// Creates a new `ChainClient`.
-    #[tracing::instrument(level = "trace", skip_all, fields(chain_id, next_block_height))]
+    #[instrument(level = "trace", skip_all, fields(chain_id, next_block_height))]
     #[expect(clippy::too_many_arguments)]
     pub fn create_chain_client(
         self: &Arc<Self>,
@@ -255,28 +257,24 @@ impl<P, S: Storage + Clone> Client<P, S> {
         next_block_height: BlockHeight,
         pending_block: Option<Block>,
         pending_blobs: BTreeMap<BlobId, Blob>,
-        pending_raw_block: Option<RawBlockProposal>,
-        pending_operations: Vec<Operation>,
     ) -> ChainClient<P, S> {
         // If the entry already exists we assume that the entry is more up to date than
         // the arguments: If they were read from the wallet file, they might be stale.
         if let dashmap::mapref::entry::Entry::Vacant(e) = self.chains.entry(chain_id) {
-            e.insert(ChainState::new(
+            e.insert(ChainClientState::new(
                 known_key_pairs,
-                admin_id,
                 block_hash,
                 timestamp,
                 next_block_height,
                 pending_block,
                 pending_blobs,
-                pending_raw_block,
-                pending_operations,
             ));
         }
 
         ChainClient {
             client: self.clone(),
             chain_id,
+            admin_id,
             options: ChainClientOptions {
                 max_pending_message_bundles: self.max_pending_message_bundles,
                 message_policy: self.message_policy.clone(),
@@ -297,34 +295,117 @@ where
     P: ValidatorNodeProvider + Sync + 'static,
     S: Storage + Sync + Send + Clone + 'static,
 {
-    async fn download_certificates(
+    /// Downloads and processes all certificates up to (excluding) the specified height.
+    #[instrument(level = "trace", skip(self, validators))]
+    pub async fn download_certificates(
         &self,
-        nodes: &[RemoteNode<P::Node>],
+        validators: &[RemoteNode<impl ValidatorNode>],
         chain_id: ChainId,
-        height: BlockHeight,
-    ) -> Result<Box<ChainInfo>, LocalNodeError> {
-        let mut notifications = Vec::<Notification>::new();
-        let info = self
-            .local_node
-            .download_certificates(nodes, chain_id, height, &mut notifications)
+        target_next_block_height: BlockHeight,
+    ) -> Result<Box<ChainInfo>, ChainClientError> {
+        // Sequentially try each validator in random order.
+        let mut validators = validators.iter().collect::<Vec<_>>();
+        validators.shuffle(&mut rand::thread_rng());
+        for remote_node in validators {
+            let info = self.local_node.local_chain_info(chain_id).await?;
+            if target_next_block_height <= info.next_block_height {
+                return Ok(info);
+            }
+            self.try_download_certificates_from(
+                remote_node,
+                chain_id,
+                info.next_block_height,
+                target_next_block_height,
+            )
             .await?;
-        self.notifier.handle_notifications(&notifications);
-        Ok(info)
+        }
+        let info = self.local_node.local_chain_info(chain_id).await?;
+        if target_next_block_height <= info.next_block_height {
+            Ok(info)
+        } else {
+            Err(ChainClientError::CannotDownloadCertificates {
+                chain_id,
+                target_next_block_height,
+            })
+        }
     }
 
-    async fn try_process_certificates(
+    /// Downloads and processes all certificates up to (excluding) the specified height from the
+    /// given validator.
+    #[instrument(level = "trace", skip_all)]
+    async fn try_download_certificates_from(
         &self,
-        remote_node: &RemoteNode<P::Node>,
+        remote_node: &RemoteNode<impl ValidatorNode>,
         chain_id: ChainId,
-        certificates: Vec<Certificate>,
+        mut start: BlockHeight,
+        stop: BlockHeight,
+    ) -> Result<(), ChainClientError> {
+        while start < stop {
+            // TODO(#2045): Analyze network errors instead of guessing the batch size.
+            let limit = u64::from(stop)
+                .checked_sub(u64::from(start))
+                .ok_or(ArithmeticError::Overflow)?
+                .min(1000);
+            let Some(certificates) = remote_node
+                .try_query_certificates_from(chain_id, start, limit)
+                .await?
+            else {
+                break;
+            };
+            let Some(info) = self
+                .try_process_certificates(remote_node, chain_id, certificates)
+                .await
+            else {
+                break;
+            };
+            assert!(info.next_block_height > start);
+            start = info.next_block_height;
+        }
+        Ok(())
+    }
+
+    /// Tries to process all the certificates, requesting any missing blobs from the given node.
+    /// Returns the chain info of the last successfully processed certificate.
+    #[instrument(level = "trace", skip_all)]
+    pub async fn try_process_certificates(
+        &self,
+        remote_node: &RemoteNode<impl ValidatorNode>,
+        chain_id: ChainId,
+        certificates: Vec<ConfirmedBlockCertificate>,
     ) -> Option<Box<ChainInfo>> {
-        let mut notifications = Vec::<Notification>::new();
-        let result = self
-            .local_node
-            .try_process_certificates(remote_node, chain_id, certificates, &mut notifications)
-            .await;
-        self.notifier.handle_notifications(&notifications);
-        result
+        let mut info = None;
+        for certificate in certificates {
+            let hash = certificate.hash();
+            if certificate.executed_block().block.chain_id != chain_id {
+                // The certificate is not as expected. Give up.
+                warn!("Failed to process network certificate {}", hash);
+                return info;
+            }
+            let mut result = self
+                .handle_certificate(certificate.clone().into(), vec![])
+                .await;
+
+            if let Some(blob_ids) = result
+                .as_ref()
+                .err()
+                .and_then(LocalNodeError::get_blobs_not_found)
+            {
+                if let Some(blobs) = remote_node.try_download_blobs(&blob_ids).await {
+                    result = self.handle_certificate(certificate.into(), blobs).await;
+                }
+            }
+
+            match result {
+                Ok(response) => info = Some(response.info),
+                Err(error) => {
+                    // The certificate is not as expected. Give up.
+                    warn!("Failed to process network certificate {}: {}", hash, error);
+                    return info;
+                }
+            };
+        }
+        // Done with all certificates.
+        info
     }
 
     async fn handle_certificate(
@@ -332,13 +413,9 @@ where
         certificate: Certificate,
         blobs: Vec<Blob>,
     ) -> Result<ChainInfoResponse, LocalNodeError> {
-        let mut notifications = Vec::<Notification>::new();
-        let result = self
-            .local_node
-            .handle_certificate(certificate, blobs, &mut notifications)
-            .await;
-        self.notifier.handle_notifications(&notifications);
-        result
+        self.local_node
+            .handle_certificate(certificate, blobs, &self.notifier)
+            .await
     }
 }
 
@@ -376,8 +453,8 @@ impl MessagePolicy {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn handle(&self, bundle: &mut IncomingBundle) -> bool {
+    #[instrument(level = "trace", skip(self))]
+    fn must_handle(&self, bundle: &mut IncomingBundle) -> bool {
         if self.is_reject() {
             if bundle.bundle.is_skippable() {
                 return false;
@@ -392,12 +469,12 @@ impl MessagePolicy {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn is_ignore(&self) -> bool {
         matches!(self.blanket, BlanketMessagePolicy::Ignore)
     }
 
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn is_reject(&self) -> bool {
         matches!(self.blanket, BlanketMessagePolicy::Reject)
     }
@@ -427,6 +504,8 @@ where
     client: Arc<Client<ValidatorNodeProvider, Storage>>,
     /// The off-chain chain ID.
     chain_id: ChainId,
+    /// The ID of the admin chain.
+    admin_id: ChainId,
     /// The client options.
     options: ChainClientOptions,
 }
@@ -439,6 +518,7 @@ where
         Self {
             client: self.client.clone(),
             chain_id: self.chain_id,
+            admin_id: self.admin_id,
             options: self.options.clone(),
         }
     }
@@ -510,8 +590,17 @@ pub enum ChainClientError {
     #[error(transparent)]
     ViewError(#[from] ViewError),
 
-    #[error("Blob not found: {0}")]
-    BlobNotFound(BlobId),
+    #[error("Blobs not found: {0:?}")]
+    BlobsNotFound(Vec<BlobId>),
+
+    #[error(
+        "Failed to download certificates and update local node to the next height \
+         {target_next_block_height} of chain {chain_id:?}"
+    )]
+    CannotDownloadCertificates {
+        chain_id: ChainId,
+        target_next_block_height: BlockHeight,
+    },
 
     #[error("Invalid raw block proposal")]
     InvalidRawBlockProposal,
@@ -524,6 +613,9 @@ pub enum ChainClientError {
 
     #[error("Invalid block round")]
     InvalidBlockRound,
+
+    #[error("Invalid validated block")]
+    InvalidValidatedBlock,
 }
 
 impl From<Infallible> for ChainClientError {
@@ -564,12 +656,12 @@ impl<T: DerefMut> DerefMut for Unsend<T> {
 
 pub type ChainGuard<'a, T> = Unsend<DashMapRef<'a, ChainId, T>>;
 pub type ChainGuardMut<'a, T> = Unsend<DashMapRefMut<'a, ChainId, T>>;
-pub type ChainGuardMapped<'a, T> = Unsend<DashMapMappedRef<'a, ChainId, ChainState, T>>;
+pub type ChainGuardMapped<'a, T> = Unsend<DashMapMappedRef<'a, ChainId, ChainClientState, T>>;
 
 impl<P: 'static, S: Storage> ChainClient<P, S> {
     /// Gets a shared reference to the chain's state.
-    #[tracing::instrument(level = "trace", skip(self))]
-    pub fn state(&self) -> ChainGuard<ChainState> {
+    #[instrument(level = "trace", skip(self))]
+    pub fn state(&self) -> ChainGuard<ChainClientState> {
         Unsend::new(
             self.client
                 .chains
@@ -580,8 +672,8 @@ impl<P: 'static, S: Storage> ChainClient<P, S> {
 
     /// Gets a mutable reference to the state.
     /// Beware: this will block any other reference to any chain's state!
-    #[tracing::instrument(level = "trace", skip(self))]
-    fn state_mut(&self) -> ChainGuardMut<ChainState> {
+    #[instrument(level = "trace", skip(self))]
+    fn state_mut(&self) -> ChainGuardMut<ChainClientState> {
         Unsend::new(
             self.client
                 .chains
@@ -591,43 +683,43 @@ impl<P: 'static, S: Storage> ChainClient<P, S> {
     }
 
     /// Gets the per-`ChainClient` options.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn options_mut(&mut self) -> &mut ChainClientOptions {
         &mut self.options
     }
 
     /// Gets the ID of the associated chain.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn chain_id(&self) -> ChainId {
         self.chain_id
     }
 
     /// Gets the hash of the latest known block.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn block_hash(&self) -> Option<CryptoHash> {
         self.state().block_hash()
     }
 
     /// Gets the earliest possible timestamp for the next block.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn timestamp(&self) -> Timestamp {
         self.state().timestamp()
     }
 
     /// Gets the next block height.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn next_block_height(&self) -> BlockHeight {
         self.state().next_block_height()
     }
 
     /// Gets a guarded reference to the next pending block.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn pending_block(&self) -> ChainGuardMapped<Option<Block>> {
         Unsend::new(self.state().inner.map(|state| state.pending_block()))
     }
 
     /// Gets a guarded reference to the set of pending blobs.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub fn pending_blobs(&self) -> ChainGuardMapped<BTreeMap<BlobId, Blob>> {
         Unsend::new(self.state().inner.map(|state| state.pending_blobs()))
     }
@@ -638,13 +730,35 @@ enum ReceiveCertificateMode {
     AlreadyChecked,
 }
 
+enum CheckCertificateResult {
+    OldEpoch,
+    New,
+    FutureEpoch,
+}
+
+/// Creates a compressed Contract, Service and bytecode.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn create_bytecode_blobs(
+    contract: Bytecode,
+    service: Bytecode,
+) -> (Blob, Blob, BytecodeId) {
+    let (compressed_contract, compressed_service) =
+        tokio::task::spawn_blocking(move || (contract.compress(), service.compress()))
+            .await
+            .expect("Compression should not panic");
+    let contract_blob = Blob::new_contract_bytecode(compressed_contract);
+    let service_blob = Blob::new_service_bytecode(compressed_service);
+    let bytecode_id = BytecodeId::new(contract_blob.id().hash, service_blob.id().hash);
+    (contract_blob, service_blob, bytecode_id)
+}
+
 impl<P, S> ChainClient<P, S>
 where
     P: ValidatorNodeProvider + Sync + 'static,
     S: Storage + Clone + Send + Sync + 'static,
 {
     /// Obtains a `ChainStateView` for a given `ChainId`.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn chain_state_view(
         &self,
     ) -> Result<OwnedRwLockReadGuard<ChainStateView<S::Context>>, LocalNodeError> {
@@ -656,7 +770,7 @@ where
     }
 
     /// Subscribes to notifications from this client's chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn subscribe(&self) -> Result<NotificationStream, LocalNodeError> {
         Ok(Box::pin(UnboundedReceiverStream::new(
             self.client.notifier.subscribe(vec![self.chain_id]),
@@ -664,13 +778,13 @@ where
     }
 
     /// Returns the storage client used by this client's local node.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub fn storage_client(&self) -> S {
         self.client.storage_client().clone()
     }
 
     /// Obtains the basic `ChainInfo` data for the local chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn chain_info(&self) -> Result<Box<ChainInfo>, LocalNodeError> {
         let query = ChainInfoQuery::new(self.chain_id);
         let response = self
@@ -682,7 +796,7 @@ where
     }
 
     /// Obtains the basic `ChainInfo` data for the local chain, with chain manager values.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn chain_info_with_manager_values(&self) -> Result<Box<ChainInfo>, LocalNodeError> {
         let query = ChainInfoQuery::new(self.chain_id).with_manager_values();
         let response = self
@@ -695,12 +809,8 @@ where
 
     /// Obtains up to `self.options.max_pending_message_bundles` pending message bundles for the
     /// local chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn pending_message_bundles(&self) -> Result<Vec<IncomingBundle>, ChainClientError> {
-        if self.next_block_height() != BlockHeight::ZERO && self.options.message_policy.is_ignore()
-        {
-            return Ok(Vec::new()); // OpenChain is already received, other are ignored.
-        }
         let query = ChainInfoQuery::new(self.chain_id).with_pending_message_bundles();
         let info = self
             .client
@@ -708,12 +818,21 @@ where
             .handle_chain_info_query(query)
             .await?
             .info;
-        ensure!(
-            info.next_block_height == self.next_block_height(),
-            ChainClientError::WalletSynchronizationError
-        );
-        let mut requested_pending_message_bundles = info.requested_pending_message_bundles;
-        let mut pending_message_bundles = vec![];
+        {
+            let state = self.state();
+            ensure!(
+                state.has_other_owners(&info.manager.ownership)
+                    || info.next_block_height == state.next_block_height(),
+                ChainClientError::WalletSynchronizationError
+            );
+        }
+        if info.next_block_height != BlockHeight::ZERO && self.options.message_policy.is_ignore() {
+            return Ok(Vec::new()); // OpenChain is already received, others are ignored.
+        }
+
+        let mut rearranged = false;
+        let mut pending_message_bundles = info.requested_pending_message_bundles;
+
         // The first incoming message of any child chain must be `OpenChain`. We must have it in
         // our inbox, and include it before all other messages.
         if info.next_block_height == BlockHeight::ZERO
@@ -722,44 +841,35 @@ where
                 .ok_or_else(|| LocalNodeError::InactiveChain(self.chain_id))?
                 .is_child()
         {
-            let Some(index) = requested_pending_message_bundles
-                .iter()
-                .position(|message| {
-                    matches!(
-                        message.bundle.messages.first(),
-                        Some(PostedMessage {
-                            message: Message::System(SystemMessage::OpenChain(_)),
-                            ..
-                        })
-                    )
-                })
-            else {
-                return Err(LocalNodeError::InactiveChain(self.chain_id).into());
-            };
-            let open_chain_bundle = requested_pending_message_bundles.remove(index);
-            pending_message_bundles.push(open_chain_bundle);
+            // The first incoming message of any child chain must be `OpenChain`. We must have it in
+            // our inbox, and include it before all other messages.
+            rearranged = IncomingBundle::put_openchain_at_front(&mut pending_message_bundles);
+            ensure!(rearranged, LocalNodeError::InactiveChain(self.chain_id));
         }
+
         if self.options.message_policy.is_ignore() {
-            return Ok(pending_message_bundles); // Ignore messages other than OpenChain.
-        }
-        for mut bundle in requested_pending_message_bundles {
-            if pending_message_bundles.len() >= self.options.max_pending_message_bundles {
-                warn!(
-                    "Limiting block to {} incoming message bundles",
-                    self.options.max_pending_message_bundles
-                );
-                break;
+            // Ignore messages other than OpenChain.
+            if rearranged {
+                return Ok(pending_message_bundles[0..1].to_vec());
+            } else {
+                return Ok(Vec::new());
             }
-            if !self.options.message_policy.handle(&mut bundle) {
-                continue;
-            }
-            pending_message_bundles.push(bundle);
         }
-        Ok(pending_message_bundles)
+
+        Ok(pending_message_bundles
+            .into_iter()
+            .filter_map(|mut bundle| {
+                self.options
+                    .message_policy
+                    .must_handle(&mut bundle)
+                    .then_some(bundle)
+            })
+            .take(self.options.max_pending_message_bundles)
+            .collect())
     }
 
     /// Obtains the current epoch of the given chain as well as its set of trusted committees.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn epoch_and_committees(
         &self,
         chain_id: ChainId,
@@ -779,14 +889,14 @@ where
     }
 
     /// Obtains the epochs of the committees trusted by the local chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn epochs(&self) -> Result<Vec<Epoch>, LocalNodeError> {
         let (_epoch, committees) = self.epoch_and_committees(self.chain_id).await?;
         Ok(committees.into_keys().collect())
     }
 
     /// Obtains the committee for the current epoch of the local chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn local_committee(&self) -> Result<Committee, LocalNodeError> {
         let (epoch, mut committees) = self.epoch_and_committees(self.chain_id).await?;
         committees
@@ -800,19 +910,18 @@ where
 
     /// Obtains all the committees trusted by either the local chain or its admin chain. Also
     /// return the latest trusted epoch.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     async fn known_committees(
         &self,
     ) -> Result<(BTreeMap<Epoch, Committee>, Epoch), LocalNodeError> {
         let (epoch, mut committees) = self.epoch_and_committees(self.chain_id).await?;
-        let admin_id = self.state().admin_id();
-        let (admin_epoch, admin_committees) = self.epoch_and_committees(admin_id).await?;
+        let (admin_epoch, admin_committees) = self.epoch_and_committees(self.admin_id).await?;
         committees.extend(admin_committees);
         let epoch = std::cmp::max(epoch.unwrap_or_default(), admin_epoch.unwrap_or_default());
         Ok((committees, epoch))
     }
 
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     fn make_nodes(&self, committee: &Committee) -> Result<Vec<RemoteNode<P::Node>>, NodeError> {
         Ok(self
             .client
@@ -823,7 +932,7 @@ where
     }
 
     /// Obtains the validators trusted by the local chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     async fn validator_nodes(&self) -> Result<Vec<RemoteNode<P::Node>>, ChainClientError> {
         match self.local_committee().await {
             Ok(committee) => Ok(self.make_nodes(&committee)?),
@@ -838,7 +947,7 @@ where
     }
 
     /// Obtains the current epoch of the local chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     async fn epoch(&self) -> Result<Epoch, LocalNodeError> {
         self.chain_info()
             .await?
@@ -848,30 +957,31 @@ where
 
     /// Obtains the identity of the current owner of the chain. Returns an error if we have the
     /// private key for more than one identity.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn identity(&self) -> Result<Owner, ChainClientError> {
         let manager = self.chain_info().await?.manager;
         ensure!(
             manager.ownership.is_active(),
             LocalNodeError::InactiveChain(self.chain_id)
         );
-        let mut identities = manager
+        let state = self.state();
+        let mut our_identities = manager
             .ownership
             .all_owners()
             .chain(&manager.leader)
-            .filter(|owner| self.state().known_key_pairs().contains_key(owner));
-        let Some(identity) = identities.next() else {
+            .filter(|owner| state.known_key_pairs().contains_key(owner));
+        let Some(identity) = our_identities.next() else {
             return Err(ChainClientError::CannotFindKeyForChain(self.chain_id));
         };
         ensure!(
-            identities.all(|id| id == identity),
+            our_identities.all(|id| id == identity),
             ChainClientError::FoundMultipleKeysForChain(self.chain_id)
         );
         Ok(*identity)
     }
 
     /// Obtains the key pair associated to the current identity.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn key_pair(&self) -> Result<KeyPair, ChainClientError> {
         let id = self.identity().await?;
         Ok(self
@@ -883,24 +993,49 @@ where
     }
 
     /// Obtains the public key associated to the current identity.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn public_key(&self) -> Result<PublicKey, ChainClientError> {
         Ok(self.key_pair().await?.public())
     }
 
     /// Prepares the chain for the next operation, i.e. makes sure we have synchronized it up to
-    /// its current height.
-    #[tracing::instrument(level = "trace")]
+    /// its current height and are not missing any received messages from the inbox.
+    #[instrument(level = "trace")]
     pub async fn prepare_chain(&self) -> Result<Box<ChainInfo>, ChainClientError> {
         #[cfg(with_metrics)]
         let _latency = metrics::PREPARE_CHAIN_LATENCY.measure_latency();
 
-        // Verify that our local storage contains enough history compared to the
-        // expected block height. Otherwise, download the missing history from the
-        // network.
-        let next_block_height = self.next_block_height();
+        let mut info = self.synchronize_until(self.next_block_height()).await?;
+
+        if self.state().has_other_owners(&info.manager.ownership) {
+            // For chains with any owner other than ourselves, we could be missing recent
+            // certificates created by other owners. Further synchronize blocks from the network.
+            // This is a best-effort that depends on network conditions.
+            let nodes = self.validator_nodes().await?;
+            info = self.synchronize_chain_state(&nodes, self.chain_id).await?;
+        }
+
+        let result = self
+            .chain_state_view()
+            .await?
+            .validate_incoming_bundles()
+            .await;
+        if matches!(result, Err(ChainError::MissingCrossChainUpdate { .. })) {
+            self.find_received_certificates().await?;
+        }
+        self.update_from_info(&info);
+        Ok(info)
+    }
+
+    // Verifies that our local storage contains enough history compared to the
+    // expected block height. Otherwise, downloads the missing history from the
+    // network.
+    pub async fn synchronize_until(
+        &self,
+        next_block_height: BlockHeight,
+    ) -> Result<Box<ChainInfo>, ChainClientError> {
         let nodes = self.validator_nodes().await?;
-        let mut info = self
+        let info = self
             .client
             .download_certificates(&nodes, self.chain_id, next_block_height)
             .await?;
@@ -911,41 +1046,27 @@ where
                 ChainClientError::InternalError("Invalid chain of blocks in local node")
             );
         }
-        let ownership = &info.manager.ownership;
-        let keys: HashSet<_> = self.state().known_key_pairs().keys().cloned().collect();
-        if ownership.all_owners().any(|owner| !keys.contains(owner)) {
-            let mutex = self.state().client_mutex();
-            let _guard = mutex.lock_owned().await;
-
-            // For chains with any owner other than ourselves, we could be missing recent
-            // certificates created by other owners. Further synchronize blocks from the network.
-            // This is a best-effort that depends on network conditions.
-            let nodes = self.validator_nodes().await?;
-            info = self.synchronize_chain_state(&nodes, self.chain_id).await?;
-        }
-        self.update_from_info(&info);
         Ok(info)
     }
 
     /// Submits a validated block for finalization and returns the confirmed block certificate.
-    #[tracing::instrument(level = "trace", skip(committee, certificate))]
+    #[instrument(level = "trace", skip(committee, certificate))]
     async fn finalize_block(
         &self,
         committee: &Committee,
-        certificate: Certificate,
-    ) -> Result<Certificate, ChainClientError> {
-        let value = certificate.value.validated_to_confirmed().ok_or_else(|| {
-            ChainClientError::InternalError(
-                "Certificate for finalization must be a validated block",
-            )
-        })?;
+        certificate: ValidatedBlockCertificate,
+    ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
+        let hashed_value =
+            HashedCertificateValue::new_confirmed(certificate.executed_block().clone());
         let finalize_action = CommunicateAction::FinalizeBlock {
-            certificate,
+            certificate: certificate.into(),
             delivery: self.options.cross_chain_message_delivery,
         };
-        let certificate = self
-            .communicate_chain_action(committee, finalize_action, value)
-            .await?;
+        let certificate: ConfirmedBlockCertificate = self
+            .communicate_chain_action(committee, finalize_action, hashed_value)
+            .await?
+            .try_into()
+            .expect("Finalized block should be confirmed");
         self.receive_certificate_and_update_validators_internal(
             certificate.clone(),
             ReceiveCertificateMode::AlreadyChecked,
@@ -956,34 +1077,38 @@ where
 
     /// Submits a block proposal to the validators. If it is a slow round, also submits the
     /// validated block for finalization. Returns the confirmed block certificate.
-    #[tracing::instrument(level = "trace", skip(committee, proposal, value))]
+    #[instrument(level = "trace", skip(committee, proposal, value))]
     async fn submit_block_proposal(
         &self,
         committee: &Committee,
         proposal: Box<BlockProposal>,
         value: HashedCertificateValue,
-    ) -> Result<Certificate, ChainClientError> {
-        let blob_ids = value
+    ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
+        let required_blob_ids = value
             .inner()
             .executed_block()
             .expect("The result of executing a proposal is always an executed block")
             .outcome
             .required_blob_ids();
-        let submit_action = CommunicateAction::SubmitBlock { proposal, blob_ids };
+        let proposed_blobs = proposal.blobs.clone();
+        let submit_action = CommunicateAction::SubmitBlock {
+            proposal,
+            blob_ids: required_blob_ids,
+        };
         let certificate = self
             .communicate_chain_action(committee, submit_action, value)
             .await?;
-        self.process_certificate(certificate.clone(), vec![])
+        self.process_certificate(certificate.clone(), proposed_blobs)
             .await?;
         if certificate.value().is_confirmed() {
-            Ok(certificate)
+            Ok(certificate.try_into().unwrap()) // shouldn't panic, we just checked.
         } else {
-            self.finalize_block(committee, certificate).await
+            self.finalize_block(committee, certificate.into()).await
         }
     }
 
     /// Broadcasts certified blocks to validators.
-    #[tracing::instrument(level = "trace", skip(committee, delivery))]
+    #[instrument(level = "trace", skip(committee, delivery))]
     async fn communicate_chain_updates(
         &self,
         committee: &Committee,
@@ -993,12 +1118,16 @@ where
     ) -> Result<(), ChainClientError> {
         let local_node = self.client.local_node.clone();
         let nodes = self.make_nodes(committee)?;
+        let n_validators = nodes.len();
+        let chain_worker_count =
+            std::cmp::max(1, self.client.max_loaded_chains.get() / n_validators);
         communicate_with_quorum(
             &nodes,
             committee,
             |_: &()| (),
             |remote_node| {
                 let mut updater = ValidatorUpdater {
+                    chain_worker_count,
                     remote_node,
                     local_node: local_node.clone(),
                 };
@@ -1018,7 +1147,7 @@ where
     ///
     /// In that case, it verifies that the validator votes are for the provided value,
     /// and returns a certificate.
-    #[tracing::instrument(level = "trace", skip(committee, action, value))]
+    #[instrument(level = "trace", skip(committee, action, value))]
     async fn communicate_chain_action(
         &self,
         committee: &Committee,
@@ -1027,12 +1156,16 @@ where
     ) -> Result<Certificate, ChainClientError> {
         let local_node = self.client.local_node.clone();
         let nodes = self.make_nodes(committee)?;
+        let n_validators = nodes.len();
+        let chain_worker_count =
+            std::cmp::max(1, self.client.max_loaded_chains.get() / n_validators);
         let ((votes_hash, votes_round), votes) = communicate_with_quorum(
             &nodes,
             committee,
             |vote: &LiteVote| (vote.value.value_hash, vote.round),
             |remote_node| {
                 let mut updater = ValidatorUpdater {
+                    chain_worker_count,
                     remote_node,
                     local_node: local_node.clone(),
                 };
@@ -1062,14 +1195,14 @@ where
 
     /// Processes the confirmed block certificate and its ancestors in the local node, then
     /// updates the validators up to that certificate.
-    #[tracing::instrument(level = "trace", skip(certificate, mode))]
+    #[instrument(level = "trace", skip(certificate, mode))]
     async fn receive_certificate_and_update_validators_internal(
         &self,
-        certificate: Certificate,
+        certificate: ConfirmedBlockCertificate,
         mode: ReceiveCertificateMode,
     ) -> Result<(), ChainClientError> {
-        let block_chain_id = certificate.value().chain_id();
-        let block_height = certificate.value().height();
+        let block_chain_id = certificate.executed_block().block.chain_id;
+        let block_height = certificate.executed_block().block.height;
 
         self.receive_certificate_internal(certificate, mode).await?;
 
@@ -1088,18 +1221,13 @@ where
 
     /// Processes the confirmed block certificate in the local node. Also downloads and processes
     /// all ancestors that are still missing.
-    #[tracing::instrument(level = "trace", skip(certificate, mode))]
+    #[instrument(level = "trace", skip(certificate, mode))]
     async fn receive_certificate_internal(
         &self,
-        certificate: Certificate,
+        certificate: ConfirmedBlockCertificate,
         mode: ReceiveCertificateMode,
     ) -> Result<(), ChainClientError> {
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
-            return Err(ChainClientError::InternalError(
-                "Was expecting a confirmed chain operation",
-            ));
-        };
-        let block = &executed_block.block;
+        let block = &certificate.executed_block().block;
 
         // Verify the certificate before doing any expensive networking.
         let (committees, max_epoch) = self.known_committees().await?;
@@ -1119,14 +1247,18 @@ where
         self.client
             .download_certificates(&nodes, block.chain_id, block.height)
             .await?;
-        // Process the received operations. Download required hashed certificate values if necessary.
-        if let Err(err) = self.process_certificate(certificate.clone(), vec![]).await {
+        // Process the received operations. Download required hashed certificate values if
+        // necessary.
+        if let Err(err) = self
+            .process_certificate(certificate.clone().into(), vec![])
+            .await
+        {
             match &err {
                 LocalNodeError::WorkerError(WorkerError::BlobsNotFound(blob_ids)) => {
-                    let blobs = LocalNodeClient::<S>::download_blobs(blob_ids, &nodes).await;
-
-                    ensure!(blobs.len() == blob_ids.len(), err);
-                    self.process_certificate(certificate.clone(), blobs).await?;
+                    let blobs = RemoteNode::download_blobs(blob_ids, &nodes)
+                        .await
+                        .ok_or(err)?;
+                    self.process_certificate(certificate.into(), blobs).await?;
                 }
                 _ => {
                     // The certificate is not as expected. Give up.
@@ -1141,134 +1273,224 @@ where
 
     /// Downloads and processes all confirmed block certificates that sent any message to this
     /// chain, including their ancestors.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     async fn synchronize_received_certificates_from_validator(
         &self,
         chain_id: ChainId,
         remote_node: &RemoteNode<P::Node>,
-    ) -> Result<(ValidatorName, u64, Vec<Certificate>), NodeError> {
-        let tracker = self
+        chain_worker_limit: usize,
+    ) -> Result<ReceivedCertificatesFromValidator, NodeError> {
+        let mut tracker = self
             .state()
             .received_certificate_trackers()
             .get(&remote_node.name)
             .copied()
             .unwrap_or(0);
-        let (mut committees, mut max_epoch) = self
+        let (committees, max_epoch) = self
             .known_committees()
             .await
             .map_err(|_| NodeError::InvalidChainInfoResponse)?;
-        let admin_id = self.state().admin_id();
-        // Retrieve newly received certificates from this validator.
+
+        // Retrieve the list of newly received certificates from this validator.
         let query = ChainInfoQuery::new(chain_id).with_received_log_excluding_first_n(tracker);
         let info = remote_node.handle_chain_info_query(query).await?;
-        let mut certificates = Vec::new();
-        let mut new_tracker = tracker;
-        for entry in info.requested_received_log {
-            let query = ChainInfoQuery::new(entry.chain_id)
-                .with_sent_certificate_hashes_in_range(BlockHeightRange::single(entry.height));
-            let local_response = self
-                .client
-                .local_node
-                .handle_chain_info_query(query.clone())
-                .await
-                .map_err(|error| NodeError::LocalNodeQuery {
-                    error: error.to_string(),
-                })?;
-            if !local_response
-                .info
-                .requested_sent_certificate_hashes
-                .is_empty()
-            {
-                new_tracker += 1;
-                continue;
-            }
+        let remote_log = info.requested_received_log;
+        let remote_max_heights = Self::max_height_per_chain(&remote_log);
 
-            let mut info = remote_node.handle_chain_info_query(query).await?;
-            let Some(certificate_hash) = info.requested_sent_certificate_hashes.pop() else {
-                break;
-            };
+        // Obtain the next block height we need in the local node, for each chain.
+        let local_next_heights = self
+            .local_next_block_heights(remote_max_heights.keys(), chain_worker_limit)
+            .await?;
 
-            let certificate = remote_node
-                .node
-                .download_certificate(certificate_hash)
-                .await?;
-            let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value()
-            else {
-                return Err(NodeError::InvalidChainInfoResponse);
-            };
-            let block = &executed_block.block;
-            // Check that certificates are valid w.r.t one of our trusted committees.
-            if block.epoch > max_epoch {
-                // Synchronize the state of the admin chain from the validator.
-                self.try_synchronize_chain_state_from(remote_node, admin_id)
-                    .await
-                    .map_err(|_| NodeError::InvalidChainInfoResponse)?;
-                let (new_committees, new_max_epoch) = self
-                    .known_committees()
-                    .await
-                    .map_err(|_| NodeError::InvalidChainInfoResponse)?;
-                committees.extend(new_committees);
-                max_epoch = max_epoch.max(new_max_epoch);
-            }
-            if block.epoch > max_epoch {
-                // We don't accept a certificate from a committee in the future.
-                warn!(
-                    "Postponing received certificate from {:.8} at height {} from future epoch {}",
-                    entry.chain_id, entry.height, block.epoch
-                );
-                // Stop the synchronization here. Do not increment the tracker further so
-                // that this certificate can still be downloaded later, once our committee
-                // is updated.
-                break;
-            }
-            match committees.get(&block.epoch) {
-                Some(committee) => {
-                    // This epoch is recognized by our chain. Let's verify the
-                    // certificate.
-                    certificate.check(committee)?;
-                    certificates.push(certificate);
-                    new_tracker += 1;
+        // We keep track of the height we've successfully downloaded and checked, per chain.
+        let mut downloaded_heights = BTreeMap::new();
+        // And we make a list of chains we already fully have locally. We need to make sure to
+        // put all their sent messages into the inbox.
+        let mut other_sender_chains = Vec::new();
+
+        let certificate_hashes = future::try_join_all(remote_max_heights.into_iter().filter_map(
+            |(sender_chain_id, remote_height)| {
+                let local_next = *local_next_heights.get(&sender_chain_id)?;
+                if let Ok(height) = local_next.try_sub_one() {
+                    downloaded_heights.insert(sender_chain_id, height);
                 }
-                None => {
+
+                let Some(diff) = remote_height.0.checked_sub(local_next.0) else {
+                    // Our highest, locally-known block is higher than any block height
+                    // from the current batch. Skip this batch, but remember to wait for
+                    // the messages to be delivered to the inboxes.
+                    other_sender_chains.push(sender_chain_id);
+                    return None;
+                };
+
+                // Find the hashes of the blocks we need.
+                let range = BlockHeightRange::multi(local_next, diff.saturating_add(1));
+                Some(remote_node.fetch_sent_certificate_hashes(sender_chain_id, range))
+            },
+        ))
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
+
+        // Download the block certificates.
+        let remote_certificates = remote_node
+            .node
+            .download_certificates(certificate_hashes)
+            .await?;
+
+        // Check the signatures and keep only the ones that are valid.
+        let mut certificates = Vec::new();
+        for certificate in remote_certificates {
+            let sender_chain_id = certificate.value().chain_id();
+            let height = certificate.value().height();
+            let epoch = certificate.value().epoch();
+            let confirmed_block_certificate = certificate
+                .try_into()
+                .map_err(|_| NodeError::InvalidChainInfoResponse)?;
+            match self.check_certificate(max_epoch, &committees, &confirmed_block_certificate)? {
+                CheckCertificateResult::FutureEpoch => {
+                    warn!(
+                        "Postponing received certificate from {sender_chain_id:.8} at height \
+                         {height} from future epoch {epoch}"
+                    );
+                    // Do not process this certificate now. It can still be
+                    // downloaded later, once our committee is updated.
+                }
+                CheckCertificateResult::OldEpoch => {
                     // This epoch is not recognized any more. Let's skip the certificate.
                     // If a higher block with a recognized epoch comes up later from the
                     // same chain, the call to `receive_certificate` below will download
                     // the skipped certificate again.
-                    warn!(
-                        "Skipping received certificate from past epoch {:?}",
-                        block.epoch
-                    );
-                    new_tracker += 1;
+                    warn!("Skipping received certificate from past epoch {epoch:?}");
+                }
+                CheckCertificateResult::New => {
+                    downloaded_heights
+                        .entry(sender_chain_id)
+                        .and_modify(|h| *h = height.max(*h))
+                        .or_insert(height);
+                    certificates.push(confirmed_block_certificate);
                 }
             }
         }
-        Ok((remote_node.name, new_tracker, certificates))
-    }
 
-    /// Processes the result of [`synchronize_received_certificates_from_validator`] and updates
-    /// the tracker for this validator.
-    #[tracing::instrument(level = "trace", skip(tracker, certificates))]
-    async fn receive_certificates_from_validator(
-        &self,
-        name: ValidatorName,
-        tracker: u64,
-        certificates: Vec<Certificate>,
-    ) {
-        for certificate in certificates {
-            let hash = certificate.hash();
-            if let Err(e) = self
-                .receive_certificate_internal(certificate, ReceiveCertificateMode::AlreadyChecked)
-                .await
+        // Increase the tracker up to the first position we haven't downloaded.
+        for entry in remote_log {
+            if downloaded_heights
+                .get(&entry.chain_id)
+                .is_some_and(|h| *h >= entry.height)
             {
-                warn!("Received invalid certificate {hash} from {name}: {e}");
-                // Do not update the validator's tracker in case of error.
-                // Move on to the next validator.
-                return;
+                tracker += 1;
+            } else {
+                break;
             }
         }
-        // Update tracker.
-        self.state_mut()
-            .update_received_certificate_tracker(name, tracker);
+
+        Ok(ReceivedCertificatesFromValidator {
+            name: remote_node.name,
+            tracker,
+            certificates,
+            other_sender_chains,
+        })
+    }
+
+    #[instrument(
+        level = "trace", skip_all,
+        fields(certificate_hash = ?incoming_certificate.hash()),
+    )]
+    fn check_certificate(
+        &self,
+        highest_known_epoch: Epoch,
+        committees: &BTreeMap<Epoch, Committee>,
+        incoming_certificate: &ConfirmedBlockCertificate,
+    ) -> Result<CheckCertificateResult, NodeError> {
+        let block = &incoming_certificate.executed_block().block;
+        // Check that certificates are valid w.r.t one of our trusted committees.
+        if block.epoch > highest_known_epoch {
+            return Ok(CheckCertificateResult::FutureEpoch);
+        }
+        if let Some(known_committee) = committees.get(&block.epoch) {
+            // This epoch is recognized by our chain. Let's verify the
+            // certificate.
+            incoming_certificate.check(known_committee)?;
+            Ok(CheckCertificateResult::New)
+        } else {
+            // We don't accept a certificate from a committee that was retired.
+            Ok(CheckCertificateResult::OldEpoch)
+        }
+    }
+
+    /// Processes the results of [`synchronize_received_certificates_from_validator`] and updates
+    /// the trackers for the validators.
+    #[tracing::instrument(level = "trace", skip(received_certificates_batches))]
+    async fn receive_certificates_from_validators(
+        &self,
+        received_certificates_batches: Vec<ReceivedCertificatesFromValidator>,
+    ) {
+        let validator_count = received_certificates_batches.len();
+        let mut other_sender_chains = BTreeSet::new();
+        let mut certificates =
+            BTreeMap::<ChainId, BTreeMap<BlockHeight, ConfirmedBlockCertificate>>::new();
+        let mut new_trackers = BTreeMap::new();
+        for response in received_certificates_batches {
+            other_sender_chains.extend(response.other_sender_chains);
+            new_trackers.insert(response.name, response.tracker);
+            for certificate in response.certificates {
+                certificates
+                    .entry(certificate.executed_block().block.chain_id)
+                    .or_default()
+                    .insert(certificate.executed_block().block.height, certificate);
+            }
+        }
+        let certificate_count = certificates.values().map(BTreeMap::len).sum::<usize>();
+
+        tracing::info!(
+            "Received {certificate_count} certificates from {validator_count} validator(s)."
+        );
+
+        // We would like to use all chain workers, but we need to keep some of them free, because
+        // handling the certificates can trigger messages to other chains, and putting these in
+        // the inbox requires the recipient chain's worker, too.
+        let chain_worker_limit = (self.client.max_loaded_chains.get() / 2).max(1);
+
+        // Process the certificates sorted by chain and in ascending order of block height.
+        let stream = stream::iter(certificates.into_values().map(|certificates| {
+            let client = self.clone();
+            async move {
+                for certificate in certificates.into_values() {
+                    let hash = certificate.hash();
+                    let mode = ReceiveCertificateMode::AlreadyChecked;
+                    if let Err(e) = client.receive_certificate_internal(certificate, mode).await {
+                        warn!("Received invalid certificate {hash}: {e}");
+                    }
+                }
+            }
+        }))
+        .buffer_unordered(chain_worker_limit);
+        stream.for_each(future::ready).await;
+
+        // Certificates for these chains were omitted from `certificates` because they were
+        // already processed locally. If they were processed in a concurrent task, it is not
+        // guaranteed that their cross-chain messages were already handled.
+        let stream = stream::iter(other_sender_chains.into_iter().map(|chain_id| {
+            let local_node = self.client.local_node.clone();
+            async move {
+                if let Err(error) = local_node
+                    .retry_pending_cross_chain_requests(chain_id)
+                    .await
+                {
+                    error!("Failed to retry outgoing messages from {chain_id}: {error}");
+                }
+            }
+        }))
+        .buffer_unordered(chain_worker_limit);
+        stream.for_each(future::ready).await;
+
+        // Update the trackers.
+        let mut state = self.state_mut();
+        for (name, tracker) in new_trackers {
+            state.update_received_certificate_tracker(name, tracker);
+        }
     }
 
     /// Attempts to download new received certificates.
@@ -1279,7 +1501,7 @@ where
     ///
     /// However, this should be the case whenever a sender's chain is still in use and
     /// is regularly upgraded to new committees.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     async fn find_received_certificates(&self) -> Result<(), ChainClientError> {
         #[cfg(with_metrics)]
         let _latency = metrics::FIND_RECEIVED_CERTIFICATES_LATENCY.measure_latency();
@@ -1288,8 +1510,13 @@ where
         let chain_id = self.chain_id;
         let local_committee = self.local_committee().await?;
         let nodes = self.make_nodes(&local_committee)?;
+        // Synchronize the state of the admin chain from the network.
+        self.synchronize_chain_state(&nodes, self.admin_id).await?;
         let client = self.clone();
-        // Proceed to downloading received certificates.
+        // Proceed to downloading received certificates. Split the available chain workers so that
+        // the tasks don't use more than the limit in total.
+        let chain_worker_limit =
+            (self.client.max_loaded_chains.get() / local_committee.validators().len()).max(1);
         let result = communicate_with_quorum(
             &nodes,
             &local_committee,
@@ -1298,14 +1525,18 @@ where
                 let client = client.clone();
                 Box::pin(async move {
                     client
-                        .synchronize_received_certificates_from_validator(chain_id, &remote_node)
+                        .synchronize_received_certificates_from_validator(
+                            chain_id,
+                            &remote_node,
+                            chain_worker_limit,
+                        )
                         .await
                 })
             },
         )
         .await;
-        let responses = match result {
-            Ok(((), responses)) => responses,
+        let received_certificate_batches = match result {
+            Ok(((), received_certificate_batches)) => received_certificate_batches,
             Err(CommunicationError::Trusted(NodeError::InactiveChain(id))) if id == chain_id => {
                 // The chain is visibly not active (yet or any more) so there is no need
                 // to synchronize received certificates.
@@ -1315,22 +1546,19 @@ where
                 return Err(error.into());
             }
         };
-        for (name, tracker, certificates) in responses {
-            // Process received certificates.
-            self.receive_certificates_from_validator(name, tracker, certificates)
-                .await;
-        }
+        self.receive_certificates_from_validators(received_certificate_batches)
+            .await;
         Ok(())
     }
 
     /// Sends money.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn transfer(
         &self,
         owner: Option<Owner>,
         amount: Amount,
         recipient: Recipient,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         // TODO(#467): check the balance of `owner` before signing any block proposal.
         self.execute_operation(Operation::System(SystemOperation::Transfer {
             owner,
@@ -1342,11 +1570,11 @@ where
 
     /// Verify if a data blob is readable from storage.
     // TODO(#2490): Consider removing or renaming this.
-    #[tracing::instrument(level = "trace", skip(hash))]
+    #[instrument(level = "trace")]
     pub async fn read_data_blob(
         &self,
         hash: CryptoHash,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         let blob_id = BlobId {
             hash,
             blob_type: BlobType::Data,
@@ -1356,14 +1584,14 @@ where
     }
 
     /// Claims money in a remote chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn claim(
         &self,
         owner: Owner,
         target_id: ChainId,
         recipient: Recipient,
         amount: Amount,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.execute_operation(Operation::System(SystemOperation::Claim {
             owner,
             target_id,
@@ -1374,7 +1602,7 @@ where
     }
 
     /// Handles the certificate in the local node and the resulting notifications.
-    #[tracing::instrument(level = "trace", skip(certificate))]
+    #[instrument(level = "trace", skip(certificate))]
     async fn process_certificate(
         &self,
         certificate: Certificate,
@@ -1390,7 +1618,7 @@ where
     }
 
     /// Updates the latest block and next block height and round information from the chain info.
-    #[tracing::instrument(level = "trace", skip(info))]
+    #[instrument(level = "trace", skip(info))]
     fn update_from_info(&self, info: &ChainInfo) {
         if info.chain_id == self.chain_id {
             self.state_mut().update_from_info(info);
@@ -1399,7 +1627,7 @@ where
 
     /// Requests a leader timeout vote from all validators. If a quorum signs it, creates a
     /// certificate and sends it to all validators, to make them enter the next round.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn request_leader_timeout(&self) -> Result<Certificate, ChainClientError> {
         let chain_id = self.chain_id;
         let query = ChainInfoQuery::new(chain_id).with_committees();
@@ -1440,7 +1668,7 @@ where
     }
 
     /// Downloads and processes any certificates we are missing for the given chain.
-    #[tracing::instrument(level = "trace", skip_all)]
+    #[instrument(level = "trace", skip_all)]
     pub async fn synchronize_chain_state(
         &self,
         validators: &[RemoteNode<P::Node>],
@@ -1449,22 +1677,27 @@ where
         #[cfg(with_metrics)]
         let _latency = metrics::SYNCHRONIZE_CHAIN_STATE_LATENCY.measure_latency();
 
-        let mut futures = vec![];
-
-        for remote_node in validators {
-            let client = self.clone();
-            futures.push(async move {
-                client
-                    .try_synchronize_chain_state_from(remote_node, chain_id)
-                    .await
-            });
-        }
-
-        for result in future::join_all(futures).await {
-            if let Err(e) = result {
-                error!(?e, "Error synchronizing chain state");
-            }
-        }
+        let committee = self.local_committee().await?;
+        communicate_with_quorum(
+            validators,
+            &committee,
+            |_: &()| (),
+            |remote_node| {
+                let client = self.clone();
+                async move {
+                    client
+                        .try_synchronize_chain_state_from(&remote_node, chain_id)
+                        .await
+                        .map_err(|error| match error {
+                            ChainClientError::RemoteNodeError(error) => error,
+                            _ => NodeError::LocalError {
+                                error: error.to_string(),
+                            },
+                        })
+                }
+            },
+        )
+        .await?;
 
         self.client
             .local_node
@@ -1475,7 +1708,7 @@ where
 
     /// Downloads any certificates from the specified validator that we are missing for the given
     /// chain, and processes them.
-    #[tracing::instrument(level = "trace", skip(self, remote_node, chain_id))]
+    #[instrument(level = "trace", skip(self, remote_node, chain_id))]
     async fn try_synchronize_chain_state_from(
         &self,
         remote_node: &RemoteNode<P::Node>,
@@ -1491,12 +1724,16 @@ where
             .with_manager_values();
         let info = remote_node.handle_chain_info_query(query).await?;
 
-        let certificates = future::try_join_all(
-            info.requested_sent_certificate_hashes
-                .into_iter()
-                .map(move |hash| async move { remote_node.node.download_certificate(hash).await }),
-        )
-        .await?;
+        let certificates: Vec<ConfirmedBlockCertificate> = remote_node
+            .node
+            .download_certificates(info.requested_sent_certificate_hashes)
+            .await?
+            .into_iter()
+            .map(|c| {
+                ConfirmedBlockCertificate::try_from(c)
+                    .map_err(|_| NodeError::InvalidChainInfoResponse)
+            })
+            .collect::<Result<_, _>>()?;
 
         if !certificates.is_empty()
             && self
@@ -1515,21 +1752,12 @@ where
                 .handle_block_proposal(*proposal.clone())
                 .await
             {
-                if let LocalNodeError::WorkerError(WorkerError::ChainError(chain_error)) =
-                    &original_err
-                {
-                    if let ChainError::ExecutionError(
-                        ExecutionError::SystemError(SystemExecutionError::BlobNotFoundOnRead(
-                            blob_id,
-                        )),
-                        _,
-                    ) = &**chain_error
-                    {
-                        self.update_local_node_with_blob_from(*blob_id, remote_node)
-                            .await?;
-                        continue; // We found the missing blob: retry.
-                    }
+                if let Some(blob_ids) = original_err.get_blobs_not_found() {
+                    self.update_local_node_with_blobs_from(blob_ids, remote_node)
+                        .await?;
+                    continue; // We found the missing blobs: retry.
                 }
+
                 warn!(
                     "Skipping proposal from {} and validator {}: {}",
                     owner, remote_node.name, original_err
@@ -1540,17 +1768,20 @@ where
         if let Some(cert) = info.manager.requested_locked {
             let hash = cert.hash();
             let mut blobs = vec![];
-            while let Err(original_err) = self.client.handle_certificate(*cert.clone(), blobs).await
+            while let Err(original_err) = self
+                .client
+                .handle_certificate(Certificate::from(*cert.clone()), blobs)
+                .await
             {
                 if let LocalNodeError::WorkerError(WorkerError::BlobsNotFound(blob_ids)) =
                     &original_err
                 {
-                    blobs = remote_node
+                    if let Some(new_blobs) = remote_node
                         .find_missing_blobs(blob_ids.clone(), chain_id)
-                        .await?;
-
-                    if blobs.len() == blob_ids.len() {
-                        continue; // We found the missing blobs: retry.
+                        .await?
+                    {
+                        blobs = new_blobs;
+                        continue;
                     }
                 }
                 warn!(
@@ -1565,45 +1796,70 @@ where
 
     /// Downloads and processes from the specified validator a confirmed block certificate that
     /// uses the given blob. If this succeeds, the blob will be in our storage.
-    async fn update_local_node_with_blob_from(
+    async fn update_local_node_with_blobs_from(
         &self,
-        blob_id: BlobId,
+        blob_ids: Vec<BlobId>,
         remote_node: &RemoteNode<P::Node>,
     ) -> Result<(), ChainClientError> {
-        let certificate = remote_node.download_certificate_for_blob(blob_id).await?;
-        // This will download all ancestors of the certificate and process all of them locally.
-        self.receive_certificate(certificate).await?;
+        try_join_all(blob_ids.into_iter().map(|blob_id| async move {
+            let certificate = remote_node.download_certificate_for_blob(blob_id).await?;
+            // This will download all ancestors of the certificate and process all of them locally.
+            self.receive_certificate(certificate).await
+        }))
+        .await?;
+
         Ok(())
     }
 
     /// Downloads and processes a confirmed block certificate that uses the given blob.
     /// If this succeeds, the blob will be in our storage.
-    async fn receive_certificate_for_blob(&self, blob_id: BlobId) -> Result<(), ChainClientError> {
-        let validators = self.validator_nodes().await?;
-        let mut tasks = FuturesUnordered::new();
-        for remote_node in validators {
-            let remote_node = remote_node.clone();
-            tasks.push(async move {
-                let cert = remote_node
-                    .download_certificate_for_blob(blob_id)
-                    .await
-                    .ok()?;
-                self.receive_certificate(cert).await.ok()
-            });
-        }
+    pub async fn receive_certificate_for_blob(
+        &self,
+        blob_id: BlobId,
+    ) -> Result<(), ChainClientError> {
+        self.receive_certificates_for_blobs(vec![blob_id]).await
+    }
 
-        while let Some(result) = tasks.next().await {
-            if result.is_some() {
-                return Ok(());
+    /// Downloads and processes confirmed block certificates that use the given blobs.
+    /// If this succeeds, the blobs will be in our storage.
+    pub async fn receive_certificates_for_blobs(
+        &self,
+        blob_ids: Vec<BlobId>,
+    ) -> Result<(), ChainClientError> {
+        // Deduplicate IDs.
+        let blob_ids = blob_ids.into_iter().collect::<BTreeSet<_>>();
+        let validators = self.validator_nodes().await?;
+
+        let mut missing_blobs = Vec::new();
+        for blob_id in blob_ids {
+            let mut certificate_stream = validators
+                .iter()
+                .map(|remote_node| remote_node.download_certificate_for_blob(blob_id))
+                .collect::<FuturesUnordered<_>>();
+            loop {
+                let Some(result) = certificate_stream.next().await else {
+                    missing_blobs.push(blob_id);
+                    break;
+                };
+                if let Ok(cert) = result {
+                    if self.receive_certificate(cert).await.is_ok() {
+                        break;
+                    }
+                }
             }
         }
 
-        Err(ChainClientError::BlobNotFound(blob_id))
+        if missing_blobs.is_empty() {
+            Ok(())
+        } else {
+            Err(ChainClientError::BlobsNotFound(missing_blobs))
+        }
     }
 
     /// Attempts to execute the block locally. If any incoming message execution fails, that
     /// message is rejected and execution is retried, until the block accepts only messages
     /// that succeed.
+    // TODO(#2806): Measure how failing messages affect the execution times.
     #[tracing::instrument(level = "trace", skip(block))]
     async fn stage_block_execution_and_discard_failing_messages(
         &self,
@@ -1645,7 +1901,7 @@ where
 
     /// Attempts to execute the block locally. If any attempt to read a blob fails, the blob is
     /// downloaded and execution is retried.
-    #[tracing::instrument(level = "trace", skip(block))]
+    #[instrument(level = "trace", skip(block))]
     async fn stage_block_execution(
         &self,
         block: Block,
@@ -1656,14 +1912,9 @@ where
                 .local_node
                 .stage_block_execution(block.clone())
                 .await;
-            if let Err(LocalNodeError::WorkerError(WorkerError::ChainError(chain_error))) = &result
-            {
-                if let ChainError::ExecutionError(
-                    ExecutionError::SystemError(SystemExecutionError::BlobNotFoundOnRead(blob_id)),
-                    _,
-                ) = &**chain_error
-                {
-                    self.receive_certificate_for_blob(*blob_id).await?;
+            if let Err(err) = &result {
+                if let Some(blob_ids) = err.get_blobs_not_found() {
+                    self.receive_certificates_for_blobs(blob_ids).await?;
                     continue; // We found the missing blob: retry.
                 }
             }
@@ -1673,46 +1924,50 @@ where
 
     /// Tries to read blobs from either the pending blobs or the local node's cache, or
     /// storage
-    #[tracing::instrument(level = "trace", skip(blob_ids))]
+    #[instrument(level = "trace")]
     async fn read_local_blobs(
         &self,
-        blob_ids: impl IntoIterator<Item = BlobId>,
+        blob_ids: impl IntoIterator<Item = BlobId> + std::fmt::Debug,
     ) -> Result<Vec<Blob>, LocalNodeError> {
         let mut blobs = Vec::new();
         for blob_id in blob_ids {
-            if let Some(blob) = self.client.local_node.recent_blob(&blob_id).await {
-                blobs.push(blob);
-                continue;
-            }
-
             let maybe_blob = self.pending_blobs().get(&blob_id).cloned();
             if let Some(blob) = maybe_blob {
-                self.client.local_node.cache_recent_blob(&blob).await;
                 blobs.push(blob);
                 continue;
             }
 
-            blobs.push(
-                self.storage_client()
-                    .read_blob(blob_id)
-                    .await
-                    .map_err(|_| LocalNodeError::CannotReadLocalBlob {
-                        chain_id: self.chain_id,
-                        blob_id,
-                    })?,
-            );
+            let maybe_blob = {
+                let chain_state_view = self.chain_state_view().await?;
+                chain_state_view
+                    .manager
+                    .get()
+                    .pending_blobs
+                    .get(&blob_id)
+                    .cloned()
+            };
+
+            if let Some(blob) = maybe_blob {
+                blobs.push(blob);
+                continue;
+            }
+
+            return Err(LocalNodeError::CannotReadLocalBlob {
+                chain_id: self.chain_id,
+                blob_id,
+            });
         }
         Ok(blobs)
     }
 
     /// Executes (or retries) a regular block proposal. Updates local balance.
-    #[tracing::instrument(level = "trace", skip(block, round, manager))]
+    #[instrument(level = "trace", skip(block, round, manager))]
     async fn propose_block(
         &self,
         block: Block,
         round: Round,
         manager: ChainManagerInfo,
-    ) -> Result<Certificate, ChainClientError> {
+    ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
         let next_block_height;
         let block_hash;
         {
@@ -1744,16 +1999,12 @@ where
         // Make sure that we follow the steps in the multi-round protocol.
         let executed_block = if let Some(validated_block_certificate) = &manager.requested_locked {
             ensure!(
-                validated_block_certificate.value().block() == Some(&block),
+                validated_block_certificate.executed_block().block == block,
                 ChainClientError::BlockProposalError(
                     "A different block has already been validated at this height"
                 )
             );
-            validated_block_certificate
-                .value()
-                .executed_block()
-                .unwrap()
-                .clone()
+            validated_block_certificate.executed_block().clone()
         } else {
             self.stage_block_execution_and_discard_failing_messages(block)
                 .await?
@@ -1828,53 +2079,53 @@ where
     }
 
     /// Executes a list of operations.
-    #[tracing::instrument(level = "trace", skip(operations))]
+    #[instrument(level = "trace", skip(operations))]
     pub async fn execute_operations(
         &self,
         operations: Vec<Operation>,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.prepare_chain().await?;
         self.execute_without_prepare(operations).await
     }
 
     /// Executes a list of operations, without calling `prepare_chain`.
-    #[tracing::instrument(level = "trace", skip(operations))]
+    #[instrument(level = "trace", skip(operations))]
     pub async fn execute_without_prepare(
         &self,
         operations: Vec<Operation>,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         loop {
             // TODO(#2066): Remove boxing once the call-stack is shallower
             match Box::pin(self.execute_block(operations.clone())).await? {
                 ExecuteBlockOutcome::Executed(certificate) => {
                     return Ok(ClientOutcome::Committed(certificate));
                 }
-                ExecuteBlockOutcome::Conflict(certificate) => {
-                    info!(
-                        height = %certificate.value().height(),
-                        "Another block was committed; retrying."
-                    );
-                }
                 ExecuteBlockOutcome::WaitForTimeout(timeout) => {
                     return Ok(ClientOutcome::WaitForTimeout(timeout));
+                }
+                ExecuteBlockOutcome::Conflict(certificate) => {
+                    info!(
+                        height = %certificate.executed_block().block.height,
+                        "Another block was committed; retrying."
+                    );
                 }
             };
         }
     }
 
     /// Executes an operation.
-    #[tracing::instrument(level = "trace", skip(operation))]
+    #[instrument(level = "trace", skip(operation))]
     pub async fn execute_operation(
         &self,
         operation: Operation,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.execute_operations(vec![operation]).await
     }
 
     /// Executes a new block.
     ///
     /// This must be preceded by a call to `prepare_chain()`.
-    #[tracing::instrument(level = "trace", skip(operations))]
+    #[instrument(level = "trace", skip(operations))]
     async fn execute_block(
         &self,
         operations: Vec<Operation>,
@@ -1888,16 +2139,16 @@ where
             ClientOutcome::Committed(Some(certificate)) => {
                 return Ok(ExecuteBlockOutcome::Conflict(certificate))
             }
-            ClientOutcome::Committed(None) => {}
             ClientOutcome::WaitForTimeout(timeout) => {
                 return Ok(ExecuteBlockOutcome::WaitForTimeout(timeout))
             }
+            ClientOutcome::Committed(None) => {}
         }
         let incoming_bundles = self.pending_message_bundles().await?;
         let confirmed_value = self.set_pending_block(incoming_bundles, operations).await?;
         match self.process_pending_block_without_prepare().await? {
             ClientOutcome::Committed(Some(certificate))
-                if certificate.value().block() == confirmed_value.inner().block() =>
+                if Some(&certificate.executed_block().block) == confirmed_value.inner().block() =>
             {
                 Ok(ExecuteBlockOutcome::Executed(certificate))
             }
@@ -1916,21 +2167,21 @@ where
 
     /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
     /// called, it will be proposed to the validators.
-    #[tracing::instrument(level = "trace", skip(incoming_bundles, operations))]
+    #[instrument(level = "trace", skip(incoming_bundles, operations))]
     async fn set_pending_block(
         &self,
         incoming_bundles: Vec<IncomingBundle>,
         operations: Vec<Operation>,
     ) -> Result<HashedCertificateValue, ChainClientError> {
-        let timestamp = self.next_timestamp(&incoming_bundles).await;
         let identity = self.identity().await?;
-        let previous_block_hash;
-        let height;
-        {
+        let (previous_block_hash, height, timestamp) = {
             let state = self.state();
-            previous_block_hash = state.block_hash();
-            height = state.next_block_height();
-        }
+            (
+                state.block_hash(),
+                state.next_block_height(),
+                self.next_timestamp(&incoming_bundles, state.timestamp()),
+            )
+        };
         let block = Block {
             epoch: self.epoch().await?,
             chain_id: self.chain_id,
@@ -1955,19 +2206,23 @@ where
     ///
     /// This will usually be the current time according to the local clock, but may be slightly
     /// ahead to make sure it's not earlier than the incoming messages or the previous block.
-    #[tracing::instrument(level = "trace", skip(incoming_bundles))]
-    pub async fn next_timestamp(&self, incoming_bundles: &[IncomingBundle]) -> Timestamp {
+    #[instrument(level = "trace", skip(incoming_bundles))]
+    pub fn next_timestamp(
+        &self,
+        incoming_bundles: &[IncomingBundle],
+        block_time: Timestamp,
+    ) -> Timestamp {
         let local_time = self.storage_client().clock().current_time();
         incoming_bundles
             .iter()
             .map(|msg| msg.bundle.timestamp)
             .max()
             .map_or(local_time, |timestamp| timestamp.max(local_time))
-            .max(self.timestamp())
+            .max(block_time)
     }
 
     /// Queries an application.
-    #[tracing::instrument(level = "trace", skip(query))]
+    #[instrument(level = "trace", skip(query))]
     pub async fn query_application(&self, query: Query) -> Result<Response, ChainClientError> {
         let response = self
             .client
@@ -1978,7 +2233,7 @@ where
     }
 
     /// Queries a system application.
-    #[tracing::instrument(level = "trace", skip(query))]
+    #[instrument(level = "trace", skip(query))]
     pub async fn query_system_application(
         &self,
         query: SystemQuery,
@@ -1997,7 +2252,7 @@ where
     }
 
     /// Queries a user application.
-    #[tracing::instrument(level = "trace", skip(application_id, query))]
+    #[instrument(level = "trace", skip(application_id, query))]
     pub async fn query_user_application<A: Abi>(
         &self,
         application_id: UserApplicationId<A>,
@@ -2023,7 +2278,7 @@ where
     /// Does not attempt to synchronize with validators. The result will reflect up to
     /// `max_pending_message_bundles` incoming message bundles and the execution fees for a single
     /// block.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn query_balance(&self) -> Result<Amount, ChainClientError> {
         let (balance, _) = self.query_balances_with_owner(None).await?;
         Ok(balance)
@@ -2035,7 +2290,7 @@ where
     /// Does not attempt to synchronize with validators. The result will reflect up to
     /// `max_pending_message_bundles` incoming message bundles and the execution fees for a single
     /// block.
-    #[tracing::instrument(level = "trace", skip(owner))]
+    #[instrument(level = "trace", skip(owner))]
     pub async fn query_owner_balance(&self, owner: Owner) -> Result<Amount, ChainClientError> {
         Ok(self
             .query_balances_with_owner(Some(owner))
@@ -2050,20 +2305,27 @@ where
     /// Does not attempt to synchronize with validators. The result will reflect up to
     /// `max_pending_message_bundles` incoming message bundles and the execution fees for a single
     /// block.
-    #[tracing::instrument(level = "trace", skip(owner))]
+    #[instrument(level = "trace", skip(owner))]
     async fn query_balances_with_owner(
         &self,
         owner: Option<Owner>,
     ) -> Result<(Amount, Option<Amount>), ChainClientError> {
         let incoming_bundles = self.pending_message_bundles().await?;
-        let timestamp = self.next_timestamp(&incoming_bundles).await;
+        let (previous_block_hash, height, timestamp) = {
+            let state = self.state();
+            (
+                state.block_hash(),
+                state.next_block_height(),
+                self.next_timestamp(&incoming_bundles, state.timestamp()),
+            )
+        };
         let block = Block {
             epoch: self.epoch().await?,
             chain_id: self.chain_id,
             incoming_bundles,
             operations: Vec::new(),
-            previous_block_hash: self.block_hash(),
-            height: self.next_block_height(),
+            previous_block_hash,
+            height,
             authenticated_signer: owner,
             timestamp,
         };
@@ -2078,13 +2340,13 @@ where
             Err(ChainClientError::LocalNodeError(LocalNodeError::WorkerError(
                 WorkerError::ChainError(error),
             ))) if matches!(
-                *error,
+                &*error,
                 ChainError::ExecutionError(
-                    ExecutionError::SystemError(
-                        SystemExecutionError::InsufficientFundingForFees { .. }
-                    ),
+                    execution_error,
                     ChainExecutionContext::Block
-                )
+                ) if matches!(**execution_error, ExecutionError::SystemError(
+                    SystemExecutionError::InsufficientFundingForFees { .. }
+                ))
             ) =>
             {
                 // We can't even pay for the execution of one empty block. Let's return zero.
@@ -2097,7 +2359,7 @@ where
     /// Reads the local balance of the chain account.
     ///
     /// Does not process the inbox or attempt to synchronize with validators.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn local_balance(&self) -> Result<Amount, ChainClientError> {
         let (balance, _) = self.local_balances_with_owner(None).await?;
         Ok(balance)
@@ -2106,7 +2368,7 @@ where
     /// Reads the local balance of a user account.
     ///
     /// Does not process the inbox or attempt to synchronize with validators.
-    #[tracing::instrument(level = "trace", skip(owner))]
+    #[instrument(level = "trace", skip(owner))]
     pub async fn local_owner_balance(&self, owner: Owner) -> Result<Amount, ChainClientError> {
         Ok(self
             .local_balances_with_owner(Some(owner))
@@ -2118,7 +2380,7 @@ where
     /// Reads the local balance of the chain account and optionally another user.
     ///
     /// Does not process the inbox or attempt to synchronize with validators.
-    #[tracing::instrument(level = "trace", skip(owner))]
+    #[instrument(level = "trace", skip(owner))]
     async fn local_balances_with_owner(
         &self,
         owner: Option<Owner>,
@@ -2142,7 +2404,7 @@ where
     }
 
     /// Attempts to update all validators about the local chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn update_validators(&self) -> Result<(), ChainClientError> {
         let committee = self.local_committee().await?;
         let next_block_height = self.next_block_height();
@@ -2158,12 +2420,12 @@ where
 
     /// Requests a `RegisterApplications` message from another chain so the application can be used
     /// on this one.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn request_application(
         &self,
         application_id: UserApplicationId,
         chain_id: Option<ChainId>,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         let chain_id = chain_id.unwrap_or(application_id.creation.chain_id);
         self.execute_operation(Operation::System(SystemOperation::RequestApplication {
             application_id,
@@ -2173,24 +2435,24 @@ where
     }
 
     /// Sends tokens to a chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn transfer_to_account(
         &self,
         owner: Option<Owner>,
         amount: Amount,
         account: Account,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.transfer(owner, amount, Recipient::Account(account))
             .await
     }
 
     /// Burns tokens.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn burn(
         &self,
         owner: Option<Owner>,
         amount: Amount,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.transfer(owner, amount, Recipient::Burn).await
     }
 
@@ -2199,26 +2461,26 @@ where
     ///
     /// To create a block that actually executes the messages in the inbox,
     /// `process_inbox` must be called separately.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn synchronize_from_validators(&self) -> Result<Box<ChainInfo>, ChainClientError> {
         self.find_received_certificates().await?;
         self.prepare_chain().await
     }
 
     /// Processes the last pending block
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn process_pending_block(
         &self,
-    ) -> Result<ClientOutcome<Option<Certificate>>, ChainClientError> {
+    ) -> Result<ClientOutcome<Option<ConfirmedBlockCertificate>>, ChainClientError> {
         self.synchronize_from_validators().await?;
         self.process_pending_block_without_prepare().await
     }
 
     /// Processes the last pending block. Assumes that the local chain is up to date.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     async fn process_pending_block_without_prepare(
         &self,
-    ) -> Result<ClientOutcome<Option<Certificate>>, ChainClientError> {
+    ) -> Result<ClientOutcome<Option<ConfirmedBlockCertificate>>, ChainClientError> {
         let identity = self.identity().await?;
         let mut info = self.chain_info_with_manager_values().await?;
         // If the current round has timed out, we request a timeout certificate and retry in
@@ -2229,7 +2491,7 @@ where
                 info = self.chain_info_with_manager_values().await?;
             }
         }
-        self.state_mut().update_from_info(&info);
+        self.update_from_info(&info);
         let manager = *info.manager;
 
         // If there is a validated block in the current round, finalize it.
@@ -2290,12 +2552,7 @@ where
                 "Conflicting proposal in the current round.",
             ));
         };
-        let can_propose = match round {
-            Round::Fast => manager.ownership.super_owners.contains_key(&identity),
-            Round::MultiLeader(_) => true,
-            Round::SingleLeader(_) | Round::Validator(_) => manager.leader == Some(identity),
-        };
-        if can_propose {
+        if manager.can_propose(&identity, round) {
             let certificate = self.propose_block(block.clone(), round, manager).await?;
             Ok(ClientOutcome::Committed(Some(certificate)))
         } else {
@@ -2312,20 +2569,20 @@ where
     }
 
     /// Clears the information on any operation that previously failed.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub fn clear_pending_block(&self) {
         self.state_mut().clear_pending_block();
     }
 
     /// Processes a confirmed block for which this chain is a recipient and updates validators.
-    #[tracing::instrument(
+    #[instrument(
         level = "trace",
         skip(certificate),
         fields(certificate_hash = ?certificate.hash()),
     )]
     pub async fn receive_certificate_and_update_validators(
         &self,
-        certificate: Certificate,
+        certificate: ConfirmedBlockCertificate,
     ) -> Result<(), ChainClientError> {
         self.receive_certificate_and_update_validators_internal(
             certificate,
@@ -2335,35 +2592,35 @@ where
     }
 
     /// Processes confirmed operation for which this chain is a recipient.
-    #[tracing::instrument(
+    #[instrument(
         level = "trace",
         skip(certificate),
         fields(certificate_hash = ?certificate.hash()),
     )]
     pub async fn receive_certificate(
         &self,
-        certificate: Certificate,
+        certificate: ConfirmedBlockCertificate,
     ) -> Result<(), ChainClientError> {
         self.receive_certificate_internal(certificate, ReceiveCertificateMode::NeedsCheck)
             .await
     }
 
     /// Rotates the key of the chain.
-    #[tracing::instrument(level = "trace", skip(key_pair))]
+    #[instrument(level = "trace", skip(key_pair))]
     pub async fn rotate_key_pair(
         &self,
         key_pair: KeyPair,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         let new_public_key = self.state_mut().insert_known_key_pair(key_pair);
         self.transfer_ownership(new_public_key).await
     }
 
     /// Transfers ownership of the chain to a single super owner.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn transfer_ownership(
         &self,
         new_public_key: PublicKey,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.execute_operation(Operation::System(SystemOperation::ChangeOwnership {
             super_owners: vec![new_public_key],
             owners: Vec::new(),
@@ -2374,12 +2631,12 @@ where
     }
 
     /// Adds another owner to the chain, and turns existing super owners into regular owners.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn share_ownership(
         &self,
         new_public_key: PublicKey,
         new_weight: u64,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         loop {
             let ownership = self.prepare_chain().await?.manager.ownership;
             ensure!(
@@ -2407,7 +2664,7 @@ where
                 }
                 ExecuteBlockOutcome::Conflict(certificate) => {
                     info!(
-                        height = %certificate.value().height(),
+                        height = %certificate.executed_block().block.height,
                         "Another block was committed; retrying."
                     );
                 }
@@ -2420,11 +2677,11 @@ where
 
     /// Changes the ownership of this chain. Fails if it would remove existing owners, unless
     /// `remove_owners` is `true`.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn change_ownership(
         &self,
         ownership: ChainOwnership,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.execute_operation(Operation::System(SystemOperation::ChangeOwnership {
             super_owners: ownership.super_owners.values().cloned().collect(),
             owners: ownership.owners.values().cloned().collect(),
@@ -2435,23 +2692,23 @@ where
     }
 
     /// Changes the application permissions configuration on this chain.
-    #[tracing::instrument(level = "trace", skip(application_permissions))]
+    #[instrument(level = "trace", skip(application_permissions))]
     pub async fn change_application_permissions(
         &self,
         application_permissions: ApplicationPermissions,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         let operation = SystemOperation::ChangeApplicationPermissions(application_permissions);
         self.execute_operation(operation.into()).await
     }
 
     /// Opens a new chain with a derived UID.
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     pub async fn open_chain(
         &self,
         ownership: ChainOwnership,
         application_permissions: ApplicationPermissions,
         balance: Amount,
-    ) -> Result<ClientOutcome<(MessageId, Certificate)>, ChainClientError> {
+    ) -> Result<ClientOutcome<(MessageId, ConfirmedBlockCertificate)>, ChainClientError> {
         self.prepare_chain().await?;
         loop {
             let (epoch, committees) = self.epoch_and_committees(self.chain_id).await?;
@@ -2459,7 +2716,7 @@ where
             let config = OpenChainConfig {
                 ownership: ownership.clone(),
                 committees,
-                admin_id: self.state().admin_id(),
+                admin_id: self.admin_id,
                 epoch,
                 balance,
                 application_permissions: application_permissions.clone(),
@@ -2474,11 +2731,8 @@ where
             };
             // The first message of the only operation created the new chain.
             let message_id = certificate
-                .value()
                 .executed_block()
-                .and_then(|executed_block| {
-                    executed_block.message_id_for_operation(0, OPEN_CHAIN_MESSAGE_INDEX)
-                })
+                .message_id_for_operation(0, OPEN_CHAIN_MESSAGE_INDEX)
                 .ok_or_else(|| ChainClientError::InternalError("Failed to create new chain"))?;
             // Add the new chain to the list of tracked chains
             self.client.track_chain(ChainId::child(message_id));
@@ -2491,28 +2745,37 @@ where
     }
 
     /// Closes the chain (and loses everything in it!!).
-    #[tracing::instrument(level = "trace")]
-    pub async fn close_chain(&self) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    #[instrument(level = "trace")]
+    pub async fn close_chain(
+        &self,
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.execute_operation(Operation::System(SystemOperation::CloseChain))
             .await
     }
 
     /// Publishes some bytecode.
     #[cfg(not(target_arch = "wasm32"))]
-    #[tracing::instrument(level = "trace", skip(contract, service))]
+    #[instrument(level = "trace", skip(contract, service))]
     pub async fn publish_bytecode(
         &self,
         contract: Bytecode,
         service: Bytecode,
-    ) -> Result<ClientOutcome<(BytecodeId, Certificate)>, ChainClientError> {
-        let (compressed_contract, compressed_service) =
-            tokio::task::spawn_blocking(move || (contract.compress(), service.compress()))
-                .await
-                .expect("Compression should not panic");
-        let contract_blob = Blob::new_contract_bytecode(compressed_contract);
-        let service_blob = Blob::new_service_bytecode(compressed_service);
+    ) -> Result<ClientOutcome<(BytecodeId, ConfirmedBlockCertificate)>, ChainClientError> {
+        let (contract_blob, service_blob, bytecode_id) =
+            create_bytecode_blobs(contract, service).await;
+        self.publish_bytecode_blobs(contract_blob, service_blob, bytecode_id)
+            .await
+    }
 
-        let bytecode_id = BytecodeId::new(contract_blob.id().hash, service_blob.id().hash);
+    /// Publishes some bytecode.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[instrument(level = "trace", skip(contract_blob, service_blob, bytecode_id))]
+    pub async fn publish_bytecode_blobs(
+        &self,
+        contract_blob: Blob,
+        service_blob: Blob,
+        bytecode_id: BytecodeId,
+    ) -> Result<ClientOutcome<(BytecodeId, ConfirmedBlockCertificate)>, ChainClientError> {
         self.add_pending_blobs([contract_blob, service_blob]).await;
         self.execute_operation(Operation::System(SystemOperation::PublishBytecode {
             bytecode_id,
@@ -2522,11 +2785,11 @@ where
     }
 
     /// Publishes some data blobs.
-    #[tracing::instrument(level = "trace", skip(bytes))]
+    #[instrument(level = "trace", skip(bytes))]
     pub async fn publish_data_blobs(
         &self,
         bytes: Vec<Vec<u8>>,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         let blobs = bytes.into_iter().map(Blob::new_data);
         let publish_blob_operations = blobs
             .clone()
@@ -2541,24 +2804,23 @@ where
     }
 
     /// Publishes some data blob.
-    #[tracing::instrument(level = "trace", skip(bytes))]
+    #[instrument(level = "trace", skip(bytes))]
     pub async fn publish_data_blob(
         &self,
         bytes: Vec<u8>,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.publish_data_blobs(vec![bytes]).await
     }
 
     /// Adds pending blobs
     pub async fn add_pending_blobs(&self, pending_blobs: impl IntoIterator<Item = Blob>) {
         for blob in pending_blobs {
-            self.client.local_node.cache_recent_blob(&blob).await;
             self.state_mut().insert_pending_blob(blob);
         }
     }
 
     /// Creates an application by instantiating some bytecode.
-    #[tracing::instrument(
+    #[instrument(
         level = "trace",
         skip(self, parameters, instantiation_argument, required_application_ids)
     )]
@@ -2572,7 +2834,8 @@ where
         parameters: &Parameters,
         instantiation_argument: &InstantiationArgument,
         required_application_ids: Vec<UserApplicationId>,
-    ) -> Result<ClientOutcome<(UserApplicationId<A>, Certificate)>, ChainClientError> {
+    ) -> Result<ClientOutcome<(UserApplicationId<A>, ConfirmedBlockCertificate)>, ChainClientError>
+    {
         let instantiation_argument = serde_json::to_vec(instantiation_argument)?;
         let parameters = serde_json::to_vec(parameters)?;
         Ok(self
@@ -2587,7 +2850,7 @@ where
     }
 
     /// Creates an application by instantiating some bytecode.
-    #[tracing::instrument(
+    #[instrument(
         level = "trace",
         skip(
             self,
@@ -2603,7 +2866,8 @@ where
         parameters: Vec<u8>,
         instantiation_argument: Vec<u8>,
         required_application_ids: Vec<UserApplicationId>,
-    ) -> Result<ClientOutcome<(UserApplicationId, Certificate)>, ChainClientError> {
+    ) -> Result<ClientOutcome<(UserApplicationId, ConfirmedBlockCertificate)>, ChainClientError>
+    {
         self.execute_operation(Operation::System(SystemOperation::CreateApplication {
             bytecode_id,
             parameters,
@@ -2614,11 +2878,8 @@ where
         .try_map(|certificate| {
             // The first message of the only operation created the application.
             let creation = certificate
-                .value()
                 .executed_block()
-                .and_then(|executed_block| {
-                    executed_block.message_id_for_operation(0, CREATE_APPLICATION_MESSAGE_INDEX)
-                })
+                .message_id_for_operation(0, CREATE_APPLICATION_MESSAGE_INDEX)
                 .ok_or_else(|| ChainClientError::InternalError("Failed to create application"))?;
             let id = ApplicationId {
                 creation,
@@ -2629,7 +2890,7 @@ where
     }
 
     /// Creates a new committee and starts using it (admin chains only).
-    #[tracing::instrument(level = "trace", skip(committee))]
+    #[instrument(level = "trace", skip(committee))]
     pub async fn stage_new_committee(
         &self,
         committee: Committee,
@@ -2647,7 +2908,7 @@ where
                 .await?
             {
                 ExecuteBlockOutcome::Executed(certificate) => {
-                    return Ok(ClientOutcome::Committed(certificate))
+                    return Ok(ClientOutcome::Committed(certificate.into()))
                 }
                 ExecuteBlockOutcome::Conflict(_) => continue,
                 ExecuteBlockOutcome::WaitForTimeout(timeout) => {
@@ -2662,10 +2923,10 @@ where
     ///
     /// If not all certificates could be processed due to a timeout, the timestamp for when to retry
     /// is returned, too.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn process_inbox(
         &self,
-    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
+    ) -> Result<(Vec<ConfirmedBlockCertificate>, Option<RoundTimeout>), ChainClientError> {
         self.prepare_chain().await?;
         self.process_inbox_without_prepare().await
     }
@@ -2675,10 +2936,10 @@ where
     ///
     /// If not all certificates could be processed due to a timeout, the timestamp for when to retry
     /// is returned, too.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn process_inbox_without_prepare(
         &self,
-    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
+    ) -> Result<(Vec<ConfirmedBlockCertificate>, Option<RoundTimeout>), ChainClientError> {
         #[cfg(with_metrics)]
         let _latency = metrics::PROCESS_INBOX_WITHOUT_PREPARE_LATENCY.measure_latency();
 
@@ -2701,12 +2962,12 @@ where
 
     /// Starts listening to the admin chain for new committees. (This is only useful for
     /// other genesis chains or for testing.)
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn subscribe_to_new_committees(
         &self,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         let operation = SystemOperation::Subscribe {
-            chain_id: self.state().admin_id(),
+            chain_id: self.admin_id,
             channel: SystemChannel::Admin,
         };
         self.execute_operation(Operation::System(operation)).await
@@ -2714,12 +2975,12 @@ where
 
     /// Stops listening to the admin chain for new committees. (This is only useful for
     /// testing.)
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn unsubscribe_from_new_committees(
         &self,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         let operation = SystemOperation::Unsubscribe {
-            chain_id: self.state().admin_id(),
+            chain_id: self.admin_id,
             channel: SystemChannel::Admin,
         };
         self.execute_operation(Operation::System(operation)).await
@@ -2729,8 +2990,10 @@ where
     /// only). Currently, each individual chain is still entitled to wait before accepting
     /// this command. However, it is expected that deprecated validators stop functioning
     /// shortly after such command is issued.
-    #[tracing::instrument(level = "trace")]
-    pub async fn finalize_committee(&self) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    #[instrument(level = "trace")]
+    pub async fn finalize_committee(
+        &self,
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.prepare_chain().await?;
         let (current_epoch, committees) = self.epoch_and_committees(self.chain_id).await?;
         let current_epoch = current_epoch.ok_or(LocalNodeError::InactiveChain(self.chain_id))?;
@@ -2752,13 +3015,13 @@ where
     /// Sends money to a chain.
     /// Do not check balance. (This may block the client)
     /// Do not confirm the transaction.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn transfer_to_account_unsafe_unconfirmed(
         &self,
         owner: Option<Owner>,
         amount: Amount,
         account: Account,
-    ) -> Result<ClientOutcome<Certificate>, ChainClientError> {
+    ) -> Result<ClientOutcome<ConfirmedBlockCertificate>, ChainClientError> {
         self.execute_operation(Operation::System(SystemOperation::Transfer {
             owner,
             recipient: Recipient::Account(account),
@@ -2767,7 +3030,7 @@ where
         .await
     }
 
-    #[tracing::instrument(level = "trace", skip(hash))]
+    #[instrument(level = "trace", skip(hash))]
     pub async fn read_hashed_certificate_value(
         &self,
         hash: CryptoHash,
@@ -2779,7 +3042,7 @@ where
     }
 
     /// Handles any cross-chain requests for any pending outgoing messages.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     pub async fn retry_pending_outgoing_messages(&self) -> Result<(), ChainClientError> {
         self.client
             .local_node
@@ -2788,7 +3051,7 @@ where
         Ok(())
     }
 
-    #[tracing::instrument(level = "trace", skip(from, limit))]
+    #[instrument(level = "trace", skip(from, limit))]
     pub async fn read_hashed_certificate_values_downward(
         &self,
         from: CryptoHash,
@@ -2800,7 +3063,7 @@ where
             .await
     }
 
-    #[tracing::instrument(level = "trace", skip(local_node))]
+    #[instrument(level = "trace", skip(local_node))]
     async fn local_chain_info(
         &self,
         chain_id: ChainId,
@@ -2815,7 +3078,7 @@ where
         Some(info)
     }
 
-    #[tracing::instrument(level = "trace", skip(chain_id, local_node))]
+    #[instrument(level = "trace", skip(chain_id, local_node))]
     async fn local_next_block_height(
         &self,
         chain_id: ChainId,
@@ -2825,7 +3088,7 @@ where
         Some(info.next_block_height)
     }
 
-    #[tracing::instrument(level = "trace", skip(remote_node, local_node, notification))]
+    #[instrument(level = "trace", skip(remote_node, local_node, notification))]
     async fn process_notification(
         &self,
         remote_node: RemoteNode<P::Node>,
@@ -2919,7 +3182,7 @@ where
 
     /// Spawns a task that listens to notifications about the current chain from all validators,
     /// and synchronizes the local state accordingly.
-    #[tracing::instrument(level = "trace", fields(chain_id = ?self.chain_id))]
+    #[instrument(level = "trace", fields(chain_id = ?self.chain_id))]
     pub async fn listen(
         &self,
     ) -> Result<(impl Future<Output = ()>, AbortOnDrop, NotificationStream), ChainClientError> {
@@ -2994,7 +3257,7 @@ where
         Ok((update_streams, AbortOnDrop(abort), notifications))
     }
 
-    #[tracing::instrument(level = "trace", skip(senders))]
+    #[instrument(level = "trace", skip(senders))]
     async fn update_streams(
         &self,
         senders: &mut HashMap<ValidatorName, AbortHandle>,
@@ -3021,13 +3284,21 @@ where
             let hash_map::Entry::Vacant(entry) = senders.entry(name) else {
                 continue;
             };
-            let (mut stream, abort) = match node.subscribe(vec![chain_id]).await {
-                Err(error) => {
-                    info!(?error, "Could not connect to validator {name}");
-                    continue;
+            let stream = stream::once({
+                let node = node.clone();
+                async move { node.subscribe(vec![chain_id]).await }
+            })
+            .filter_map(move |result| async move {
+                if let Err(error) = &result {
+                    warn!(?error, "Could not connect to validator {name}");
+                } else {
+                    info!("Connected to validator {name}");
                 }
-                Ok(stream) => stream::abortable(stream),
-            };
+                result.ok()
+            })
+            .flatten();
+            let (stream, abort) = stream::abortable(stream);
+            let mut stream = Box::pin(stream);
             let this = self.clone();
             let local_node = local_node.clone();
             let remote_node = RemoteNode { name, node };
@@ -3050,148 +3321,69 @@ where
     ///
     /// This is similar to `find_received_certificates` but for only one validator.
     /// We also don't try to synchronize the admin chain.
-    #[tracing::instrument(level = "trace")]
+    #[instrument(level = "trace")]
     async fn find_received_certificates_from_validator(
         &self,
         remote_node: RemoteNode<P::Node>,
     ) -> Result<(), ChainClientError> {
-        let mutex = self.state().client_mutex();
-        let _guard = mutex.lock_owned().await;
-
         let chain_id = self.chain_id;
         // Proceed to downloading received certificates.
-        let (name, tracker, certificates) = self
-            .synchronize_received_certificates_from_validator(chain_id, &remote_node)
+        let received_certificates = self
+            .synchronize_received_certificates_from_validator(
+                chain_id,
+                &remote_node,
+                self.client.max_loaded_chains.into(),
+            )
             .await?;
-
-        drop(_guard);
         // Process received certificates. If the client state has changed during the
         // network calls, we should still be fine.
-        self.receive_certificates_from_validator(name, tracker, certificates)
+        self.receive_certificates_from_validators(vec![received_certificates])
             .await;
         Ok(())
     }
 
-    pub fn track_chain(&self, chain_id: ChainId) {
-        self.client.track_chain(chain_id)
+    /// Given a list of chain IDs, returns a map that assigns to each of them the next block
+    /// height, i.e. the lowest block height that we have not processed in the local node yet.
+    ///
+    /// It makes at most `chain_worker_limit` requests to the local node in parallel.
+    async fn local_next_block_heights(
+        &self,
+        chain_ids: impl IntoIterator<Item = &ChainId>,
+        chain_worker_limit: usize,
+    ) -> Result<BTreeMap<ChainId, BlockHeight>, NodeError> {
+        let futures = chain_ids
+            .into_iter()
+            .map(|chain_id| async move {
+                let local_info = self.client.local_node.local_chain_info(*chain_id).await?;
+                Ok::<_, LocalNodeError>((*chain_id, local_info.next_block_height))
+            })
+            .collect::<Vec<_>>();
+        stream::iter(futures)
+            .buffer_unordered(chain_worker_limit)
+            .try_collect()
+            .await
+            .map_err(|error| NodeError::LocalNodeQuery {
+                error: error.to_string(),
+            })
     }
 
-    #[tracing::instrument(level = "trace")]
-    /// Executes (or retries) a regular block proposal. Updates local balance.
-    ///
-    /// Different from propose_block, we don't submit proposal here, and just put
-    /// executed_block to pending list, then let client to fetch
-    async fn propose_block_without_block_proposal(
-        &self,
-        block: Block,
-        round: Round,
-        manager: ChainManagerInfo,
-    ) -> Result<(), ChainClientError> {
-        let next_block_height;
-        let block_hash;
-        {
-            let state = self.state();
-            next_block_height = state.next_block_height();
-            block_hash = state.block_hash();
-            // In the fast round, we must never make any conflicting proposals.
-            if round.is_fast() {
-                if let Some(pending) = &state.pending_block() {
-                    ensure!(
-                        pending == &block,
-                        ChainClientError::BlockProposalError(
-                            "Client state has a different pending block; \
-                             use the `linera retry-pending-block` command to commit that first"
-                        )
-                    );
-                }
-            }
-        }
-
-        ensure!(
-            block.height == next_block_height,
-            ChainClientError::BlockProposalError("Unexpected block height")
-        );
-        ensure!(
-            block.previous_block_hash == block_hash,
-            ChainClientError::BlockProposalError("Unexpected previous block hash")
-        );
-        // Make sure that we follow the steps in the multi-round protocol.
-        let executed_block = if let Some(validated_block_certificate) = &manager.requested_locked {
-            ensure!(
-                validated_block_certificate.value().block() == Some(&block),
-                ChainClientError::BlockProposalError(
-                    "A different block has already been validated at this height"
-                )
-            );
-            validated_block_certificate
-                .value()
-                .executed_block()
-                .unwrap()
-                .clone()
-        } else {
-            self.stage_block_execution_and_discard_failing_messages(block)
-                .await?
-                .0
-        };
-        let block = executed_block.block.clone();
-        if let Some(proposal) = manager.requested_proposed {
-            if proposal.content.round.is_fast() {
-                ensure!(
-                    proposal.content.block == block,
-                    ChainClientError::BlockProposalError(
-                        "Chain manager has a different pending block in the fast round"
-                    )
-                );
-            }
-        }
-        let hashed_value = if round.is_fast() {
-            HashedCertificateValue::new_confirmed(executed_block)
-        } else {
-            HashedCertificateValue::new_validated(executed_block)
-        };
-
-        // Collect the blobs required for execution.
-        let blobs = self.read_local_blobs(block.published_blob_ids()).await?;
-
-        self.state_mut().pending_raw_block = Some(RawBlockProposal {
-            content: ProposalContent {
-                block: block.clone(),
-                round,
-                forced_oracle_responses: match manager.requested_locked {
-                    Some(ref cert) => {
-                        if let CertificateValue::ValidatedBlock { executed_block } =
-                            cert.clone().value.into_inner()
-                        {
-                            Some(executed_block.outcome.oracle_responses)
-                        } else {
-                            panic!("called new_retry with a certificate without a validated block");
-                        }
-                    }
-                    _ => None,
-                },
+    /// Given a set of chain ID-block height pairs, returns a map that assigns to each chain ID
+    /// the highest height seen.
+    fn max_height_per_chain(remote_log: &[ChainAndHeight]) -> BTreeMap<ChainId, BlockHeight> {
+        remote_log.iter().fold(
+            BTreeMap::<ChainId, BlockHeight>::new(),
+            |mut chain_to_info, entry| {
+                chain_to_info
+                    .entry(entry.chain_id)
+                    .and_modify(|h| *h = entry.height.max(*h))
+                    .or_insert(entry.height);
+                chain_to_info
             },
-            owner: self.public_key().await?.into(),
-            blobs,
-            validated_block_certificate: match manager.requested_locked {
-                Some(ref cert) => Some(cert.lite_certificate().cloned()),
-                _ => None,
-            },
-            hashed_value,
-        });
-        self.state_mut().set_pending_block(block.clone());
+        )
+    }
 
-        let mut notifications = Vec::new();
-        notifications.push(Notification {
-            chain_id: self.chain_id,
-            reason: Reason::NewRawBlock {
-                height: block.height,
-            },
-        });
-        self.client
-            .notifier
-            .handle_notifications(&mut notifications);
-
-        Ok(())
+    pub fn track_chain(&self, chain_id: ChainId) {
+        self.client.track_chain(chain_id)
     }
 
     pub async fn submit_extenal_signed_block_proposal_and_signature(
@@ -3201,8 +3393,8 @@ where
         round: Round,
         signature: Signature,
         retry: bool,
-        validated_block_certificate: Option<Certificate>,
-    ) -> Result<Certificate, ChainClientError> {
+        validated_block_hash: Option<CryptoHash>,
+    ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
         let block = executed_block.block.clone();
         ensure!(
             block.height == height,
@@ -3217,6 +3409,30 @@ where
         } else {
             HashedCertificateValue::new_validated(executed_block)
         };
+
+        let mut validated_block_certificate = None;
+        if retry {
+            let chain_id = self.chain_id;
+            let query = ChainInfoQuery::new(chain_id).with_committees();
+            let info = self
+                .client
+                .local_node
+                .handle_chain_info_query(query)
+                .await?
+                .info;
+
+            if validated_block_hash.is_none() {
+                return Err(ChainClientError::InvalidValidatedBlock);
+            }
+            if let Some(_validated_block_certificate) = &info.manager.requested_locked {
+                if _validated_block_certificate.hash() != validated_block_hash.unwrap() {
+                    return Err(ChainClientError::InvalidValidatedBlock);
+                }
+                validated_block_certificate = Some(_validated_block_certificate.clone());
+            } else {
+                return Err(ChainClientError::InvalidValidatedBlock);
+            }
+        }
 
         let proposal = BlockProposal {
             content: ProposalContent {
@@ -3274,354 +3490,6 @@ where
             }
         }
         Ok(certificate)
-    }
-
-    pub async fn submit_extenal_signed_block_proposal(
-        &self,
-        height: BlockHeight,
-        signature: Signature,
-    ) -> Result<Certificate, ChainClientError> {
-        let raw_block = match &self.state().pending_raw_block {
-            Some(raw_block) => raw_block.clone(),
-            _ => return Err(ChainClientError::InvalidRawBlockProposal),
-        };
-        ensure!(
-            raw_block.content.block.height == height,
-            ChainClientError::MismatchBlockHeight(raw_block.content.block.height, height)
-        );
-        let proposal = BlockProposal {
-            content: raw_block.content,
-            owner: raw_block.owner,
-            signature,
-            blobs: raw_block.blobs,
-            validated_block_certificate: raw_block.validated_block_certificate,
-        };
-
-        // Check the final block proposal. This will be cheaper after #1401.
-        self.client
-            .local_node
-            .handle_block_proposal(proposal.clone())
-            .await?;
-        // Remember what we are trying to do before sending the proposal to the validators.
-        // Send the query to validators.
-        let committee = self.local_committee().await?;
-        let certificate = self
-            .submit_block_proposal(
-                &committee,
-                Box::new(proposal),
-                raw_block.hashed_value.clone(),
-            )
-            .await?;
-        self.state_mut().pending_raw_block = None;
-        self.clear_pending_block();
-        // Communicate the new certificate now.
-        self.communicate_chain_updates(
-            &committee,
-            self.chain_id,
-            self.next_block_height(),
-            self.options.cross_chain_message_delivery,
-        )
-        .await?;
-        if let Ok(new_committee) = self.local_committee().await {
-            if new_committee != committee {
-                // If the configuration just changed, communicate to the new committee as well.
-                // (This is actually more important that updating the previous committee.)
-                self.communicate_chain_updates(
-                    &new_committee,
-                    self.chain_id,
-                    self.next_block_height(),
-                    self.options.cross_chain_message_delivery,
-                )
-                .await?;
-            }
-        }
-        Ok(certificate)
-    }
-
-    #[tracing::instrument(level = "trace")]
-    /// Processes the last pending block. Assumes that the local chain is up to date.
-    ///
-    /// Different from process_pending_block_without_prepare, we don't submit proposal here, and just put
-    /// executed_block to pending list, then let client to fetch
-    async fn process_pending_block_without_prepare_without_block_proposal(
-        &self,
-    ) -> Result<ClientOutcome<bool>, ChainClientError> {
-        let identity = self.identity().await?;
-        let mut info = self.chain_info_with_manager_values().await?;
-        // If the current round has timed out, we request a timeout certificate and retry in
-        // the next round.
-        if let Some(round_timeout) = info.manager.round_timeout {
-            if round_timeout <= self.storage_client().clock().current_time() {
-                self.request_leader_timeout().await?;
-                info = self.chain_info_with_manager_values().await?;
-            }
-        }
-        let manager = *info.manager;
-        // Drop the pending block if it is outdated.
-        {
-            let state = self.state();
-            if let Some(block) = &self.state().pending_block() {
-                if block.height != info.next_block_height {
-                    drop(state);
-                    self.clear_pending_block();
-                }
-            }
-        }
-        {
-            let state = self.state();
-            if let Some(raw_block) = &self.state().pending_raw_block {
-                if raw_block.content.block.height == info.next_block_height {
-                    return Ok(ClientOutcome::Committed(true));
-                }
-                drop(state);
-                self.state_mut().pending_raw_block = None
-            }
-        }
-        // If there is a validated block in the current round, finalize it.
-        if let Some(certificate) = &manager.requested_locked {
-            if certificate.round == manager.current_round {
-                let committee = self.local_committee().await?;
-                match self.finalize_block(&committee, *certificate.clone()).await {
-                    Ok(_) => return Ok(ClientOutcome::Committed(false)),
-                    Err(ChainClientError::CommunicationError(_)) => {
-                        // Communication errors in this case often mean that someone else already
-                        // finalized the block.
-                        let timestamp = manager.round_timeout.ok_or_else(|| {
-                            ChainClientError::BlockProposalError(
-                                "Cannot propose in the current round.",
-                            )
-                        })?;
-                        return Ok(ClientOutcome::WaitForTimeout(RoundTimeout {
-                            timestamp,
-                            current_round: manager.current_round,
-                            next_block_height: info.next_block_height,
-                        }));
-                    }
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-
-        // The block we want to propose is either the highest validated, or our pending one.
-        let Some(block) = manager
-            .highest_validated_block()
-            .cloned()
-            .or_else(|| self.state().pending_block().clone())
-        else {
-            return Ok(ClientOutcome::Committed(false)); // Nothing to propose.
-        };
-
-        // If there is a conflicting proposal in the current round, we can only propose if the
-        // next round can be started without a timeout, i.e. if we are in a multi-leader round.
-        let conflicting_proposal = manager.requested_proposed.as_ref().is_some_and(|proposal| {
-            proposal.content.round == manager.current_round && proposal.content.block != block
-        });
-        let round = if !conflicting_proposal {
-            manager.current_round
-        } else if let Some(round) = manager
-            .ownership
-            .next_round(manager.current_round)
-            .filter(|_| manager.current_round.is_multi_leader())
-        {
-            round
-        } else if let Some(_) = manager.round_timeout {
-            return Ok(ClientOutcome::Committed(false));
-        } else {
-            return Err(ChainClientError::BlockProposalError(
-                "Conflicting proposal in the current round.",
-            ));
-        };
-        let can_propose = match round {
-            Round::Fast => manager.ownership.super_owners.contains_key(&identity),
-            Round::MultiLeader(_) => true,
-            Round::SingleLeader(_) | Round::Validator(_) => manager.leader == Some(identity),
-        };
-        if can_propose {
-            self.propose_block_without_block_proposal(block.clone(), round, manager)
-                .await?;
-            Ok(ClientOutcome::Committed(true))
-        } else {
-            Ok(ClientOutcome::Committed(false))
-        }
-    }
-
-    #[tracing::instrument(level = "trace")]
-    /// Executes a list of operations.
-    pub async fn execute_operations_without_block_proposal(
-        &self,
-        operations: Vec<Operation>,
-    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        // It'll be executed in process inbox
-        self.state_mut()
-            .pending_operations
-            .extend_from_slice(&operations);
-        Ok((false, None))
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    /// Executes a list of operations, without calling `prepare_chain`.
-    pub async fn execute_with_messages_without_block_proposal(
-        &self,
-        operations: Vec<Operation>,
-    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        self.execute_block_without_block_proposal(operations.clone())
-            .await
-    }
-
-    #[tracing::instrument(level = "trace")]
-    /// Executes an operation.
-    pub async fn execute_operation_without_block_proposal(
-        &self,
-        operation: Operation,
-    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        self.execute_operations_without_block_proposal(vec![operation])
-            .await
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    /// Executes a new block.
-    ///
-    /// This must be preceded by a call to `prepare_chain()`.
-    ///
-    /// Different from ececute_block, we don't submit proposal here, and just put
-    /// executed_block to pending list, then let client to fetch
-    pub async fn execute_block_without_block_proposal(
-        &self,
-        operations: Vec<Operation>,
-    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        #[cfg(with_metrics)]
-        let _latency = metrics::EXECUTE_BLOCK_LATENCY.measure_latency();
-
-        let mutex = self.state().client_mutex();
-        let _guard = mutex.lock_owned().await;
-        match self
-            .process_pending_block_without_prepare_without_block_proposal()
-            .await?
-        {
-            ClientOutcome::Committed(true) => {
-                return Ok((operations.len() > 0, None));
-            }
-            ClientOutcome::Committed(false) => {}
-            ClientOutcome::WaitForTimeout(timeout) => {
-                return Ok((operations.len() > 0, Some(timeout)))
-            }
-        }
-        let incoming_bundles = self.pending_message_bundles().await?;
-        let _ = self.set_pending_block(incoming_bundles, operations).await?;
-        match self
-            .process_pending_block_without_prepare_without_block_proposal()
-            .await?
-        {
-            ClientOutcome::Committed(true) => Ok((false, None)),
-            // Should be unreachable: We did set a pending block.
-            ClientOutcome::Committed(false) => Err(ChainClientError::BlockProposalError(
-                "Unexpected block proposal error",
-            )),
-            ClientOutcome::WaitForTimeout(timeout) => Ok((true, Some(timeout))),
-        }
-    }
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    /// Creates an empty block to process all incoming messages. This may require several blocks.
-    ///
-    /// If not all certificates could be processed due to a timeout, the timestamp for when to retry
-    /// is returned, too.
-    ///
-    /// Different from process_inbox, we don't submit proposal here, and just put
-    /// executed_block to pending list, then let client to fetch
-    pub async fn process_inbox_without_block_proposal(
-        &self,
-    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
-        self.prepare_chain().await?;
-        let incoming_bundles = self.pending_message_bundles().await?;
-        let operations = self.state().pending_operations.clone();
-        if incoming_bundles.is_empty() && operations.is_empty() {
-            return Ok((Vec::new(), None));
-        }
-        let mut count = if operations.len() > 4 {
-            4
-        } else {
-            operations.len()
-        };
-        loop {
-            match self
-                .execute_block_without_block_proposal(
-                    operations.get(0..count).unwrap_or(&Vec::new()).to_vec(),
-                )
-                .await
-            {
-                Ok((retry, timeout)) => {
-                    if !retry && count > 0 {
-                        self.state_mut().pending_operations.drain(0..count);
-                    }
-                    return Ok((Vec::new(), timeout));
-                }
-                Err(error) => {
-                    if count == 1 {
-                        tracing::error!(
-                            "Failed to process chain {} operation {:?}: {}",
-                            self.chain_id,
-                            operations,
-                            error
-                        );
-                        self.state_mut().pending_operations.drain(0..count);
-                        return Ok((Vec::new(), None));
-                    }
-                    count = 1;
-                }
-            }
-        }
-    }
-
-    #[tracing::instrument(level = "trace")]
-    /// Creates an empty block to process all incoming messages. This may require several blocks.
-    /// If we are not a chain owner, this doesn't fail, and just returns an empty list.
-    ///
-    /// Different from process_inbox_if_owned, we don't submit proposal here, and just put
-    /// executed_block to pending list, then let client to fetch
-    pub async fn process_inbox_if_owned_without_block_proposal(
-        &self,
-    ) -> Result<(Vec<Certificate>, Option<RoundTimeout>), ChainClientError> {
-        self.process_inbox_without_block_proposal().await
-    }
-
-    pub async fn peek_candidate_block_proposal(&self) -> Option<RawBlockProposal> {
-        self.state().pending_raw_block.clone()
-    }
-
-    /// Sends money.
-    pub async fn transfer_without_block_proposal(
-        &self,
-        owner: Option<Owner>,
-        amount: Amount,
-        recipient: Recipient,
-    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        self.execute_operation_without_block_proposal(Operation::System(
-            SystemOperation::Transfer {
-                owner,
-                recipient,
-                amount,
-            },
-        ))
-        .await
-    }
-
-    #[tracing::instrument(level = "trace")]
-    /// Requests a `RegisterApplications` message from another chain so the application can be used
-    /// on this one.
-    pub async fn request_application_without_block_proposal(
-        &self,
-        application_id: UserApplicationId,
-        chain_id: Option<ChainId>,
-    ) -> Result<(bool, Option<RoundTimeout>), ChainClientError> {
-        let chain_id = chain_id.unwrap_or(application_id.creation.chain_id);
-        self.execute_operation_without_block_proposal(Operation::System(
-            SystemOperation::RequestApplication {
-                application_id,
-                chain_id,
-            },
-        ))
-        .await
     }
 
     #[tracing::instrument(level = "trace", skip(block))]
@@ -3683,14 +3551,9 @@ where
                 .local_node
                 .calculate_block_state_hash(block.clone(), local_time)
                 .await;
-            if let Err(LocalNodeError::WorkerError(WorkerError::ChainError(chain_error))) = &result
-            {
-                if let ChainError::ExecutionError(
-                    ExecutionError::SystemError(SystemExecutionError::BlobNotFoundOnRead(blob_id)),
-                    _,
-                ) = &**chain_error
-                {
-                    self.receive_certificate_for_blob(*blob_id).await?;
+            if let Err(err) = &result {
+                if let Some(blob_ids) = err.get_blobs_not_found() {
+                    self.receive_certificates_for_blobs(blob_ids).await?;
                     continue; // We found the missing blob: retry.
                 }
             }
@@ -3837,11 +3700,7 @@ where
         if let Some(validated_block_certificate) = &info.manager.requested_locked {
             tracing::info!("Requested locked block is available, retry it");
             Ok((
-                validated_block_certificate
-                    .value()
-                    .executed_block()
-                    .unwrap()
-                    .clone(),
+                validated_block_certificate.executed_block().clone(),
                 Some(validated_block_certificate.hash()),
                 true,
             ))
@@ -3860,10 +3719,10 @@ where
 #[derive(Debug)]
 enum ExecuteBlockOutcome {
     /// A block with the messages and operations was committed.
-    Executed(Certificate),
+    Executed(ConfirmedBlockCertificate),
     /// A different block was already proposed and got committed. Check whether the messages and
     /// operations are still suitable, and try again at the next block height.
-    Conflict(Certificate),
+    Conflict(ConfirmedBlockCertificate),
     /// We are not the round leader and cannot do anything. Try again at the specified time or
     /// or whenever the round or block height changes.
     WaitForTimeout(RoundTimeout),
@@ -3874,8 +3733,22 @@ enum ExecuteBlockOutcome {
 pub struct AbortOnDrop(AbortHandle);
 
 impl Drop for AbortOnDrop {
-    #[tracing::instrument(level = "trace", skip(self))]
+    #[instrument(level = "trace", skip(self))]
     fn drop(&mut self) {
         self.0.abort();
     }
+}
+
+/// The result of `synchronize_received_certificates_from_validator`.
+struct ReceivedCertificatesFromValidator {
+    /// The name of the validator we downloaded from.
+    name: ValidatorName,
+    /// The new tracker value for that validator.
+    tracker: u64,
+    /// The downloaded certificates. The signatures were already checked and they are ready
+    /// to be processed.
+    certificates: Vec<ConfirmedBlockCertificate>,
+    /// Sender chains that were already up to date locally. We need to ensure their messages
+    /// are delivered.
+    other_sender_chains: Vec<ChainId>,
 }

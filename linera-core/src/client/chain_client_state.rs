@@ -10,17 +10,18 @@ use std::{
 use linera_base::{
     crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{Blob, BlockHeight, Timestamp},
-    identifiers::{BlobId, ChainId, Owner},
+    identifiers::{BlobId, Owner},
+    ownership::ChainOwnership,
 };
 use linera_chain::data_types::Block;
-use linera_execution::{committee::ValidatorName, Operation};
+use linera_execution::committee::ValidatorName;
 use tokio::sync::Mutex;
 
-use crate::data_types::{ChainInfo, RawBlockProposal};
+use crate::data_types::ChainInfo;
 
 /// The state of our interaction with a particular chain: how far we have synchronized it and
 /// whether we are currently attempting to propose a new block.
-pub struct ChainState {
+pub struct ChainClientState {
     /// Latest block hash, if any.
     block_hash: Option<CryptoHash>,
     /// The earliest possible timestamp for the next block.
@@ -34,8 +35,6 @@ pub struct ChainState {
     pending_block: Option<Block>,
     /// Known key pairs from present and past identities.
     known_key_pairs: BTreeMap<Owner, KeyPair>,
-    /// The ID of the admin chain.
-    admin_id: ChainId,
 
     /// For each validator, up to which index we have synchronized their
     /// [`ChainStateView::received_log`].
@@ -47,32 +46,23 @@ pub struct ChainState {
     /// A mutex that is held whilst we are performing operations that should not be
     /// attempted by multiple clients at the same time.
     client_mutex: Arc<Mutex<()>>,
-
-    /// Raw block proposal list waiting for sign
-    pub pending_raw_block: Option<RawBlockProposal>,
-    /// Pending operations
-    pub pending_operations: Vec<Operation>,
 }
 
-impl ChainState {
+impl ChainClientState {
     pub fn new(
         known_key_pairs: Vec<KeyPair>,
-        admin_id: ChainId,
         block_hash: Option<CryptoHash>,
         timestamp: Timestamp,
         next_block_height: BlockHeight,
         pending_block: Option<Block>,
         pending_blobs: BTreeMap<BlobId, Blob>,
-        pending_raw_block: Option<RawBlockProposal>,
-        pending_operations: Vec<Operation>,
-    ) -> ChainState {
+    ) -> ChainClientState {
         let known_key_pairs = known_key_pairs
             .into_iter()
             .map(|kp| (Owner::from(kp.public()), kp))
             .collect();
-        let mut state = ChainState {
+        let mut state = ChainClientState {
             known_key_pairs,
-            admin_id,
             block_hash,
             timestamp,
             next_block_height,
@@ -80,8 +70,6 @@ impl ChainState {
             pending_blobs,
             received_certificate_trackers: HashMap::new(),
             client_mutex: Arc::default(),
-            pending_raw_block,
-            pending_operations,
         };
         if let Some(block) = pending_block {
             state.set_pending_block(block);
@@ -99,10 +87,6 @@ impl ChainState {
 
     pub fn next_block_height(&self) -> BlockHeight {
         self.next_block_height
-    }
-
-    pub fn admin_id(&self) -> ChainId {
-        self.admin_id
     }
 
     pub fn pending_block(&self) -> &Option<Block> {
@@ -131,6 +115,13 @@ impl ChainState {
 
     pub fn known_key_pairs(&self) -> &BTreeMap<Owner, KeyPair> {
         &self.known_key_pairs
+    }
+
+    /// Returns whether the given ownership includes anyone whose secret key we don't have.
+    pub fn has_other_owners(&self, ownership: &ChainOwnership) -> bool {
+        ownership
+            .all_owners()
+            .any(|owner| !self.known_key_pairs.contains_key(owner))
     }
 
     pub(super) fn insert_known_key_pair(&mut self, key_pair: KeyPair) -> PublicKey {

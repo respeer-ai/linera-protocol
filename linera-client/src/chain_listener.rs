@@ -23,7 +23,7 @@ use linera_core::{
 use linera_execution::{Message, SystemMessage};
 use linera_rpc::node_provider::NodeProvider;
 use linera_storage::{Clock as _, Storage};
-use tracing::{debug, error, info, warn, Instrument as _};
+use tracing::{debug, error, info, instrument, warn, Instrument as _};
 #[cfg(feature = "no-storage")]
 use {
     crate::fake_wallet::FakeWallet,
@@ -33,10 +33,6 @@ use {
 #[cfg(not(feature = "no-storage"))]
 use crate::wallet::Wallet;
 use crate::Error;
-
-#[cfg(test)]
-#[path = "unit_tests/chain_listener.rs"]
-mod tests;
 
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct ChainListenerConfig {
@@ -63,10 +59,6 @@ pub struct ChainListenerConfig {
         env = "LINERA_LISTENER_DELAY_AFTER"
     )]
     pub delay_after_ms: u64,
-
-    /// Use external signing service.
-    #[arg(long = "external-signing", action = clap::ArgAction::Set, default_value_t = true)]
-    pub external_signing: bool,
 }
 
 type ContextChainClient<C> =
@@ -170,8 +162,8 @@ impl ChainListener {
         }
     }
 
-    #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
-    pub fn run_with_chain_id<C>(
+    #[instrument(level = "trace", skip_all, fields(?chain_id))]
+    fn run_with_chain_id<C>(
         chain_id: ChainId,
         context: Arc<Mutex<C>>,
         storage: C::Storage,
@@ -192,7 +184,7 @@ impl ChainListener {
         );
     }
 
-    #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
+    #[instrument(level = "trace", skip_all, fields(?chain_id))]
     pub fn run_with_chain_id_retry<C>(
         chain_id: ChainId,
         context: Arc<Mutex<C>>,
@@ -229,7 +221,6 @@ impl ChainListener {
         );
     }
 
-    #[tracing::instrument(level = "trace", skip_all, fields(?chain_id))]
     async fn run_client_stream<C>(
         chain_id: ChainId,
         context: Arc<Mutex<C>>,
@@ -267,37 +258,18 @@ impl ChainListener {
                         continue;
                     }
                     debug!("Processing inbox");
-                    let result = if config.external_signing {
-                        client.process_inbox_if_owned_without_block_proposal().await
-                    } else {
-                        client.process_inbox_without_prepare().await
-                    };
-                    match result {
-                        Err(ChainClientError::CannotFindKeyForChain(_)) => continue,
-                        Err(ref error) => {
-                            warn!(%error, "Failed to process inbox.");
-                            timeout = if config.external_signing {
-                                storage
-                                    .clock()
-                                    .current_time()
-                                    .saturating_add_micros(1000000)
-                            } else {
-                                Timestamp::from(u64::MAX)
-                            };
+                    match client.process_inbox_without_prepare().await {
+                        Err(ChainClientError::CannotFindKeyForChain(_)) => {}
+                        Err(error) => warn!(%error, "Failed to process inbox."),
+                        Ok((certs, None)) => {
+                            info!("Done processing inbox. {} blocks created.", certs.len());
                         }
-                        Ok((ref _certs, None)) => {
-                            timeout = if config.external_signing {
-                                storage
-                                    .clock()
-                                    .current_time()
-                                    .saturating_add_micros(1000000)
-                            } else {
-                                Timestamp::from(u64::MAX)
-                            }
-                        }
-                        Ok((ref certs, Some(ref new_timeout))) => {
-                            info!("Done processing inbox ({} blocks created)", certs.len());
-                            info!("I will try processing the inbox later based on the given round timeout: {:?}", new_timeout);
+                        Ok((certs, Some(new_timeout))) => {
+                            info!(
+                                "{} blocks created. Will try processing the inbox later based \
+                                 on the given round timeout: {new_timeout:?}",
+                                certs.len(),
+                            );
                             timeout = new_timeout.timestamp;
                         }
                     }

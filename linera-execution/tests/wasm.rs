@@ -41,7 +41,7 @@ async fn test_fuel_for_counter_wasm_application(
     let mut view = state
         .into_view_with(ChainId::root(0), ExecutionRuntimeConfig::default())
         .await;
-    let app_desc = create_dummy_user_application_description(1);
+    let (app_desc, contract_blob, service_blob) = create_dummy_user_application_description(1);
     let app_id = view
         .system
         .registry
@@ -61,6 +61,10 @@ async fn test_fuel_for_counter_wasm_application(
         .extra()
         .user_services()
         .insert(app_id, service.into());
+
+    view.context()
+        .extra()
+        .add_blobs(vec![contract_blob, service_blob]);
 
     let app_id = app_id.with_abi::<CounterAbi>();
 
@@ -83,6 +87,7 @@ async fn test_fuel_for_counter_wasm_application(
         tracker: ResourceTracker::default(),
         account: None,
     };
+
     for increment in &increments {
         let account = Account {
             chain_id: ChainId::root(0),

@@ -3,10 +3,8 @@
 
 //! Operations that don't persist any changes to the chain state.
 
-use std::borrow::Cow;
-
 use linera_base::{
-    data_types::{ArithmeticError, Timestamp, UserApplicationDescription},
+    data_types::{ArithmeticError, BlobContent, Timestamp, UserApplicationDescription},
     ensure,
     identifiers::{GenericApplicationId, UserApplicationId},
 };
@@ -17,13 +15,16 @@ use linera_chain::{
     },
     manager,
 };
-use linera_execution::{ChannelSubscription, Query, Response};
+use linera_execution::{ChannelSubscription, Query, ResourceControlPolicy, Response};
 use linera_storage::{Clock as _, Storage};
 use linera_views::views::View;
 #[cfg(with_testing)]
 use {
     linera_base::{crypto::CryptoHash, data_types::BlockHeight},
-    linera_chain::data_types::{Certificate, MessageBundle, Origin},
+    linera_chain::{
+        data_types::{MessageBundle, Origin},
+        types::ConfirmedBlockCertificate,
+    },
 };
 
 use super::{check_block_epoch, ChainWorkerState};
@@ -43,7 +44,7 @@ impl<'state, StorageClient> ChainWorkerStateWithTemporaryChanges<'state, Storage
 where
     StorageClient: Storage + Clone + Send + Sync + 'static,
 {
-    /// Creates a new [`ChainWorkerStateWithAttemptedChanges`] instance to temporarily change the
+    /// Creates a new [`ChainWorkerStateWithTemporaryChanges`] instance to temporarily change the
     /// `state`.
     pub(super) async fn new(state: &'state mut ChainWorkerState<StorageClient>) -> Self {
         assert!(
@@ -59,7 +60,7 @@ where
     pub(super) async fn read_certificate(
         &mut self,
         height: BlockHeight,
-    ) -> Result<Option<Certificate>, WorkerError> {
+    ) -> Result<Option<ConfirmedBlockCertificate>, WorkerError> {
         self.0.ensure_is_active()?;
         let certificate_hash = match self.0.chain.confirmed_log.get(height.try_into()?).await? {
             Some(hash) => hash,
@@ -178,6 +179,7 @@ where
             .system
             .current_committee()
             .expect("chain is active");
+        let policy = committee.policy().clone();
         check_block_epoch(epoch, block)?;
         // Check the authentication of the block.
         let public_key = self
@@ -205,13 +207,20 @@ where
         // legitimately required.
         // Actual execution happens below, after other validity checks.
         self.0.chain.remove_bundles_from_inboxes(block).await?;
-        // Verify that all required bytecode hashed certificate values and blobs are available, and no
-        // unrelated ones provided.
+        // Verify that no unrelated blobs were provided.
+        let published_blob_ids = block.published_blob_ids();
         self.0
-            .check_no_missing_blobs(block.published_blob_ids(), blobs)
-            .await?;
+            .check_for_unneeded_blobs(&published_blob_ids, blobs)?;
+        let missing_published_blob_ids = published_blob_ids
+            .difference(&blobs.iter().map(|blob| blob.id()).collect())
+            .cloned()
+            .collect::<Vec<_>>();
+        ensure!(
+            missing_published_blob_ids.is_empty(),
+            WorkerError::BlobsNotFound(missing_published_blob_ids)
+        );
         for blob in blobs {
-            self.0.cache_recent_blob(Cow::Borrowed(blob)).await;
+            Self::check_blob_size(blob.content(), &policy)?;
         }
 
         let local_time = self.0.storage.clock().current_time();
@@ -304,7 +313,7 @@ where
                 for bundle in inbox.added_bundles.elements().await? {
                     messages.push(IncomingBundle {
                         origin: origin.clone(),
-                        bundle: bundle.clone(),
+                        bundle,
                         action,
                     });
                 }
@@ -332,6 +341,29 @@ where
             info.manager.add_values(chain.manager.get());
         }
         Ok(ChainInfoResponse::new(info, self.0.config.key_pair()))
+    }
+
+    fn check_blob_size(
+        content: &BlobContent,
+        policy: &ResourceControlPolicy,
+    ) -> Result<(), WorkerError> {
+        ensure!(
+            u64::try_from(content.size())
+                .ok()
+                .is_some_and(|size| size <= policy.maximum_blob_size),
+            WorkerError::BlobTooLarge
+        );
+        match content {
+            BlobContent::ContractBytecode(compressed_bytecode)
+            | BlobContent::ServiceBytecode(compressed_bytecode) => {
+                ensure!(
+                    compressed_bytecode.decompressed_size_at_most(*policy.maximum_bytecode_size)?,
+                    WorkerError::BytecodeTooLarge
+                );
+            }
+            BlobContent::Data(_) => {}
+        }
+        Ok(())
     }
 
     /// Executes a block without persisting any changes to the state.

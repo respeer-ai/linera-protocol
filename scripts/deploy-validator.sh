@@ -2,6 +2,9 @@
 
 set -e
 
+# Make sure we're at the source of the repo.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
 # Function to check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -31,17 +34,26 @@ if ! docker_compose_plugin_installed; then
     exit 1
 fi
 
+HOST=$1
+
 # Check if the host is provided as an argument
-if [ -z "$1" ]; then
-  echo "Usage: $0 <host>"
+if [ -z "$HOST" ]; then
+  echo "Usage: $0 <host> [--remote-image]"
   exit 1
 fi
 
-HOST="$1"
+if [ -n "$2" ]; then
+  if [ "$2" != "--remote-image" ]; then
+    echo "Usage: $0 <host> [--remote-image]"
+    exit 1
+  fi
+  REMOTE_IMAGE="$2"
+fi
 
 # Get the current branch name and replace underscores with dashes
 BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
 FORMATTED_BRANCH_NAME="${BRANCH_NAME//_/-}"
+GIT_COMMIT=$(git rev-parse --short HEAD)
 
 # Variables
 PORT="19100"
@@ -50,14 +62,16 @@ GENESIS_URL="https://storage.googleapis.com/linera-io-dev-public/$FORMATTED_BRAN
 VALIDATOR_CONFIG="docker/validator-config.toml"
 GENESIS_CONFIG="docker/genesis.json"
 
-cd ..
-
 echo "Building Linera binaries"
 cargo install --locked --path linera-service
 
-# Build Docker image
-echo "Building Linera docker image"
-docker build -f docker/Dockerfile . -t linera
+if [ -z "$REMOTE_IMAGE" ]; then
+  echo "Building local image from commit $GIT_COMMIT..."
+  docker build --build-arg git_commit="$GIT_COMMIT" -f  docker/Dockerfile . -t linera
+else
+  export LINERA_IMAGE="us-docker.pkg.dev/linera-io-dev/linera-public-registry/linera:$BRANCH_NAME"
+  echo "Using remote image $LINERA_IMAGE..."
+fi
 
 # Create validator configuration file
 echo "Creating validator configuration..."
@@ -73,10 +87,29 @@ internal_port = 20100
 Grpc = "ClearText"
 [internal_protocol]
 Grpc = "ClearText"
+
 [[shards]]
-host = "shard"
+host = "docker-shard-1"
 port = $PORT
-metrics_host = "shard"
+metrics_host = "docker-shard-1"
+metrics_port = $METRICS_PORT
+
+[[shards]]
+host = "docker-shard-2"
+port = $PORT
+metrics_host = "docker-shard-2"
+metrics_port = $METRICS_PORT
+
+[[shards]]
+host = "docker-shard-3"
+port = $PORT
+metrics_host = "docker-shard-3"
+metrics_port = $METRICS_PORT
+
+[[shards]]
+host = "docker-shard-4"
+port = $PORT
+metrics_host = "docker-shard-4"
 metrics_port = $METRICS_PORT
 EOL
 

@@ -16,6 +16,9 @@ pub mod storage;
 pub mod util;
 pub mod wallet;
 
+#[cfg(test)]
+mod unit_tests;
+
 pub use error::Error;
 
 #[cfg(feature = "no-storage")]

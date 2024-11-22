@@ -95,13 +95,22 @@ pub trait ValidatorNode {
 
     async fn download_certificate(&self, hash: CryptoHash) -> Result<Certificate, NodeError>;
 
+    /// Requests a batch of certificates from the validator.
+    async fn download_certificates(
+        &self,
+        hashes: Vec<CryptoHash>,
+    ) -> Result<Vec<Certificate>, NodeError>;
+
     /// Returns the hash of the `Certificate` that last used a blob.
     async fn blob_last_used_by(&self, blob_id: BlobId) -> Result<CryptoHash, NodeError>;
+
+    /// Returns the hashes of the `Certificate`s that last used some blobs.
+    async fn blobs_last_used_by(&self, blob_ids: Vec<BlobId>)
+        -> Result<Vec<CryptoHash>, NodeError>;
 }
 
 /// Turn an address into a validator node.
 #[cfg_attr(not(web), trait_variant::make(Send + Sync))]
-#[expect(clippy::result_large_err)]
 pub trait ValidatorNodeProvider: 'static {
     #[cfg(not(web))]
     type Node: ValidatorNode + Send + Sync + Clone + 'static;
@@ -168,7 +177,7 @@ pub enum NodeError {
     )]
     MissingCrossChainUpdate {
         chain_id: ChainId,
-        origin: Origin,
+        origin: Box<Origin>,
         height: BlockHeight,
     },
 
@@ -214,6 +223,8 @@ pub enum NodeError {
     BlobNotFoundOnRead(BlobId),
     #[error("Node failed to provide a 'last used by' certificate for the blob")]
     InvalidCertificateForBlob(BlobId),
+    #[error("Local error handling validator response")]
+    LocalError { error: String },
 }
 
 impl From<tonic::Status> for NodeError {
@@ -234,10 +245,9 @@ impl CrossChainMessageDelivery {
     }
 
     pub fn wait_for_outgoing_messages(self) -> bool {
-        use CrossChainMessageDelivery::*;
         match self {
-            NonBlocking => false,
-            Blocking => true,
+            CrossChainMessageDelivery::NonBlocking => false,
+            CrossChainMessageDelivery::Blocking => true,
         }
     }
 }
@@ -275,14 +285,20 @@ impl From<ChainError> for NodeError {
                 height,
             } => Self::MissingCrossChainUpdate {
                 chain_id,
-                origin: *origin,
+                origin,
                 height,
             },
             ChainError::InactiveChain(chain_id) => Self::InactiveChain(chain_id),
-            ChainError::ExecutionError(
-                ExecutionError::SystemError(SystemExecutionError::BlobNotFoundOnRead(blob_id)),
-                _,
-            ) => Self::BlobNotFoundOnRead(blob_id),
+            ChainError::ExecutionError(execution_error, context) => match *execution_error {
+                ExecutionError::SystemError(SystemExecutionError::BlobNotFoundOnRead(blob_id))
+                | ExecutionError::ViewError(ViewError::BlobNotFoundOnRead(blob_id)) => {
+                    Self::BlobNotFoundOnRead(blob_id)
+                }
+                execution_error => Self::ChainError {
+                    error: ChainError::ExecutionError(Box::new(execution_error), context)
+                        .to_string(),
+                },
+            },
             error => Self::ChainError {
                 error: error.to_string(),
             },

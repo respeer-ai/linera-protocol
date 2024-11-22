@@ -50,9 +50,6 @@ pub static OPEN_CHAIN_MESSAGE_INDEX: u32 = 0;
 /// The relative index of the `ApplicationCreated` message created by the `CreateApplication`
 /// operation.
 pub static CREATE_APPLICATION_MESSAGE_INDEX: u32 = 0;
-/// The relative index of the `BytecodePublished` message created by the `PublishBytecode`
-/// operation.
-pub static PUBLISH_BYTECODE_MESSAGE_INDEX: u32 = 0;
 
 /// The number of times the [`SystemOperation::OpenChain`] was executed.
 #[cfg(with_metrics)]
@@ -62,7 +59,6 @@ static OPEN_CHAIN_COUNT: LazyLock<IntCounterVec> = LazyLock::new(|| {
         "The number of times the `OpenChain` operation was executed",
         &[],
     )
-    .expect("Counter creation should not fail")
 });
 
 /// A view accessing the execution state of the system of a chain.
@@ -341,8 +337,6 @@ pub enum SystemExecutionError {
     #[error(transparent)]
     ViewError(#[from] ViewError),
 
-    #[error("Incorrect chain ID: {0}")]
-    IncorrectChainId(ChainId),
     #[error("Invalid admin ID in new chain: {0}")]
     InvalidNewChainAdminId(ChainId),
     #[error("Invalid committees")]
@@ -351,8 +345,8 @@ pub enum SystemExecutionError {
     InvalidEpoch { chain_id: ChainId, epoch: Epoch },
     #[error("Transfer must have positive amount")]
     IncorrectTransferAmount,
-    #[error("Transfer from owned account must be authenticated by the right signer {0} != {1}")]
-    UnauthenticatedTransferOwner(Owner, Owner),
+    #[error("Transfer from owned account must be authenticated by the right signer")]
+    UnauthenticatedTransferOwner,
     #[error("The transferred amount must not exceed the current chain balance: {balance}")]
     InsufficientFunding { balance: Amount },
     #[error("Required execution fees exceeded the total funding available: {balance}")]
@@ -389,8 +383,6 @@ pub enum SystemExecutionError {
     CannotRewindEpoch,
     #[error("Cannot decrease the chain's timestamp")]
     TicksOutOfOrder,
-    #[error("Attempt to create an application using unregistered bytecode identifier {0:?}")]
-    UnknownBytecodeId(BytecodeId),
     #[error("Application {0:?} is not registered by the chain")]
     UnknownApplicationId(Box<UserApplicationId>),
     #[error("Chain is not active yet.")]
@@ -675,14 +667,16 @@ where
         recipient: Recipient,
         amount: Amount,
     ) -> Result<Option<RawOutgoingMessage<SystemMessage, Amount>>, SystemExecutionError> {
-        if owner.is_some() {
-            ensure!(
+        match (owner, authenticated_signer) {
+            (Some(_), _) => ensure!(
                 authenticated_signer == owner,
-                SystemExecutionError::UnauthenticatedTransferOwner(
-                    authenticated_signer.expect("operation should be authenticated"),
-                    owner.unwrap()
-                )
-            );
+                SystemExecutionError::UnauthenticatedTransferOwner
+            ),
+            (None, Some(signer)) => ensure!(
+                self.ownership.get().verify_owner(&signer).is_some(),
+                SystemExecutionError::UnauthenticatedTransferOwner
+            ),
+            (None, None) => return Err(SystemExecutionError::UnauthenticatedTransferOwner),
         }
         ensure!(
             amount > Amount::ZERO,
@@ -805,18 +799,18 @@ where
                 }
             }
             CreateCommittee { epoch, committee } => {
+                let chain_next_epoch = self.epoch.get().expect("chain is active").try_add_one()?;
                 ensure!(
-                    epoch == self.epoch.get().expect("chain is active").try_add_one()?,
+                    epoch <= chain_next_epoch,
                     SystemExecutionError::InvalidCommitteeCreation
                 );
-                self.committees.get_mut().insert(epoch, committee.clone());
-                self.epoch.set(Some(epoch));
+                if epoch == chain_next_epoch {
+                    self.committees.get_mut().insert(epoch, committee.clone());
+                    self.epoch.set(Some(epoch));
+                }
             }
             RemoveCommittee { epoch } => {
-                ensure!(
-                    self.committees.get_mut().remove(&epoch).is_some(),
-                    SystemExecutionError::InvalidCommitteeRemoval
-                );
+                self.committees.get_mut().remove(&epoch);
             }
             RegisterApplications { applications } => {
                 for application in applications {
@@ -1080,8 +1074,9 @@ mod tests {
             required_application_ids: vec![],
         };
         let mut txn_tracker = TransactionTracker::default();
-        view.context().extra().add_blob(contract_blob);
-        view.context().extra().add_blob(service_blob);
+        view.context()
+            .extra()
+            .add_blobs(vec![contract_blob, service_blob]);
         let new_application = view
             .system
             .execute_operation(context, operation, &mut txn_tracker)

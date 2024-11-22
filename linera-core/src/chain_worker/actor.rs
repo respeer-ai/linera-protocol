@@ -12,13 +12,13 @@ use std::{
 use linera_base::{
     crypto::CryptoHash,
     data_types::{Blob, BlockHeight, Timestamp, UserApplicationDescription},
-    identifiers::{BlobId, ChainId, UserApplicationId},
+    identifiers::{ChainId, UserApplicationId},
 };
 use linera_chain::{
     data_types::{
-        Block, BlockProposal, Certificate, ExecutedBlock, HashedCertificateValue, MessageBundle,
-        Origin, Target,
+        Block, BlockProposal, ExecutedBlock, HashedCertificateValue, MessageBundle, Origin, Target,
     },
+    types::{ConfirmedBlockCertificate, TimeoutCertificate, ValidatedBlockCertificate},
     ChainStateView,
 };
 use linera_execution::{
@@ -28,7 +28,7 @@ use linera_storage::Storage;
 use tokio::sync::{mpsc, oneshot, OwnedRwLockReadGuard};
 use tracing::{instrument, trace, warn};
 
-use super::{config::ChainWorkerConfig, state::ChainWorkerState};
+use super::{config::ChainWorkerConfig, state::ChainWorkerState, DeliveryNotifier};
 use crate::{
     data_types::{ChainInfoQuery, ChainInfoResponse},
     value_cache::ValueCache,
@@ -44,7 +44,7 @@ where
     #[cfg(with_testing)]
     ReadCertificate {
         height: BlockHeight,
-        callback: oneshot::Sender<Result<Option<Certificate>, WorkerError>>,
+        callback: oneshot::Sender<Result<Option<ConfirmedBlockCertificate>, WorkerError>>,
     },
 
     /// Search for a bundle in one of the chain's inboxes.
@@ -83,7 +83,7 @@ where
 
     /// Process a leader timeout issued for this multi-owner chain.
     ProcessTimeout {
-        certificate: Certificate,
+        certificate: TimeoutCertificate,
         callback: oneshot::Sender<Result<(ChainInfoResponse, NetworkActions), WorkerError>>,
     },
 
@@ -95,15 +95,16 @@ where
 
     /// Process a validated block issued for this multi-owner chain.
     ProcessValidatedBlock {
-        certificate: Certificate,
+        certificate: ValidatedBlockCertificate,
         blobs: Vec<Blob>,
         callback: oneshot::Sender<Result<(ChainInfoResponse, NetworkActions, bool), WorkerError>>,
     },
 
     /// Process a confirmed block (a commit).
     ProcessConfirmedBlock {
-        certificate: Certificate,
+        certificate: ConfirmedBlockCertificate,
         blobs: Vec<Blob>,
+        notify_when_messages_are_delivered: Option<oneshot::Sender<()>>,
         callback: oneshot::Sender<Result<(ChainInfoResponse, NetworkActions), WorkerError>>,
     },
 
@@ -117,7 +118,7 @@ where
     /// Handle cross-chain request to confirm that the recipient was updated.
     ConfirmUpdatedRecipient {
         latest_heights: Vec<(Target, BlockHeight)>,
-        callback: oneshot::Sender<Result<BlockHeight, WorkerError>>,
+        callback: oneshot::Sender<Result<(), WorkerError>>,
     },
 
     /// Handle a [`ChainInfoQuery`].
@@ -153,8 +154,8 @@ where
         config: ChainWorkerConfig,
         storage: StorageClient,
         certificate_value_cache: Arc<ValueCache<CryptoHash, HashedCertificateValue>>,
-        blob_cache: Arc<ValueCache<BlobId, Blob>>,
         tracked_chains: Option<Arc<RwLock<HashSet<ChainId>>>>,
+        delivery_notifier: DeliveryNotifier,
         chain_id: ChainId,
         local_time: Option<Timestamp>,
     ) -> Result<Self, WorkerError> {
@@ -171,8 +172,8 @@ where
             config,
             storage,
             certificate_value_cache,
-            blob_cache,
             tracked_chains,
+            delivery_notifier,
             chain_id,
             service_runtime_endpoint,
         )
@@ -291,11 +292,16 @@ where
                 ChainWorkerRequest::ProcessConfirmedBlock {
                     certificate,
                     blobs,
+                    notify_when_messages_are_delivered,
                     callback,
                 } => callback
                     .send(
                         self.worker
-                            .process_confirmed_block(certificate, &blobs)
+                            .process_confirmed_block(
+                                certificate,
+                                &blobs,
+                                notify_when_messages_are_delivered,
+                            )
                             .await,
                     )
                     .is_ok(),
@@ -428,11 +434,16 @@ where
             ChainWorkerRequest::ProcessConfirmedBlock {
                 certificate,
                 blobs,
+                notify_when_messages_are_delivered,
                 callback: _callback,
             } => formatter
                 .debug_struct("ChainWorkerRequest::ProcessConfirmedBlock")
                 .field("certificate", &certificate)
                 .field("blobs", &blobs)
+                .field(
+                    "notify_when_messages_are_delivered",
+                    &notify_when_messages_are_delivered.as_ref().map(|_| "..."),
+                )
                 .finish_non_exhaustive(),
             ChainWorkerRequest::ProcessCrossChainUpdate {
                 origin,

@@ -20,7 +20,8 @@ use linera_execution::{
     system::{OpenChainConfig, Recipient},
     test_utils::{ExpectedCall, MockApplication},
     ExecutionError, ExecutionRuntimeConfig, ExecutionRuntimeContext, Message, MessageKind,
-    Operation, ResourceControlPolicy, SystemMessage, SystemOperation, TestExecutionRuntimeContext,
+    Operation, ResourceControlPolicy, ResourceLimit, SystemMessage, SystemOperation,
+    TestExecutionRuntimeContext,
 };
 use linera_views::{
     context::{Context as _, MemoryContext},
@@ -59,19 +60,23 @@ where
     }
 }
 
-fn make_app_description() -> UserApplicationDescription {
+fn make_app_description() -> (UserApplicationDescription, Blob, Blob) {
     let contract = Bytecode::new(b"contract".into());
     let service = Bytecode::new(b"service".into());
     let contract_blob = Blob::new_contract_bytecode(contract.compress());
     let service_blob = Blob::new_service_bytecode(service.compress());
 
     let bytecode_id = BytecodeId::new(contract_blob.id().hash, service_blob.id().hash);
-    UserApplicationDescription {
-        bytecode_id,
-        creation: make_admin_message_id(BlockHeight(2)),
-        required_application_ids: vec![],
-        parameters: vec![],
-    }
+    (
+        UserApplicationDescription {
+            bytecode_id,
+            creation: make_admin_message_id(BlockHeight(2)),
+            required_application_ids: vec![],
+            parameters: vec![],
+        },
+        contract_blob,
+        service_blob,
+    )
 }
 
 fn admin_id() -> ChainId {
@@ -106,7 +111,7 @@ async fn test_block_size_limit() {
     let mut chain = ChainStateView::new(chain_id).await;
 
     // The size of the executed valid block below.
-    let maximum_executed_block_size = 675;
+    let maximum_executed_block_size = ResourceLimit(691);
 
     // Initialize the chain.
     let mut config = make_open_chain_config();
@@ -158,9 +163,9 @@ async fn test_block_size_limit() {
     assert_matches!(
         result,
         Err(ChainError::ExecutionError(
-            ExecutionError::ExecutedBlockTooLarge,
+            execution_error,
             ChainExecutionContext::Operation(1),
-        ))
+        )) if matches!(*execution_error, ExecutionError::ExecutedBlockTooLarge)
     );
 
     // The valid block is accepted...
@@ -170,7 +175,7 @@ async fn test_block_size_limit() {
     // ...because its size is exactly at the allowed limit.
     assert_eq!(
         bcs::serialized_size(&executed_block).unwrap(),
-        maximum_executed_block_size as usize
+        maximum_executed_block_size.0 as usize
     );
 }
 
@@ -182,17 +187,14 @@ async fn test_application_permissions() {
     let mut chain = ChainStateView::new(chain_id).await;
 
     // Create a mock application.
-    let app_description = make_app_description();
+    let (app_description, contract_blob, service_blob) = make_app_description();
     let application_id = ApplicationId::from(&app_description);
     let application = MockApplication::default();
     let extra = &chain.context().extra();
     extra
         .user_contracts()
         .insert(application_id, application.clone().into());
-    let contract_blob = Blob::new_contract_bytecode(Bytecode::new(b"contract".into()).compress());
-    extra.add_blob(contract_blob);
-    let service_blob = Blob::new_service_bytecode(Bytecode::new(b"service".into()).compress());
-    extra.add_blob(service_blob);
+    extra.add_blobs(vec![contract_blob, service_blob]);
 
     // Initialize the chain, with a chain application.
     let config = OpenChainConfig {

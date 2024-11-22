@@ -17,8 +17,8 @@ fs = ["tokio/fs"]
 metrics = ["prometheus", "linera-views/metrics"]
 unstable-oracles = []
 wasmer = [
-    "bytes",
     "dep:wasmer",
+    "wasmer/enable-serde",
     "linera-witty/wasmer",
     "wasm-encoder",
     "wasm-instrument",
@@ -30,14 +30,13 @@ wasmtime = [
     "wasm-encoder",
     "wasmparser",
 ]
-web = ["linera-base/web", "linera-views/web"]
+web = ["linera-base/web", "linera-views/web", "js-sys"]
 
 [dependencies]
 anyhow.workspace = true
 async-graphql.workspace = true
 async-trait.workspace = true
 bcs.workspace = true
-bytes = { workspace = true, optional = true }
 cfg-if.workspace = true
 clap.workspace = true
 custom_debug_derive.workspace = true
@@ -45,6 +44,7 @@ dashmap.workspace = true
 derive_more = { workspace = true, features = ["display"] }
 dyn-clone.workspace = true
 futures.workspace = true
+js-sys = { workspace = true, optional = true }
 linera-base.workspace = true
 linera-views.workspace = true
 linera-views-derive.workspace = true
@@ -62,11 +62,11 @@ wasm-encoder = { workspace = true, optional = true }
 wasm-instrument = { workspace = true, optional = true, features = ["sign_ext"] }
 wasmparser = { workspace = true, optional = true }
 wasmtime = { workspace = true, optional = true }
-serde_with.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 wasmer = { workspace = true, optional = true, features = ["cranelift", "singlepass"] }
+wasmer-compiler-singlepass.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { workspace = true, features = ["rt"] }
@@ -78,7 +78,7 @@ assert_matches.workspace = true
 bcs.workspace = true
 counter.workspace = true
 linera-base = { workspace = true, features = ["test"] }
-linera-execution = { path = ".", features = ["test"] }
+linera-execution = { path = ".", default-features = false, features = ["test"] }
 linera-witty = { workspace = true, features = ["log", "macros", "test"] }
 test-case.workspace = true
 test-log = { workspace = true, features = ["trace"] }

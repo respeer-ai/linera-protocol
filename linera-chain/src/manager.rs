@@ -81,13 +81,13 @@ use linera_execution::committee::Epoch;
 use rand_chacha::{rand_core::SeedableRng, ChaCha8Rng};
 use rand_distr::{Distribution, WeightedAliasIndex};
 use serde::{Deserialize, Serialize};
-use tracing::error;
 
 use crate::{
     data_types::{
-        Block, BlockExecutionOutcome, BlockProposal, Certificate, CertificateValue,
-        HashedCertificateValue, LiteVote, ProposalContent, Vote,
+        Block, BlockExecutionOutcome, BlockProposal, CertificateValue, HashedCertificateValue,
+        LiteVote, ProposalContent, Vote,
     },
+    types::{ConfirmedBlockCertificate, TimeoutCertificate, ValidatedBlockCertificate},
     ChainError,
 };
 
@@ -114,9 +114,9 @@ pub struct ChainManager {
     pub proposed: Option<BlockProposal>,
     /// Latest validated proposal that we have voted to confirm (or would have, if we are not a
     /// validator).
-    pub locked: Option<Certificate>,
+    pub locked: Option<ValidatedBlockCertificate>,
     /// Latest leader timeout certificate we have received.
-    pub timeout: Option<Certificate>,
+    pub timeout: Option<TimeoutCertificate>,
     /// Latest vote we have cast, to validate or confirm.
     pub pending: Option<Vote>,
     /// Latest timeout vote we cast.
@@ -275,7 +275,7 @@ impl ChainManager {
                     .validated_block_certificate
                     .as_ref()
                     .is_some_and(|cert| locked.round <= cert.round),
-                ChainError::HasLockedBlock(locked.value().height(), locked.round)
+                ChainError::HasLockedBlock(locked.executed_block().block.height, locked.round)
             )
         }
         Ok(Outcome::Accept)
@@ -334,20 +334,23 @@ impl ChainManager {
     }
 
     /// Verifies that we can vote to confirm a validated block.
-    pub fn check_validated_block(&self, certificate: &Certificate) -> Result<Outcome, ChainError> {
-        let new_block = certificate.value().block();
+    pub fn check_validated_block(
+        &self,
+        certificate: &ValidatedBlockCertificate,
+    ) -> Result<Outcome, ChainError> {
+        let new_block = &certificate.executed_block().block;
         let new_round = certificate.round;
         if let Some(Vote { value, round, .. }) = &self.pending {
             match value.inner() {
-                CertificateValue::ConfirmedBlock { executed_block } => {
-                    if Some(&executed_block.block) == new_block && *round == new_round {
+                CertificateValue::ConfirmedBlock(confirmed) => {
+                    if &confirmed.inner().block == new_block && *round == new_round {
                         return Ok(Outcome::Skip); // We already voted to confirm this block.
                     }
                 }
-                CertificateValue::ValidatedBlock { .. } => {
+                CertificateValue::ValidatedBlock(_) => {
                     ensure!(new_round >= *round, ChainError::InsufficientRound(*round))
                 }
-                CertificateValue::Timeout { .. } => {
+                CertificateValue::Timeout(_) => {
                     // Unreachable: We only put validated or confirmed blocks in pending.
                     return Err(ChainError::InternalError(
                         "pending can only be validated or confirmed block".to_string(),
@@ -393,7 +396,7 @@ impl ChainManager {
             {
                 let value = HashedCertificateValue::new_validated(executed_block.clone());
                 if let Some(certificate) = lite_cert.with_value(value) {
-                    self.locked = Some(certificate);
+                    self.locked = Some(certificate.into());
                 }
             }
         }
@@ -416,26 +419,24 @@ impl ChainManager {
     /// Signs a vote to confirm the validated block.
     pub fn create_final_vote(
         &mut self,
-        certificate: Certificate,
+        validated: ValidatedBlockCertificate,
         key_pair: Option<&KeyPair>,
         local_time: Timestamp,
     ) {
-        let round = certificate.round;
+        let round = validated.round;
         // Validators only change their locked block if the new one is included in a proposal in the
         // current round, or it is itself in the current round.
         if key_pair.is_some() && round < self.current_round {
             return;
         }
-        let Some(value) = certificate.value.validated_to_confirmed() else {
-            // Unreachable: This is only called with validated blocks.
-            error!("Unexpected certificate; expected ValidatedBlock");
-            return;
-        };
-        self.locked = Some(certificate);
+        let confirmed = ConfirmedBlockCertificate::from_validated(validated.clone());
+        self.locked = Some(validated);
         self.update_current_round(local_time);
         if let Some(key_pair) = key_pair {
             // Vote to confirm.
-            let vote = Vote::new(value, round, key_pair);
+            // NOTE: For backwards compatibility, we need to turn `ValidatedBlockCertificate`
+            // back into `Certificate` type so that the vote is cast over hash of the old type.
+            let vote = Vote::new(confirmed.into_inner().into(), round, key_pair);
             // Ok to overwrite validation votes with confirmation votes at equal or higher round.
             self.pending = Some(vote);
         }
@@ -468,12 +469,11 @@ impl ChainManager {
 
     /// Updates the round number and timer if the timeout certificate is from a higher round than
     /// any known certificate.
-    pub fn handle_timeout_certificate(&mut self, certificate: Certificate, local_time: Timestamp) {
-        if !certificate.value().is_timeout() {
-            // Unreachable: This is only called with timeout certificates.
-            error!("Unexpected certificate; expected leader timeout");
-            return;
-        }
+    pub fn handle_timeout_certificate(
+        &mut self,
+        certificate: TimeoutCertificate,
+        local_time: Timestamp,
+    ) {
         let round = certificate.round;
         if let Some(known_certificate) = &self.timeout {
             if known_certificate.round >= round {
@@ -561,9 +561,9 @@ pub struct ChainManagerInfo {
     pub requested_proposed: Option<Box<BlockProposal>>,
     /// Latest validated proposal that we have voted to confirm (or would have, if we are not a
     /// validator).
-    pub requested_locked: Option<Box<Certificate>>,
+    pub requested_locked: Option<Box<ValidatedBlockCertificate>>,
     /// Latest timeout certificate we have seen.
-    pub timeout: Option<Box<Certificate>>,
+    pub timeout: Option<Box<TimeoutCertificate>>,
     /// Latest vote we cast (either to validate or to confirm a block).
     pub pending: Option<LiteVote>,
     /// Latest timeout vote we cast.
@@ -618,10 +618,7 @@ impl ChainManagerInfo {
     /// Gets the highest validated block.
     pub fn highest_validated_block(&self) -> Option<&Block> {
         if let Some(certificate) = &self.requested_locked {
-            let block = certificate.value().block();
-            if block.is_some() {
-                return block;
-            }
+            return Some(&certificate.executed_block().block);
         }
 
         if let Some(proposal) = &self.requested_proposed {
@@ -631,5 +628,15 @@ impl ChainManagerInfo {
         }
 
         None
+    }
+
+    /// Returns whether the `identity` is allowed to propose a block in `round`.
+    /// This is dependant on the type of round and whether `identity` is a validator or (super)owner.
+    pub fn can_propose(&self, identity: &Owner, round: Round) -> bool {
+        match round {
+            Round::Fast => self.ownership.super_owners.contains_key(identity),
+            Round::MultiLeader(_) => true,
+            Round::SingleLeader(_) | Round::Validator(_) => self.leader.as_ref() == Some(identity),
+        }
     }
 }

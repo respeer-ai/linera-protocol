@@ -10,10 +10,9 @@ use std::{
     ops::Range,
 };
 
-use futures::{stream, Future, StreamExt};
+use futures::{stream, stream::TryStreamExt, Future, StreamExt};
 use linera_base::{
     data_types::{BlockHeight, Round},
-    ensure,
     identifiers::{BlobId, ChainId},
     time::{timer::timeout, Duration, Instant},
 };
@@ -25,8 +24,9 @@ use tracing::{error, warn};
 
 use crate::{
     data_types::{ChainInfo, ChainInfoQuery},
-    local_node::{LocalNodeClient, RemoteNode},
+    local_node::LocalNodeClient,
     node::{CrossChainMessageDelivery, NodeError, ValidatorNode},
+    remote_node::RemoteNode,
 };
 
 /// The amount of time we wait for additional validators to contribute to the result, as a fraction
@@ -64,10 +64,12 @@ impl CommunicateAction {
     }
 }
 
+#[derive(Clone)]
 pub struct ValidatorUpdater<A, S>
 where
     S: Storage,
 {
+    pub chain_worker_count: usize,
     pub remote_node: RemoteNode<A>,
     pub local_node: LocalNodeClient<S>,
 }
@@ -236,8 +238,8 @@ where
                 let blobs = self
                     .local_node
                     .find_missing_blobs(&certificate, blob_ids, certificate.value().chain_id())
-                    .await?;
-                ensure!(blobs.len() == blob_ids.len(), original_err.clone());
+                    .await?
+                    .ok_or_else(|| original_err.clone())?;
                 self.remote_node
                     .handle_certificate(certificate, blobs, delivery)
                     .await
@@ -286,19 +288,26 @@ where
                         .collect::<Vec<_>>()
                         .await;
                     let local_storage = self.local_node.storage_client();
-                    for blob_id in missing_blob_ids {
-                        let last_used_by_hash =
-                            local_storage.read_blob_state(blob_id).await?.last_used_by;
-                        let certificate = local_storage.read_certificate(last_used_by_hash).await?;
-                        let block_chain_id = certificate.value().chain_id();
-                        let block_height = certificate.value().height();
-                        self.send_chain_information(
-                            block_chain_id,
-                            block_height.try_add_one()?,
-                            CrossChainMessageDelivery::NonBlocking,
-                        )
+                    let blob_states = local_storage.read_blob_states(&missing_blob_ids).await?;
+                    let certificates = local_storage
+                        .read_certificates(blob_states.into_iter().map(|x| x.last_used_by))
                         .await?;
+                    let mut chain_heights = BTreeMap::new();
+                    for certificate in certificates {
+                        let block_chain_id = certificate.executed_block().block.chain_id;
+                        let block_height =
+                            certificate.executed_block().block.height.try_add_one()?;
+                        chain_heights
+                            .entry(block_chain_id)
+                            .and_modify(|h| *h = block_height.max(*h))
+                            .or_insert(block_height);
                     }
+
+                    self.send_chain_info_up_to_heights(
+                        chain_heights,
+                        CrossChainMessageDelivery::NonBlocking,
+                    )
+                    .await?;
                 }
                 // Fail immediately on other errors.
                 Err(e) => return Err(e),
@@ -339,15 +348,34 @@ where
             let storage = self.local_node.storage_client();
             let certs = storage.read_certificates(keys.into_iter()).await?;
             for cert in certs {
-                self.send_certificate(cert, delivery).await?;
+                self.send_certificate(cert.into(), delivery).await?;
             }
         }
         if let Some(cert) = manager.timeout {
-            if cert.value().is_timeout() && cert.value().chain_id() == chain_id {
-                self.send_certificate(cert, CrossChainMessageDelivery::NonBlocking)
+            if cert.inner().chain_id == chain_id {
+                self.send_certificate(cert.into(), CrossChainMessageDelivery::NonBlocking)
                     .await?;
             }
         }
+        Ok(())
+    }
+
+    async fn send_chain_info_up_to_heights(
+        &mut self,
+        chain_heights: BTreeMap<ChainId, BlockHeight>,
+        delivery: CrossChainMessageDelivery,
+    ) -> Result<(), NodeError> {
+        let stream = stream::iter(chain_heights)
+            .map(|(chain_id, height)| {
+                let mut updater = self.clone();
+                async move {
+                    updater
+                        .send_chain_information(chain_id, height, delivery)
+                        .await
+                }
+            })
+            .buffer_unordered(self.chain_worker_count);
+        stream.try_collect::<Vec<_>>().await?;
         Ok(())
     }
 
@@ -360,17 +388,16 @@ where
             let chain = self.local_node.chain_state_view(chain_id).await?;
             let pairs = chain.inboxes.try_load_all_entries().await?;
             for (origin, inbox) in pairs {
-                let next_height = sender_heights.entry(origin.sender).or_default();
                 let inbox_next_height = inbox.next_block_height_to_receive()?;
-                if inbox_next_height > *next_height {
-                    *next_height = inbox_next_height;
-                }
+                sender_heights
+                    .entry(origin.sender)
+                    .and_modify(|h| *h = inbox_next_height.max(*h))
+                    .or_insert(inbox_next_height);
             }
         }
-        for (sender, next_height) in sender_heights {
-            self.send_chain_information(sender, next_height, CrossChainMessageDelivery::Blocking)
-                .await?;
-        }
+
+        self.send_chain_info_up_to_heights(sender_heights, CrossChainMessageDelivery::Blocking)
+            .await?;
         Ok(())
     }
 

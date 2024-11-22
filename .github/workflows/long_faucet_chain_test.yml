@@ -2,18 +2,21 @@ name: Long Faucet chain test
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, 'devnet_*', 'testnet_*' ]
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   LINERA_STORAGE_SERVICE: 127.0.0.1:1235
+  RUST_LOG: warn
+  RUST_LOG_FORMAT: plain
 
 jobs:
-  benchmark:
+  long-faucet-chain-test:
     runs-on: ubuntu-latest-16-cores
-    timeout-minutes: 180
+    timeout-minutes: 60
 
     steps:
     - uses: actions/checkout@v3
@@ -34,4 +37,4 @@ jobs:
     - name: Run end-to-end tests
       run: |
         cargo run --release -p linera-storage-service -- memory --endpoint $LINERA_STORAGE_SERVICE &
-        cargo test -p linera-service --features storage-service -- --ignored test_end_to_end_faucet_with_long_chains --nocapture
+        cargo test --release -p linera-service --features storage-service -- --ignored test_end_to_end_faucet_with_long_chains --nocapture

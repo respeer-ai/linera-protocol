@@ -12,7 +12,7 @@ use tempfile::{tempdir, TempDir};
 
 use super::{
     local_net::PathProvider, ClientWrapper, Faucet, FaucetOption, LineraNet, LineraNetConfig,
-    Network,
+    Network, OnClientDrop,
 };
 
 pub struct RemoteNetTestingConfig {
@@ -20,13 +20,19 @@ pub struct RemoteNetTestingConfig {
 }
 
 impl RemoteNetTestingConfig {
+    /// Creates a new [`RemoteNetTestingConfig`] for running tests with an external Linera
+    /// network.
+    ///
+    /// The `faucet_url` is used to connect to the network and obtain its configuration,
+    /// as well as to create microchains used for testing. If the parameter is [`None`],
+    /// then it falls back to the URL specified in the `LINERA_FAUCET_URL` environment
+    /// variable, or the default devnet faucet URL.
     pub fn new(faucet_url: Option<String>) -> Self {
         Self {
             faucet: Faucet::new(
-                faucet_url.unwrap_or(
-                    env::var("LINERA_FAUCET_URL")
-                        .unwrap_or("https://faucet.devnet.linera.net".to_string()),
-                ),
+                faucet_url
+                    .or_else(|| env::var("LINERA_FAUCET_URL").ok())
+                    .expect("Missing `LINERA_FAUCET_URL` environment variable"),
             ),
         }
     }
@@ -43,15 +49,15 @@ impl LineraNetConfig for RemoteNetTestingConfig {
             .expect("Creating RemoteNet should not fail");
 
         let client = net.make_client().await;
-        // The tests assume we've created a genesis config with 10
+        // The tests assume we've created a genesis config with 2
         // chains with 10 tokens each. We create the first chain here
         client
             .wallet_init(&[], FaucetOption::NewChain(&self.faucet))
             .await
             .unwrap();
 
-        // And the remaining 9 here
-        for _ in 0..9 {
+        // And the remaining 2 here
+        for _ in 0..2 {
             client
                 .open_and_assign(&client, Amount::from_tokens(10))
                 .await
@@ -97,6 +103,7 @@ impl LineraNet for RemoteNet {
             self.network,
             self.testing_prng_seed,
             self.next_client_id,
+            OnClientDrop::CloseChains,
         );
         if let Some(seed) = self.testing_prng_seed {
             self.testing_prng_seed = Some(seed + 1);

@@ -5,7 +5,6 @@
 
 use std::{borrow::Cow, collections::BTreeMap};
 
-use futures::future::try_join_all;
 use linera_base::{
     data_types::{Blob, BlockHeight, Timestamp},
     ensure,
@@ -13,10 +12,11 @@ use linera_base::{
 };
 use linera_chain::{
     data_types::{
-        BlockExecutionOutcome, BlockProposal, Certificate, CertificateValue, MessageBundle, Origin,
-        Target,
+        BlockExecutionOutcome, BlockProposal, Certificate, MessageBundle, Origin, Target,
     },
-    manager, ChainStateView,
+    manager,
+    types::{ConfirmedBlockCertificate, TimeoutCertificate, ValidatedBlockCertificate},
+    ChainStateView,
 };
 use linera_execution::{
     committee::{Committee, Epoch},
@@ -27,7 +27,8 @@ use linera_views::{
     context::Context,
     views::{RootView, View},
 };
-use tracing::{debug, warn};
+use tokio::sync::oneshot;
+use tracing::{debug, instrument, trace, warn};
 
 use super::{check_block_epoch, ChainWorkerConfig, ChainWorkerState};
 use crate::{
@@ -66,17 +67,8 @@ where
     /// Processes a leader timeout issued for this multi-owner chain.
     pub(super) async fn process_timeout(
         &mut self,
-        certificate: Certificate,
+        certificate: TimeoutCertificate,
     ) -> Result<(ChainInfoResponse, NetworkActions), WorkerError> {
-        let (chain_id, height, epoch) = match certificate.value() {
-            CertificateValue::Timeout {
-                chain_id,
-                height,
-                epoch,
-                ..
-            } => (*chain_id, *height, *epoch),
-            _ => panic!("Expecting a leader timeout certificate"),
-        };
         // Check that the chain is active and ready for this timeout.
         // Verify the certificate. Returns a catch-all error to make client code more robust.
         self.state.ensure_is_active()?;
@@ -88,11 +80,11 @@ where
             .current_committee()
             .expect("chain is active");
         ensure!(
-            epoch == chain_epoch,
+            certificate.inner().epoch == chain_epoch,
             WorkerError::InvalidEpoch {
-                chain_id,
+                chain_id: certificate.inner().chain_id,
                 chain_epoch,
-                epoch
+                epoch: certificate.inner().epoch
             }
         );
         certificate.check(committee)?;
@@ -102,7 +94,7 @@ where
             .chain
             .tip_state
             .get()
-            .already_validated_block(height)?
+            .already_validated_block(certificate.inner().height)?
         {
             return Ok((
                 ChainInfoResponse::new(&self.state.chain, self.state.config.key_pair()),
@@ -110,19 +102,21 @@ where
             ));
         }
         let old_round = self.state.chain.manager.get().current_round;
+        let timeout_chainid = certificate.inner().chain_id;
+        let timeout_height = certificate.inner().height;
         self.state
             .chain
             .manager
             .get_mut()
-            .handle_timeout_certificate(
-                certificate.clone(),
-                self.state.storage.clock().current_time(),
-            );
+            .handle_timeout_certificate(certificate, self.state.storage.clock().current_time());
         let round = self.state.chain.manager.get().current_round;
         if round > old_round {
             actions.notifications.push(Notification {
-                chain_id,
-                reason: Reason::NewRound { height, round },
+                chain_id: timeout_chainid,
+                reason: Reason::NewRound {
+                    height: timeout_height,
+                    round,
+                },
             })
         }
         let info = ChainInfoResponse::new(&self.state.chain, self.state.config.key_pair());
@@ -154,13 +148,10 @@ where
     /// Processes a validated block issued for this multi-owner chain.
     pub(super) async fn process_validated_block(
         &mut self,
-        certificate: Certificate,
+        certificate: ValidatedBlockCertificate,
         blobs: &[Blob],
     ) -> Result<(ChainInfoResponse, NetworkActions, bool), WorkerError> {
-        let executed_block = match certificate.value() {
-            CertificateValue::ValidatedBlock { executed_block } => executed_block,
-            _ => panic!("Expecting a validation certificate"),
-        };
+        let executed_block = certificate.executed_block();
 
         let block = &executed_block.block;
         let height = block.height;
@@ -199,14 +190,24 @@ where
                 true,
             ));
         }
+
+        // NOTE: Turn back to `Certificate` type to extract `HashedCertificateValue`
+        // as the `recent_hashed_cerificate_values` cache works on old types still.
+        let cert = Certificate::from(certificate.clone());
         self.state
             .recent_hashed_certificate_values
-            .insert(Cow::Borrowed(&certificate.value))
+            .insert(Cow::Borrowed(&cert.value))
             .await;
-        // Verify that all required bytecode hashed certificate values and blobs are available, and no
-        // unrelated ones provided.
+        let required_blob_ids = executed_block.required_blob_ids();
+        // Verify that no unrelated blobs were provided.
         self.state
-            .check_no_missing_blobs(executed_block.required_blob_ids(), blobs)
+            .check_for_unneeded_blobs(&required_blob_ids, blobs)?;
+        let remaining_required_blob_ids = required_blob_ids
+            .difference(&blobs.iter().map(|blob| blob.id()).collect())
+            .cloned()
+            .collect();
+        self.state
+            .check_no_missing_blobs(&remaining_required_blob_ids)
             .await?;
         let old_round = self.state.chain.manager.get().current_round;
         self.state.chain.manager.get_mut().create_final_vote(
@@ -229,21 +230,21 @@ where
     /// Processes a confirmed block (aka a commit).
     pub(super) async fn process_confirmed_block(
         &mut self,
-        certificate: Certificate,
+        certificate: ConfirmedBlockCertificate,
         blobs: &[Blob],
+        notify_when_messages_are_delivered: Option<oneshot::Sender<()>>,
     ) -> Result<(ChainInfoResponse, NetworkActions), WorkerError> {
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.value() else {
-            panic!("Expecting a confirmation certificate");
-        };
+        let executed_block = certificate.executed_block();
         let block = &executed_block.block;
+        let block_height = executed_block.block.height;
         // Check that the chain is active and ready for this confirmation.
         let tip = self.state.chain.tip_state.get().clone();
-        if tip.next_block_height < block.height {
+        if tip.next_block_height < block_height {
             return Err(WorkerError::MissingEarlierBlocks {
                 current_block_height: tip.next_block_height,
             });
         }
-        if tip.next_block_height > block.height {
+        if tip.next_block_height > block_height {
             // Block was already confirmed.
             let info = ChainInfoResponse::new(&self.state.chain, self.state.config.key_pair());
             let actions = self.state.create_network_actions().await?;
@@ -289,16 +290,19 @@ where
         );
 
         let required_blob_ids = executed_block.required_blob_ids();
-        // Verify that all required bytecode hashed certificate values and blobs are available, and no
-        // unrelated ones provided.
+        // Verify that no unrelated blobs were provided.
         self.state
-            .check_no_missing_blobs(required_blob_ids.clone(), blobs)
+            .check_for_unneeded_blobs(&required_blob_ids, blobs)?;
+        let remaining_required_blob_ids = required_blob_ids
+            .difference(&blobs.iter().map(|blob| blob.id()).collect())
+            .cloned()
+            .collect();
+        let mut blobs_in_block = self
+            .state
+            .get_blobs_and_checks_storage(&remaining_required_blob_ids)
             .await?;
-        for blob in blobs {
-            self.state.cache_recent_blob(Cow::Borrowed(blob)).await;
-        }
+        blobs_in_block.extend_from_slice(blobs);
 
-        let blobs_in_block = self.state.get_blobs(required_blob_ids.clone()).await?;
         let certificate_hash = certificate.hash();
 
         self.state
@@ -307,16 +311,17 @@ where
             .await?;
 
         // Update the blob state with last used certificate hash.
-        try_join_all(required_blob_ids.into_iter().map(|blob_id| {
-            self.state.storage.maybe_write_blob_state(
-                blob_id,
-                BlobState {
-                    last_used_by: certificate_hash,
-                    epoch: certificate.value().epoch(),
-                },
+        let blob_state = BlobState {
+            last_used_by: certificate_hash,
+            epoch: block.epoch,
+        };
+        self.state
+            .storage
+            .maybe_write_blob_states(
+                &required_blob_ids.into_iter().collect::<Vec<_>>(),
+                blob_state,
             )
-        }))
-        .await?;
+            .await?;
 
         // Execute the block and update inboxes.
         self.state.chain.remove_bundles_from_inboxes(block).await?;
@@ -331,8 +336,8 @@ where
         ensure!(
             executed_block.outcome == verified_outcome,
             WorkerError::IncorrectOutcome {
-                submitted: executed_block.outcome.clone(),
-                computed: verified_outcome,
+                submitted: Box::new(executed_block.outcome.clone()),
+                computed: Box::new(verified_outcome),
             }
         );
         // Advance to next block height.
@@ -346,26 +351,56 @@ where
         let info = ChainInfoResponse::new(&self.state.chain, self.state.config.key_pair());
         self.state.track_newly_created_chains(executed_block);
         let mut actions = self.state.create_network_actions().await?;
-        tracing::trace!(
+        trace!(
             "Processed confirmed block {} on chain {:.8}",
-            block.height,
+            block_height,
             block.chain_id
         );
         actions.notifications.push(Notification {
             chain_id: block.chain_id,
             reason: Reason::NewBlock {
-                height: block.height,
-                hash: certificate.value.hash(),
+                height: block_height,
+                hash: certificate.hash(),
             },
         });
         // Persist chain.
         self.save().await?;
+
         self.state
             .recent_hashed_certificate_values
-            .insert(Cow::Owned(certificate.value))
+            .insert(Cow::Owned(certificate.into_inner().into()))
+            .await;
+
+        self.register_delivery_notifier(block_height, &actions, notify_when_messages_are_delivered)
             .await;
 
         Ok((info, actions))
+    }
+
+    /// Schedules a notification for when cross-chain messages are delivered up to the given
+    /// `height`.
+    #[instrument(level = "trace", skip(self, notify_when_messages_are_delivered))]
+    async fn register_delivery_notifier(
+        &mut self,
+        height: BlockHeight,
+        actions: &NetworkActions,
+        notify_when_messages_are_delivered: Option<oneshot::Sender<()>>,
+    ) {
+        if let Some(notifier) = notify_when_messages_are_delivered {
+            if actions
+                .cross_chain_requests
+                .iter()
+                .any(|request| request.has_messages_lower_or_equal_than(height))
+            {
+                self.state.delivery_notifier.register(height, notifier);
+            } else {
+                // No need to wait. Also, cross-chain requests may not trigger the
+                // notifier later, even if we register it.
+                if let Err(()) = notifier.send(()) {
+                    warn!("Failed to notify message delivery to caller");
+                }
+            }
+        }
     }
 
     /// Updates the chain's inboxes, receiving messages from a cross-chain update.
@@ -439,7 +474,7 @@ where
     pub(super) async fn confirm_updated_recipient(
         &mut self,
         latest_heights: Vec<(Target, BlockHeight)>,
-    ) -> Result<BlockHeight, WorkerError> {
+    ) -> Result<(), WorkerError> {
         let mut height_with_fully_delivered_messages = BlockHeight::ZERO;
 
         for (target, height) in latest_heights {
@@ -448,7 +483,10 @@ where
                 .chain
                 .mark_messages_as_received(&target, height)
                 .await?
-                && self.state.chain.all_messages_delivered_up_to(height);
+                && self
+                    .state
+                    .all_messages_to_tracked_chains_delivered_up_to(height)
+                    .await?;
 
             if fully_delivered && height > height_with_fully_delivered_messages {
                 height_with_fully_delivered_messages = height;
@@ -457,7 +495,11 @@ where
 
         self.save().await?;
 
-        Ok(height_with_fully_delivered_messages)
+        self.state
+            .delivery_notifier
+            .notify(height_with_fully_delivered_messages);
+
+        Ok(())
     }
 
     /// Attempts to vote for a leader timeout, if possible.

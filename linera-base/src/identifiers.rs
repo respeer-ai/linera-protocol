@@ -18,7 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::{
     bcs_scalar,
     crypto::{BcsHashable, CryptoError, CryptoHash, PublicKey},
-    data_types::{BlobBytes, BlobContent, BlockHeight},
+    data_types::{BlobContent, BlockHeight},
     doc_scalar,
 };
 
@@ -188,21 +188,7 @@ impl From<&BlobContent> for BlobType {
 }
 
 /// A content-addressed blob ID i.e. the hash of the `BlobContent`.
-#[derive(
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Clone,
-    Copy,
-    Hash,
-    Debug,
-    Serialize,
-    Deserialize,
-    WitType,
-    WitStore,
-    WitLoad,
-)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy, Hash, Debug, WitType, WitStore, WitLoad)]
 #[cfg_attr(with_testing, derive(test_strategy::Arbitrary, Default))]
 pub struct BlobId {
     /// The hash of the blob.
@@ -215,7 +201,7 @@ impl BlobId {
     /// Creates a new `BlobId` from a `BlobContent`
     pub fn from_content(content: &BlobContent) -> Self {
         Self {
-            hash: CryptoHash::new(&BlobBytes(content.inner_bytes())),
+            hash: CryptoHash::new(&content.blob_bytes()),
             blob_type: content.into(),
         }
     }
@@ -246,6 +232,45 @@ impl FromStr for BlobId {
             })
         } else {
             Err(anyhow!("Invalid blob ID: {}", s))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "BlobId")]
+struct BlobIdHelper {
+    hash: CryptoHash,
+    blob_type: BlobType,
+}
+
+impl Serialize for BlobId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            serializer.serialize_str(&self.to_string())
+        } else {
+            let helper = BlobIdHelper {
+                hash: self.hash,
+                blob_type: self.blob_type,
+            };
+            helper.serialize(serializer)
+        }
+    }
+}
+
+impl<'a> Deserialize<'a> for BlobId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'a>,
+    {
+        if deserializer.is_human_readable() {
+            let s = String::deserialize(deserializer)?;
+            Self::from_str(&s).map_err(serde::de::Error::custom)
+        } else {
+            let helper = BlobIdHelper::deserialize(deserializer)?;
+            Ok(BlobId::new(helper.hash, helper.blob_type))
         }
     }
 }
