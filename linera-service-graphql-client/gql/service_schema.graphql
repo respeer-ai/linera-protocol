@@ -867,7 +867,7 @@ type QueryRoot {
 	"""
 	Returns block material of the chain
 	"""
-	blockMaterial(chainId: ChainId!): CandidateBlockMaterial!
+	blockMaterial(chainId: ChainId!, maxPendingMessages: Int!): CandidateBlockMaterial!
 	"""
 	Returns the next raw block proposal
 	"""

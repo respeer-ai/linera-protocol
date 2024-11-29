@@ -8,10 +8,8 @@ use std::fmt;
 use async_graphql::InputObject;
 use linera_base::data_types::{Amount, ArithmeticError, Resources};
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 
 /// A collection of prices and limits associated with block execution.
-#[serde_as]
 #[derive(Eq, PartialEq, Hash, Clone, Debug, Serialize, Deserialize, InputObject)]
 pub struct ResourceControlPolicy {
     /// The base price for creating a new block.
@@ -41,17 +39,13 @@ pub struct ResourceControlPolicy {
     // TODO(#1538): Cap the number of transactions per block and the total size of their
     // arguments.
     /// The maximum amount of fuel a block can consume.
-    #[serde_as(as = "DisplayFromStr")]
     pub maximum_fuel_per_block: u64,
     /// The maximum size of an executed block. This includes the block proposal itself as well as
     /// the execution outcome.
-    #[serde_as(as = "DisplayFromStr")]
     pub maximum_executed_block_size: u64,
     /// The maximum data to read per block
-    #[serde_as(as = "DisplayFromStr")]
     pub maximum_bytes_read_per_block: u64,
     /// The maximum data to write per block
-    #[serde_as(as = "DisplayFromStr")]
     pub maximum_bytes_written_per_block: u64,
 }
 

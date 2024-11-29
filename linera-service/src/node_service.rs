@@ -1119,13 +1119,13 @@ where
     }
 
     /// Returns block material of the chain
-    async fn block_material(&self, chain_id: ChainId) -> Result<CandidateBlockMaterial, Error> {
+    async fn block_material(&self, chain_id: ChainId, max_pending_messages: usize) -> Result<CandidateBlockMaterial, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
         let incoming_bundles = client.pending_message_bundles().await?;
         let local_time = client.next_timestamp(&incoming_bundles).await;
         let round = client.block_round().await?;
         Ok(CandidateBlockMaterial {
-            incoming_bundles,
+            incoming_bundles: incoming_bundles[..max_pending_messages].to_vec(),
             local_time,
             round,
         })
