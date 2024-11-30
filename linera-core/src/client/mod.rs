@@ -516,6 +516,9 @@ pub enum ChainClientError {
 
     #[error("Invalid block round")]
     InvalidBlockRound,
+
+    #[error("Waiting for pending block process")]
+    WaitPendingBlock,
 }
 
 impl From<Infallible> for ChainClientError {
@@ -2306,6 +2309,7 @@ where
     /// Clears the information on any operation that previously failed.
     #[tracing::instrument(level = "trace")]
     pub fn clear_pending_block(&self) {
+        tracing::info!("Clear pending block {}", self.chain_id);
         self.state_mut().clear_pending_block();
     }
 
@@ -3077,6 +3081,10 @@ where
         retry: bool,
         validated_block_certificate: Option<Certificate>,
     ) -> Result<Certificate, ChainClientError> {
+        if self.state().pending_block().is_some() {
+            return Err(ChainClientError::WaitPendingBlock);
+        }
+
         let block = executed_block.block.clone();
         ensure!(
             block.height == height,
@@ -3113,13 +3121,12 @@ where
             },
         };
 
-        // TODO: process requested_locked and round conflict
-
         // Check the final block proposal. This will be cheaper after #1401.
         self.client
             .local_node
             .handle_block_proposal(proposal.clone())
             .await?;
+        self.state_mut().set_pending_block(block);
         // Remember what we are trying to do before sending the proposal to the validators.
         // Send the query to validators.
         let committee = self.local_committee().await?;
@@ -3296,8 +3303,11 @@ where
             .info;
         let manager = info.manager;
 
-        let Some(block) = manager.highest_validated_block().cloned().or_else(|| None) else {
-            tracing::info!("Validated block is available, retry it");
+        let Some(block) = manager
+            .highest_validated_block()
+            .cloned()
+            .or_else(|| self.state().pending_block().clone())
+        else {
             return Ok(manager.current_round);
         };
 
@@ -3328,21 +3338,10 @@ where
         incoming_bundles: Vec<IncomingBundle>,
         local_time: Timestamp,
     ) -> Result<ExecutedBlock, ChainClientError> {
-        // Construct a block in pending block then clean it
-        let pending_block = self.state().pending_block().clone();
-
         // Construct block and executed block
-        let executed_block = self
+        Ok(self
             .construct_executed_block_with_full_materials(incoming_bundles, operations, local_time)
-            .await?;
-
-        // Finally recover the pending block
-        match pending_block {
-            Some(block) => self.state_mut().set_pending_block(block),
-            _ => self.clear_pending_block(),
-        }
-
-        Ok(executed_block)
+            .await?)
     }
 
     /// Calculate block execution state hash
