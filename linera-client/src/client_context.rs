@@ -1171,8 +1171,6 @@ where
             next_block_height,
             None,
             BTreeMap::new(),
-            None,
-            Vec::new(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
             self.options.blanket_message_policy,
