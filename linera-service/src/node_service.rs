@@ -1060,11 +1060,19 @@ where
         max_pending_messages: usize,
     ) -> Result<CandidateBlockMaterial, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
+
         let incoming_bundles = client.pending_message_bundles().await?;
         let local_time = client.next_timestamp(&incoming_bundles).await;
         let round = client.block_round().await?;
+
+        let incoming_bundles = if incoming_bundles.len() > max_pending_messages {
+            incoming_bundles[..max_pending_messages].to_vec()
+        } else {
+            incoming_bundles
+        };
+
         Ok(CandidateBlockMaterial {
-            incoming_bundles: incoming_bundles[..max_pending_messages].to_vec(),
+            incoming_bundles,
             local_time,
             round,
         })
