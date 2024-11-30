@@ -256,8 +256,6 @@ where
             chain.next_block_height,
             chain.pending_block.clone(),
             chain.pending_blobs.clone(),
-            chain.pending_raw_block.clone(),
-            chain.pending_operations.clone(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
             self.options.blanket_message_policy,
@@ -324,8 +322,6 @@ where
                     next_block_height: BlockHeight::ZERO,
                     pending_block: None,
                     pending_blobs: BTreeMap::new(),
-                    pending_raw_block: None,
-                    pending_operations: Vec::new(),
                 })
             })
             .await?;
@@ -1146,8 +1142,6 @@ where
             chain.next_block_height,
             chain.pending_block.clone(),
             chain.pending_blobs.clone(),
-            chain.pending_raw_block.clone(),
-            chain.pending_operations.clone(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
             self.options.blanket_message_policy,

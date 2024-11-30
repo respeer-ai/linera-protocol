@@ -63,10 +63,6 @@ pub struct ChainListenerConfig {
         env = "LINERA_LISTENER_DELAY_AFTER"
     )]
     pub delay_after_ms: u64,
-
-    /// Use external signing service.
-    #[arg(long = "external-signing", action = clap::ArgAction::Set, default_value_t = true)]
-    pub external_signing: bool,
 }
 
 type ContextChainClient<C> =
@@ -267,37 +263,18 @@ impl ChainListener {
                         continue;
                     }
                     debug!("Processing inbox");
-                    let result = if config.external_signing {
-                        client.process_inbox_if_owned_without_block_proposal().await
-                    } else {
-                        client.process_inbox_without_prepare().await
-                    };
-                    match result {
-                        Err(ChainClientError::CannotFindKeyForChain(_)) => continue,
-                        Err(ref error) => {
-                            warn!(%error, "Failed to process inbox.");
-                            timeout = if config.external_signing {
-                                storage
-                                    .clock()
-                                    .current_time()
-                                    .saturating_add_micros(1000000)
-                            } else {
-                                Timestamp::from(u64::MAX)
-                            };
+                    match client.process_inbox_without_prepare().await {
+                        Err(ChainClientError::CannotFindKeyForChain(_)) => {}
+                        Err(error) => warn!(%error, "Failed to process inbox."),
+                        Ok((certs, None)) => {
+                            info!("Done processing inbox. {} blocks created.", certs.len());
                         }
-                        Ok((ref _certs, None)) => {
-                            timeout = if config.external_signing {
-                                storage
-                                    .clock()
-                                    .current_time()
-                                    .saturating_add_micros(1000000)
-                            } else {
-                                Timestamp::from(u64::MAX)
-                            }
-                        }
-                        Ok((ref certs, Some(ref new_timeout))) => {
-                            info!("Done processing inbox ({} blocks created)", certs.len());
-                            info!("I will try processing the inbox later based on the given round timeout: {:?}", new_timeout);
+                        Ok((certs, Some(new_timeout))) => {
+                            info!(
+                                "{} blocks created. Will try processing the inbox later based \
+                                 on the given round timeout: {new_timeout:?}",
+                                certs.len(),
+                            );
                             timeout = new_timeout.timestamp;
                         }
                     }

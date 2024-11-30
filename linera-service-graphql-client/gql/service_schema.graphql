@@ -715,24 +715,9 @@ type MutationRoot {
 	"""
 	walletInitWithoutKeypair(publicKey: PublicKey!, signature: Signature!, faucetUrl: String!, chainId: ChainId!, messageId: MessageId!, certificateHash: CryptoHash!): ChainId!
 	"""
-	Submit pending block proposal signature
-	"""
-	submitBlockSignature(chainId: ChainId!, height: BlockHeight!, signature: Signature!): CryptoHash!
-	"""
 	Submit block proposal with signature
 	"""
 	submitBlockAndSignature(chainId: ChainId!, height: BlockHeight!, executedBlock: UserExecutedBlock!, round: Round!, signature: Signature!, retry: Boolean!, validatedBlockCertificateHash: CryptoHash): CryptoHash!
-	"""
-	Transfers `amount` units of value from the given owner's account to the recipient.
-	If no owner is given, try to take the units out of the unattributed account.
-	Different from transfer, node service won't sign block in transfer_without_block_proposal
-	"""
-	transferWithoutBlockProposal(fromChainId: ChainId!, fromPublicKey: PublicKey, toChainId: ChainId!, toPublicKey: PublicKey, amount: Amount!): ChainId!
-	"""
-	Requests a `RegisterApplications` message from another chain so the application can be used
-	on this one.
-	"""
-	requestApplicationWithoutBlockProposal(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): ApplicationId!
 	"""
 	Calculate block execution state hash
 	"""
@@ -869,10 +854,6 @@ type QueryRoot {
 	"""
 	blockMaterial(chainId: ChainId!, maxPendingMessages: Int!): CandidateBlockMaterial!
 	"""
-	Returns the next raw block proposal
-	"""
-	peekCandidateRawBlockPayload(chainId: ChainId!): RawBlockProposalPayload
-	"""
 	Returns the balance of given owner
 	"""
 	balance(chainId: ChainId!, publicKey: PublicKey): Amount!
@@ -896,11 +877,6 @@ type QueueView_MessageBundle_f4399f0b {
 
 type QueueView_TimestampedBundleInInbox_5a630c55 {
 	entries(count: Int): [TimestampedBundleInInbox!]!
-}
-
-type RawBlockProposalPayload {
-	height: BlockHeight!
-	payloadBytes: [Int!]!
 }
 
 """
