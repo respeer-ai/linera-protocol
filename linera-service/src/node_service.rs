@@ -30,7 +30,7 @@ use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, PublicKey, Signature},
     data_types::{
         Amount, ApplicationPermissions, BlobBytes, BlockHeight, Bytecode, Round, TimeDelta,
-        Timestamp, UserApplicationDescription,
+        Timestamp, UserApplicationDescription, Blob,
     },
     doc_scalar,
     identifiers::{
@@ -955,6 +955,19 @@ where
             validated_block_certificate_hash,
             retry,
         })
+    }
+
+    pub async fn add_pending_blobs(
+        &self,
+        chain_id: ChainId,
+        bytes: Vec<u8>,
+    ) -> Result<CryptoHash, Error> {
+        let blob = Blob::new_data(bytes);
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+
+        client.add_pending_blobs(vec![blob.clone()]).await;
+
+        Ok(blob.id().hash)
     }
 }
 
