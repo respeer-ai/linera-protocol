@@ -957,7 +957,7 @@ where
         })
     }
 
-    pub async fn add_pending_blobs(
+    pub async fn add_pending_blob(
         &self,
         chain_id: ChainId,
         bytes: Vec<u8>,

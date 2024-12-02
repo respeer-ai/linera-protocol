@@ -722,7 +722,7 @@ type MutationRoot {
 	Calculate block execution state hash
 	"""
 	executeBlockWithFullMaterials(chainId: ChainId!, operations: [Operation!]!, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): ExecutedBlockMaterial!
-	addPendingBlobs(chainId: ChainId!, bytes: [Int!]!): CryptoHash!
+	addPendingBlob(chainId: ChainId!, bytes: [Int!]!): CryptoHash!
 }
 
 """
