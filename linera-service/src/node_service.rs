@@ -917,7 +917,7 @@ where
         };
 
         let hash = client
-            .submit_extenal_signed_block_proposal_and_signature(
+            .submit_external_signed_block_proposal_and_signature(
                 height,
                 executed_block.into(),
                 round,

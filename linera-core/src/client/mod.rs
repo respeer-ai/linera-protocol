@@ -3076,7 +3076,7 @@ where
         self.client.track_chain(chain_id)
     }
 
-    pub async fn submit_extenal_signed_block_proposal_and_signature(
+    pub async fn submit_external_signed_block_proposal_and_signature(
         &self,
         height: BlockHeight,
         executed_block: ExecutedBlock,
