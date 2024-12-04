@@ -10,6 +10,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
 };
+use std::str::FromStr;
 
 use chain_state::ChainState;
 use dashmap::{
@@ -519,6 +520,9 @@ pub enum ChainClientError {
 
     #[error("Waiting for pending block process")]
     WaitPendingBlock,
+
+    #[error("Waiting for finalizing block process")]
+    WaitFinalizingBlock,
 }
 
 impl From<Infallible> for ChainClientError {
@@ -2285,7 +2289,7 @@ where
                 "Conflicting proposal in the current round.",
             ));
         };
-        let can_propose = match round {
+        let mut can_propose = match round {
             Round::Fast => manager.ownership.super_owners.contains_key(&identity),
             Round::MultiLeader(_) => true,
             Round::SingleLeader(_) | Round::Validator(_) => manager.leader == Some(identity),
@@ -3081,6 +3085,29 @@ where
         retry: bool,
         validated_block_certificate: Option<Certificate>,
     ) -> Result<Certificate, ChainClientError> {
+        self.prepare_chain().await?;
+
+        let mut info = self.chain_info_with_manager_values().await?;
+
+        if let Some(round_timeout) = info.manager.round_timeout {
+            if round_timeout <= self.storage_client().clock().current_time() {
+                self.request_leader_timeout().await?;
+                info = self.chain_info_with_manager_values().await?;
+            }
+        }
+        self.state_mut().update_from_info(&info);
+
+        let manager = info.manager;
+        let committee = self.local_committee().await?;
+
+        // If there is a validated block in the current round, finalize it.
+        if let Some(certificate) = &manager.requested_locked {
+            if certificate.round == manager.current_round {
+                self.finalize_block(&committee, *certificate.clone()).await?;
+                return Err(ChainClientError::WaitFinalizingBlock);
+            }
+        }
+
         if self.state().pending_block().is_some() {
             return Err(ChainClientError::WaitPendingBlock);
         }
@@ -3129,7 +3156,6 @@ where
         self.state_mut().set_pending_block(block);
         // Remember what we are trying to do before sending the proposal to the validators.
         // Send the query to validators.
-        let committee = self.local_committee().await?;
         let certificate = self
             .submit_block_proposal(&committee, Box::new(proposal), hashed_value)
             .await?;
@@ -3293,14 +3319,18 @@ where
     #[tracing::instrument(level = "trace")]
     /// Processes the last pending block. Assumes that the local chain is up to date.
     pub async fn block_round(&self) -> Result<Round, ChainClientError> {
-        let chain_id = self.chain_id;
-        let query = ChainInfoQuery::new(chain_id).with_committees();
-        let info = self
-            .client
-            .local_node
-            .handle_chain_info_query(query)
-            .await?
-            .info;
+        self.prepare_chain().await?;
+
+        let mut info = self.chain_info_with_manager_values().await?;
+
+        if let Some(round_timeout) = info.manager.round_timeout {
+            if round_timeout <= self.storage_client().clock().current_time() {
+                self.request_leader_timeout().await?;
+                info = self.chain_info_with_manager_values().await?;
+            }
+        }
+        self.state_mut().update_from_info(&info);
+
         let manager = info.manager;
 
         let Some(block) = manager
@@ -3351,16 +3381,19 @@ where
         incoming_bundles: Vec<IncomingBundle>,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, Option<CryptoHash>, bool), ChainClientError> {
-        let chain_id = self.chain_id;
-        let query = ChainInfoQuery::new(chain_id).with_committees();
-        let info = self
-            .client
-            .local_node
-            .handle_chain_info_query(query)
-            .await?
-            .info;
+        self.prepare_chain().await?;
+
+        let mut info = self.chain_info_with_manager_values().await?;
+
+        if let Some(round_timeout) = info.manager.round_timeout {
+            if round_timeout <= self.storage_client().clock().current_time() {
+                self.request_leader_timeout().await?;
+                info = self.chain_info_with_manager_values().await?;
+            }
+        }
+        self.state_mut().update_from_info(&info);
+
         if let Some(validated_block_certificate) = &info.manager.requested_locked {
-            tracing::info!("Requested locked block is available, retry it");
             Ok((
                 validated_block_certificate
                     .value()
