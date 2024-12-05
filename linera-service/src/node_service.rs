@@ -900,7 +900,7 @@ where
     ) -> Result<CryptoHash, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
-        let certificate = if retry {
+        let certificate = if retry && validated_block_certificate_hash.is_some() {
             let certificate = self
                 .storage
                 .read_certificate(validated_block_certificate_hash.unwrap())

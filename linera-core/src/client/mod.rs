@@ -3127,12 +3127,12 @@ where
             content: ProposalContent {
                 block: block.clone(),
                 round,
-                forced_oracle_responses: if retry { Some(oracle_responses) } else { None },
+                forced_oracle_responses: if retry && validated_block_certificate.is_some() { Some(oracle_responses) } else { None },
             },
             owner: self.public_key().await?.into(),
             signature,
             blobs,
-            validated_block_certificate: if retry {
+            validated_block_certificate: if retry && validated_block_certificate.is_some() {
                 Some(
                     validated_block_certificate
                         .unwrap()
