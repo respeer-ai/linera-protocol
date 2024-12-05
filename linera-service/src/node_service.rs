@@ -29,8 +29,8 @@ use futures::{
 use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, PublicKey, Signature},
     data_types::{
-        Amount, ApplicationPermissions, BlobBytes, BlockHeight, Bytecode, Round, TimeDelta,
-        Timestamp, UserApplicationDescription, Blob,
+        Amount, ApplicationPermissions, Blob, BlobBytes, BlockHeight, Bytecode, Round, TimeDelta,
+        Timestamp, UserApplicationDescription,
     },
     doc_scalar,
     identifiers::{

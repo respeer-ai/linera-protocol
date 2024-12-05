@@ -10,7 +10,6 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
 };
-use std::str::FromStr;
 
 use chain_state::ChainState;
 use dashmap::{
@@ -2289,7 +2288,7 @@ where
                 "Conflicting proposal in the current round.",
             ));
         };
-        let mut can_propose = match round {
+        let can_propose = match round {
             Round::Fast => manager.ownership.super_owners.contains_key(&identity),
             Round::MultiLeader(_) => true,
             Round::SingleLeader(_) | Round::Validator(_) => manager.leader == Some(identity),
@@ -3087,6 +3086,9 @@ where
     ) -> Result<Certificate, ChainClientError> {
         self.prepare_chain().await?;
 
+        let mutex = self.state().client_mutex();
+        let _guard = mutex.lock_owned().await;
+
         let mut info = self.chain_info_with_manager_values().await?;
 
         if let Some(round_timeout) = info.manager.round_timeout {
@@ -3103,7 +3105,8 @@ where
         // If there is a validated block in the current round, finalize it.
         if let Some(certificate) = &manager.requested_locked {
             if certificate.round == manager.current_round {
-                self.finalize_block(&committee, *certificate.clone()).await?;
+                self.finalize_block(&committee, *certificate.clone())
+                    .await?;
                 return Err(ChainClientError::WaitFinalizingBlock);
             }
         }
@@ -3391,9 +3394,40 @@ where
                 info = self.chain_info_with_manager_values().await?;
             }
         }
-        self.state_mut().update_from_info(&info);
+        self.state_mut().update_from_info(&info.clone());
 
-        if let Some(validated_block_certificate) = &info.manager.requested_locked {
+        let manager = info.manager;
+        let committee = self.local_committee().await?;
+
+        // If there is a validated block in the current round, finalize it.
+        if let Some(certificate) = &manager.requested_locked {
+            if certificate.round == manager.current_round {
+                self.finalize_block(&committee, *certificate.clone())
+                    .await?;
+                return Err(ChainClientError::WaitFinalizingBlock);
+            }
+        }
+
+        let Some(block) = manager
+            .highest_validated_block()
+            .cloned()
+            .or_else(|| self.state().pending_block().clone())
+        else {
+            return Ok((
+                self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
+                    .await?,
+                None,
+                false,
+            ));
+        };
+
+        if let Some(validated_block_certificate) = &manager.requested_locked {
+            ensure!(
+                validated_block_certificate.value().block() == Some(&block),
+                ChainClientError::BlockProposalError(
+                    "A different block has already been validated at this height"
+                )
+            );
             Ok((
                 validated_block_certificate
                     .value()
@@ -3404,12 +3438,10 @@ where
                 true,
             ))
         } else {
-            Ok((
-                self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
-                    .await?,
-                None,
-                false,
-            ))
+            let (executed_block, _) = self
+                .construct_block_with_full_materials_and_discard_failing_messages(block, local_time)
+                .await?;
+            Ok((executed_block, None, true))
         }
     }
 }
