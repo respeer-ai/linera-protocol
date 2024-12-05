@@ -517,9 +517,6 @@ pub enum ChainClientError {
     #[error("Invalid block round")]
     InvalidBlockRound,
 
-    #[error("Waiting for pending block process")]
-    WaitPendingBlock,
-
     #[error("Waiting for finalizing block process")]
     WaitFinalizingBlock,
 }
@@ -3109,10 +3106,6 @@ where
                     .await?;
                 return Err(ChainClientError::WaitFinalizingBlock);
             }
-        }
-
-        if self.state().pending_block().is_some() {
-            return Err(ChainClientError::WaitPendingBlock);
         }
 
         let block = executed_block.block.clone();
