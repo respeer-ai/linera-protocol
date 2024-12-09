@@ -4,7 +4,7 @@
 //! Core identifiers used by the Linera protocol.
 
 use std::{
-    fmt::{self, Debug, Display},
+    fmt::{self, Debug, Display, Formatter},
     hash::{Hash, Hasher},
     marker::PhantomData,
     str::FromStr,
@@ -24,26 +24,12 @@ use crate::{
 
 /// The owner of a chain. This is currently the hash of the owner's public key used to
 /// verify signatures.
-#[derive(
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Copy,
-    Clone,
-    Hash,
-    Debug,
-    Serialize,
-    Deserialize,
-    WitLoad,
-    WitStore,
-    WitType,
-)]
+#[derive(Eq, PartialEq, Ord, PartialOrd, Copy, Clone, Hash, Debug, WitLoad, WitStore, WitType)]
 #[cfg_attr(with_testing, derive(Default, test_strategy::Arbitrary))]
 pub struct Owner(pub CryptoHash);
 
 /// An account owner.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 pub enum AccountOwner {
     /// An account owned by a user.
     User(Owner),
@@ -57,6 +43,7 @@ pub enum AccountOwner {
 )]
 pub struct Account {
     /// The chain of the account.
+    #[serde(alias = "chainId", alias = "chain_id")]
     pub chain_id: ChainId,
     /// The owner of the account, or `None` for the chain balance.
     pub owner: Option<Owner>,
@@ -856,6 +843,50 @@ impl std::str::FromStr for Owner {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(Owner(CryptoHash::from_str(s)?))
+    }
+}
+
+impl Serialize for Owner {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if serializer.is_human_readable() {
+            serializer.serialize_str(&self.to_string())
+        } else {
+            serializer.serialize_newtype_struct("Owner", &self.0)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Owner {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        if deserializer.is_human_readable() {
+            let string = String::deserialize(deserializer)?;
+            Self::from_str(&string).map_err(serde::de::Error::custom)
+        } else {
+            deserializer.deserialize_newtype_struct("Owner", OwnerVisitor)
+        }
+    }
+}
+
+struct OwnerVisitor;
+
+impl<'de> serde::de::Visitor<'de> for OwnerVisitor {
+    type Value = Owner;
+
+    fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(formatter, "an owner represented as a `CryptoHash`")
+    }
+
+    fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Owner(CryptoHash::deserialize(deserializer)?))
     }
 }
 

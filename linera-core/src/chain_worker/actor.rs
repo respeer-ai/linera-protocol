@@ -126,6 +126,13 @@ where
         query: ChainInfoQuery,
         callback: oneshot::Sender<Result<(ChainInfoResponse, NetworkActions), WorkerError>>,
     },
+
+    /// Execute a block but discard any changes to the chain state.
+    CalculateBlockStateHash {
+        block: Block,
+        local_time: Timestamp,
+        callback: oneshot::Sender<Result<(ExecutedBlock, ChainInfoResponse), WorkerError>>,
+    },
 }
 
 /// The actor worker type.
@@ -150,10 +157,11 @@ where
         tracked_chains: Option<Arc<RwLock<HashSet<ChainId>>>>,
         delivery_notifier: DeliveryNotifier,
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> Result<Self, WorkerError> {
         let (service_runtime_thread, service_runtime_endpoint) = {
             if config.long_lived_services {
-                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id);
+                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id, local_time);
                 (Some(thread), Some(endpoint))
             } else {
                 (None, None)
@@ -182,6 +190,7 @@ where
     /// Returns the task handle and the endpoints to interact with the actor.
     fn spawn_service_runtime_actor(
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> (
         linera_base::task::BlockingFuture<()>,
         ServiceRuntimeEndpoint,
@@ -189,7 +198,10 @@ where
         let context = QueryContext {
             chain_id,
             next_block_height: BlockHeight(0),
-            local_time: Timestamp::from(0),
+            local_time: match local_time {
+                Some(timestamp) => timestamp,
+                None => Timestamp::from(0),
+            },
         };
 
         let (execution_state_sender, incoming_execution_requests) =
@@ -221,7 +233,7 @@ where
 
         while let Some(request) = incoming_requests.recv().await {
             // TODO(#2237): Spawn concurrent tasks for read-only operations
-            trace!("Handling `ChainWorkerRequest`: {request:?}");
+            tracing::debug!("Handling `ChainWorkerRequest`: {request:?}");
 
             let responded = match request {
                 #[cfg(with_testing)]
@@ -312,6 +324,17 @@ where
                     .is_ok(),
                 ChainWorkerRequest::HandleChainInfoQuery { query, callback } => callback
                     .send(self.worker.handle_chain_info_query(query).await)
+                    .is_ok(),
+                ChainWorkerRequest::CalculateBlockStateHash {
+                    block,
+                    local_time,
+                    callback,
+                } => callback
+                    .send(
+                        self.worker
+                            .calculate_block_state_hash(block, local_time)
+                            .await,
+                    )
                     .is_ok(),
             };
 
@@ -444,6 +467,15 @@ where
             } => formatter
                 .debug_struct("ChainWorkerRequest::HandleChainInfoQuery")
                 .field("query", &query)
+                .finish_non_exhaustive(),
+            ChainWorkerRequest::CalculateBlockStateHash {
+                block,
+                local_time,
+                callback: _callback,
+            } => formatter
+                .debug_struct("ChainWorkerRequest::CalculateBlockStateHash")
+                .field("block", &block)
+                .field("local_time", &local_time)
                 .finish_non_exhaustive(),
         }
     }

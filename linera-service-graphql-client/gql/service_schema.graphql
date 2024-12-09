@@ -142,6 +142,12 @@ A unique identifier for an application bytecode
 """
 scalar BytecodeId
 
+type CandidateBlockMaterial {
+	incomingBundles: [IncomingBundle!]!
+	localTime: Timestamp!
+	round: Round!
+}
+
 type CertificateValue {
 	executedBlock: ExecutedBlock
 	status: String!
@@ -407,6 +413,12 @@ type ExecutedBlock {
 	outcome: BlockExecutionOutcome!
 }
 
+type ExecutedBlockMaterial {
+	executedBlock: ExecutedBlock!
+	validatedBlockCertificateHash: CryptoHash
+	retry: Boolean!
+}
+
 type ExecutionStateView {
 	system: SystemExecutionStateView!
 }
@@ -568,6 +580,11 @@ type MessageBundle {
 }
 
 """
+The index of a message in a chain
+"""
+scalar MessageId
+
+"""
 The kind of outgoing message being sent
 """
 scalar MessageKind
@@ -693,6 +710,19 @@ type MutationRoot {
 	on this one.
 	"""
 	requestApplication(chainId: ChainId!, applicationId: ApplicationId!, targetChainId: ChainId): CryptoHash!
+	"""
+	ResPeer::CheCko::Initialize offline wallet
+	"""
+	walletInitWithoutKeypair(publicKey: PublicKey!, signature: Signature!, faucetUrl: String!, chainId: ChainId!, messageId: MessageId!, certificateHash: CryptoHash!): ChainId!
+	"""
+	Submit block proposal with signature
+	"""
+	submitBlockAndSignature(chainId: ChainId!, height: BlockHeight!, executedBlock: UserExecutedBlock!, round: Round!, signature: Signature!, retry: Boolean!, validatedBlockCertificateHash: CryptoHash): CryptoHash!
+	"""
+	Calculate block execution state hash
+	"""
+	executeBlockWithFullMaterials(chainId: ChainId!, operations: [Operation!]!, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): ExecutedBlockMaterial!
+	addPendingBlob(chainId: ChainId!, bytes: [Int!]!): CryptoHash!
 }
 
 """
@@ -816,6 +846,26 @@ type QueryRoot {
 	Returns the version information on this node service.
 	"""
 	version: VersionInfo!
+	"""
+	Returns the pending message of the chain
+	"""
+	pendingMessages(chainId: ChainId!): [IncomingBundle!]!
+	"""
+	Returns block material of the chain
+	"""
+	blockMaterial(chainId: ChainId!, maxPendingMessages: Int!): CandidateBlockMaterial!
+	"""
+	Returns the balance of given owner
+	"""
+	balance(chainId: ChainId!, publicKey: PublicKey): Amount!
+	"""
+	Returns the balances of given owners
+	"""
+	balances(chainIds: [ChainId!]!, publicKeys: [PublicKey!]!): JSONObject!
+	"""
+	Returns the maintained chains of given owner
+	"""
+	chainsWithPublicKey(publicKey: PublicKey!): Chains!
 }
 
 type QueueView_BlockHeight_e824a938 {
@@ -921,6 +971,16 @@ input ResourceControlPolicy {
 }
 
 """
+A number to identify successive attempts to decide a value in a consensus protocol.
+"""
+scalar Round
+
+"""
+A signature value
+"""
+scalar Signature
+
+"""
 An event stream ID.
 """
 type StreamId {
@@ -997,6 +1057,16 @@ type TimestampedBundleInInbox {
 Description of the necessary information to run a user application
 """
 scalar UserApplicationDescription
+
+"""
+A executed block which will be submitted to blockchain with its signature.
+"""
+scalar UserExecutedBlock
+
+"""
+Input shadow of IncomingBundle.
+"""
+scalar UserIncomingBundle
 
 """
 The version info of a build of Linera.
