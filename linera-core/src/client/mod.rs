@@ -3164,16 +3164,6 @@ where
                     error!("Fail to synchronize new block after notification");
                 }
             }
-            Reason::NewRawBlock { height } => {
-                let chain_id = notification.chain_id;
-                if self
-                    .local_next_block_height(chain_id, &mut local_node)
-                    .await
-                    < Some(height)
-                {
-                    error!("Fail to synchronize new block after notification");
-                }
-            }
         }
     }
 

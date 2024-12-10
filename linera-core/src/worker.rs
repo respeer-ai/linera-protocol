@@ -138,9 +138,6 @@ pub enum Reason {
         height: BlockHeight,
         round: Round,
     },
-    NewRawBlock {
-        height: BlockHeight,
-    },
 }
 
 /// Error type for worker operations..
