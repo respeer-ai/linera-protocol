@@ -70,7 +70,7 @@ impl GrpcClient {
     fn is_retryable(status: &Status) -> bool {
         match status.code() {
             Code::DeadlineExceeded | Code::Aborted | Code::Unavailable | Code::Unknown => {
-                info!("gRPC request interrupted: {}; retrying", status);
+                debug!("gRPC request interrupted: {}; retrying", status);
                 true
             }
             Code::Ok
