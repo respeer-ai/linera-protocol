@@ -270,6 +270,7 @@ impl ValidatorNode for GrpcClient {
                     return future::Either::Left(future::ready(true));
                 };
                 if !Self::is_retryable(status) || retry_count >= max_retries {
+                    tracing::error!("Error {:?} {} retries", status, retry_count);
                     return future::Either::Left(future::ready(false));
                 }
                 let delay = retry_delay.saturating_mul(retry_count);
