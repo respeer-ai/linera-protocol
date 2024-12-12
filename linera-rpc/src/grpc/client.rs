@@ -17,7 +17,7 @@ use linera_core::{
 };
 use linera_version::VersionInfo;
 use tonic::{Code, IntoRequest, Request, Status};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 #[cfg(not(web))]
 use {
     super::GrpcProtoConversionError,
