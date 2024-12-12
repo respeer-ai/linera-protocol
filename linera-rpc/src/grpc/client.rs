@@ -217,6 +217,7 @@ impl ValidatorNode for GrpcClient {
     #[instrument(target = "grpc_client", skip_all, err, fields(address = self.address))]
     async fn subscribe(&self, chains: Vec<ChainId>) -> Result<Self::NotificationStream, NodeError> {
         let address = self.address.clone();
+        let subscribe_address = self.address.clone();
         let retry_delay = self.retry_delay;
         let max_retries = self.max_retries;
         let mut retry_count = 0;
@@ -243,11 +244,12 @@ impl ValidatorNode for GrpcClient {
             let subscription_request = subscription_request.clone();
             let mut stream = stream.take();
             let chains = chains.clone();
+            let address = subscribe_address.clone();
             async move {
                 let stream = if let Some(stream) = stream.take() {
                     future::Either::Right(stream)
                 } else {
-                    warn!("Re-subscribe to chains {:?}", chains);
+                    warn!("Re-subscribe chains {:?} to {}", chains, address);
                     match client.subscribe(subscription_request.clone()).await {
                         Err(err) => future::Either::Left(stream::iter(iter::once(Err(err)))),
                         Ok(response) => future::Either::Right(response.into_inner()),
