@@ -216,6 +216,7 @@ impl ValidatorNode for GrpcClient {
 
     #[instrument(target = "grpc_client", skip_all, err, fields(address = self.address))]
     async fn subscribe(&self, chains: Vec<ChainId>) -> Result<Self::NotificationStream, NodeError> {
+        let address = self.address.clone();
         let retry_delay = self.retry_delay;
         let max_retries = self.max_retries;
         let mut retry_count = 0;
@@ -272,7 +273,7 @@ impl ValidatorNode for GrpcClient {
                 if !Self::is_retryable(status) || retry_count >= max_retries {
                     tracing::error!(
                         "{} notification Error {:?} {} retries",
-                        self.address,
+                        address,
                         status,
                         retry_count
                     );
