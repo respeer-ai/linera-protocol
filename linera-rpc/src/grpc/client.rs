@@ -77,6 +77,7 @@ impl GrpcClient {
             | Code::Cancelled
             | Code::NotFound
             | Code::AlreadyExists
+            | Code::Internal
             | Code::ResourceExhausted => {
                 error!("Unexpected gRPC status: {}; retrying", status);
                 true
@@ -86,7 +87,6 @@ impl GrpcClient {
             | Code::FailedPrecondition
             | Code::OutOfRange
             | Code::Unimplemented
-            | Code::Internal
             | Code::DataLoss
             | Code::Unauthenticated => {
                 error!("Unexpected gRPC status: {}", status);
@@ -272,8 +272,9 @@ impl ValidatorNode for GrpcClient {
                 };
                 if !Self::is_retryable(status) || retry_count >= max_retries {
                     tracing::error!(
-                        "{} notification Error {:?} {} retries",
+                        "{} notification Error {}, {:?} {} retries",
                         address,
+                        status.code(),
                         status,
                         retry_count
                     );
