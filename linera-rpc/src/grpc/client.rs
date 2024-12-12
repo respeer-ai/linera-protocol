@@ -17,7 +17,7 @@ use linera_core::{
 };
 use linera_version::VersionInfo;
 use tonic::{Code, IntoRequest, Request, Status};
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, instrument, warn};
 #[cfg(not(web))]
 use {
     super::GrpcProtoConversionError,
@@ -221,7 +221,7 @@ impl ValidatorNode for GrpcClient {
         let max_retries = self.max_retries;
         let mut retry_count = 0;
         let subscription_request = SubscriptionRequest {
-            chain_ids: chains.into_iter().map(|chain| chain.into()).collect(),
+            chain_ids: chains.clone().into_iter().map(|chain| chain.into()).collect(),
         };
         let mut client = self.client.clone();
 
@@ -242,10 +242,12 @@ impl ValidatorNode for GrpcClient {
             let mut client = client.clone();
             let subscription_request = subscription_request.clone();
             let mut stream = stream.take();
+            let chains = chains.clone();
             async move {
                 let stream = if let Some(stream) = stream.take() {
                     future::Either::Right(stream)
                 } else {
+                    warn!("Re-subscribe to chains {:?}", chains);
                     match client.subscribe(subscription_request.clone()).await {
                         Err(err) => future::Either::Left(stream::iter(iter::once(Err(err)))),
                         Ok(response) => future::Either::Right(response.into_inner()),
