@@ -79,7 +79,7 @@ impl GrpcClient {
             | Code::AlreadyExists
             | Code::Internal
             | Code::ResourceExhausted => {
-                error!("Unexpected gRPC status: {}; retrying", status);
+                debug!("Unexpected gRPC status: {}; retrying", status);
                 true
             }
             Code::InvalidArgument
@@ -89,7 +89,7 @@ impl GrpcClient {
             | Code::Unimplemented
             | Code::DataLoss
             | Code::Unauthenticated => {
-                error!("Unexpected gRPC status: {}", status);
+                debug!("Unexpected gRPC status: {}", status);
                 false
             }
         }
@@ -271,7 +271,7 @@ impl ValidatorNode for GrpcClient {
                     return future::Either::Left(future::ready(true));
                 };
                 if !Self::is_retryable(status) || retry_count >= max_retries {
-                    tracing::error!(
+                    error!(
                         "{} notification Error {}, {:?} {} retries",
                         address,
                         status.code(),
@@ -292,7 +292,7 @@ impl ValidatorNode for GrpcClient {
                     Ok(notification @ Some(_)) => notification,
                     Ok(None) => None,
                     Err(err) => {
-                        warn!("{}", err);
+                        debug!("{}", err);
                         None
                     }
                 })
