@@ -1,9 +1,16 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fmt, future::Future, iter};
+use std::{
+    collections::HashMap,
+    fmt,
+    future::Future,
+    iter,
+    sync::{Arc, Mutex},
+};
 
 use futures::{future, stream, StreamExt};
+use lazy_static::lazy_static;
 use linera_base::{
     crypto::CryptoHash,
     data_types::{Blob, BlobContent},
@@ -17,7 +24,7 @@ use linera_core::{
 };
 use linera_version::VersionInfo;
 use tonic::{Code, IntoRequest, Request, Status};
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 #[cfg(not(web))]
 use {
     super::GrpcProtoConversionError,
@@ -37,11 +44,91 @@ use crate::{
 };
 
 #[derive(Clone)]
+struct ClientMetrics {
+    requests: u128,
+    request_errors: u128,
+    total_request_delay_ms: u128,
+    total_error_delay_ms: u128,
+    last_window_delay_ms: u128,
+}
+
+lazy_static! {
+    static ref CLIENT_METRICS: Arc<Mutex<HashMap<String, ClientMetrics>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+}
+
+#[derive(Clone)]
 pub struct GrpcClient {
     address: String,
     client: ValidatorNodeClient<transport::Channel>,
     retry_delay: Duration,
     max_retries: u32,
+}
+
+fn client_request(address: String) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                metrics.requests += 1;
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn client_response(address: String, success: bool, elapsed: u128) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                if !success {
+                    metrics.request_errors += 1;
+                    metrics.total_error_delay_ms += elapsed;
+                }
+                metrics.total_request_delay_ms += elapsed;
+                metrics.last_window_delay_ms += elapsed;
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn client_print_if_needed(address: String) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                if metrics.last_window_delay_ms >= 300000 && metrics.requests > 0 {
+                    info!(
+                        " -> Request to {} requests {} errors {} average rtt {} averate success rtt {} averate error rtt {}",
+                        address,
+                        metrics.requests,
+                        metrics.request_errors,
+                        metrics.total_request_delay_ms / metrics.requests,
+                        if metrics.requests > metrics.request_errors {
+                            (metrics.total_request_delay_ms - metrics.total_error_delay_ms) / (metrics.requests - metrics.request_errors)
+                        } else {
+                            0
+                        },
+                        if metrics.request_errors > 0 {
+                            metrics.total_error_delay_ms / metrics.request_errors
+                        } else {
+                            0
+                        },
+                    );
+                    let mut metrics = metrics.clone();
+                    metrics.last_window_delay_ms = 0;
+                    guard.insert(address, metrics);
+                }
+            }
+            _ => {}
+        },
+        _ => {}
+    }
 }
 
 impl GrpcClient {
@@ -56,6 +143,16 @@ impl GrpcClient {
         let client = ValidatorNodeClient::new(channel)
             .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE);
+
+        let mut metrics = CLIENT_METRICS.lock().unwrap();
+        let client_metrics = ClientMetrics {
+            requests: 0,
+            request_errors: 0,
+            total_request_delay_ms: 0,
+            total_error_delay_ms: 0,
+            last_window_delay_ms: 0,
+        };
+        metrics.entry(address.clone()).or_insert(client_metrics);
 
         Ok(Self {
             address,
@@ -111,20 +208,35 @@ impl GrpcClient {
         let request_inner = request.try_into().map_err(|_| NodeError::GrpcError {
             error: "could not convert request to proto".to_string(),
         })?;
+        let address = self.address.clone();
         loop {
+            client_print_if_needed(address.clone());
+            client_request(address.clone());
+            let request_at = Instant::now();
+
             match f(self.client.clone(), Request::new(request_inner.clone())).await {
                 Err(s) if Self::is_retryable(&s) && retry_count < self.max_retries => {
+                    let elapsed = request_at.elapsed().as_millis();
+                    client_response(address.clone(), false, elapsed);
+
                     let delay = self.retry_delay.saturating_mul(retry_count);
                     retry_count += 1;
                     linera_base::time::timer::sleep(delay).await;
                     continue;
                 }
                 Err(s) => {
+                    let elapsed = request_at.elapsed().as_millis();
+                    client_response(address.clone(), false, elapsed);
+
                     return Err(NodeError::GrpcError {
                         error: format!("remote request [{handler}] failed with status: {s:?}",),
                     });
                 }
-                Ok(result) => return Ok(result.into_inner()),
+                Ok(result) => {
+                    let elapsed = request_at.elapsed().as_millis();
+                    client_response(address.clone(), true, elapsed);
+                    return Ok(result.into_inner());
+                }
             };
         }
     }
@@ -274,11 +386,12 @@ impl ValidatorNode for GrpcClient {
                                 elapsed,
                                 elapsed_since_start,
                                 chains,
-                                address
+                                address,
                             );
                             subscribe_at = Instant::now();
                             last_reconnects = 0;
                         }
+
                         match client.subscribe(subscription_request.clone()).await {
                             Err(err) => (
                                 future::Either::Left(stream::iter(iter::once(Err(err)))),
