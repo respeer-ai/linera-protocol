@@ -102,9 +102,9 @@ fn client_print_if_needed(address: String) {
     match CLIENT_METRICS.lock() {
         Ok(mut guard) => match guard.get(&address) {
             Some(metrics) => {
-                if metrics.last_window_delay_ms >= 300000 && metrics.requests > 0 {
+                if metrics.last_window_delay_ms >= 60000 && metrics.requests > 0 {
                     info!(
-                        " -> Request to {} requests {} errors {} average rtt {} averate success rtt {} averate error rtt {}",
+                        " -> Request to {} requests {} errors {} average rtt {}ms averate success rtt {}ms averate error rtt {}ms",
                         address,
                         metrics.requests,
                         metrics.request_errors,
