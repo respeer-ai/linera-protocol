@@ -241,49 +241,59 @@ impl ValidatorNode for GrpcClient {
                 .into_inner(),
         );
 
-        let mut reconnects = 0;
-        let mut last_reconnects = 0;
-        let mut subscribe_at = Instant::now();
-        let first_subscribe_at = subscribe_at;
+        let first_subscribe_at = Instant::now();
 
         // A stream of `Result<grpc::Notification, tonic::Status>` that keeps calling
         // `client.subscribe(request)` endlessly and without delay.
-        let endlessly_retrying_notification_stream = stream::unfold((), move |()| {
-            let mut client = client.clone();
-            let subscription_request = subscription_request.clone();
-            let mut stream = stream.take();
-            let chains = chains.clone();
-            let address = subscribe_address.clone();
-            async move {
-                let stream = if let Some(stream) = stream.take() {
-                    future::Either::Right(stream)
-                } else {
-                    reconnects += 1;
-                    last_reconnects += 1;
-                    let elapsed = subscribe_at.elapsed().as_secs();
-                    let elapsed_since_start = first_subscribe_at.elapsed().as_secs();
+        let endlessly_retrying_notification_stream = stream::unfold(
+            (0, 0, first_subscribe_at),
+            move |(reconnects, last_reconnects, subscribe_at)| {
+                let mut client = client.clone();
+                let subscription_request = subscription_request.clone();
+                let mut stream = stream.take();
+                let chains = chains.clone();
+                let address = subscribe_address.clone();
+                async move {
+                    let (stream, (reconnects, last_reconnects, subscribe_at)) = if let Some(stream) = stream.take() {
+                        (
+                            future::Either::Right(stream),
+                            (reconnects, last_reconnects, subscribe_at),
+                        )
+                    } else {
+                        let mut subscribe_at = subscribe_at;
+                        let elapsed = subscribe_at.elapsed().as_secs();
+                        let elapsed_since_start = first_subscribe_at.elapsed().as_secs();
+                        let reconnects = reconnects + 1;
+                        let mut last_reconnects = last_reconnects + 1;
 
-                    if reconnects % 100 == 0 || elapsed > 300 {
-                        warn!(
-                            "Subscription {}/{} retries within {}/{} seconds of chains {:?} to {}",
-                            last_reconnects,
-                            reconnects,
-                            elapsed,
-                            elapsed_since_start,
-                            chains,
-                            address
-                        );
-                        subscribe_at = Instant::now();
-                        last_reconnects = 0;
-                    }
-                    match client.subscribe(subscription_request.clone()).await {
-                        Err(err) => future::Either::Left(stream::iter(iter::once(Err(err)))),
-                        Ok(response) => future::Either::Right(response.into_inner()),
-                    }
-                };
-                Some((stream, ()))
-            }
-        })
+                        if reconnects % 100 == 0 || elapsed > 300 {
+                            warn!(
+                                "Subscription {}/{} retries within {}/{} seconds of chains {:?} to {}",
+                                last_reconnects,
+                                reconnects,
+                                elapsed,
+                                elapsed_since_start,
+                                chains,
+                                address
+                            );
+                            subscribe_at = Instant::now();
+                            last_reconnects = 0;
+                        }
+                        match client.subscribe(subscription_request.clone()).await {
+                            Err(err) => (
+                                future::Either::Left(stream::iter(iter::once(Err(err)))),
+                                (reconnects, last_reconnects, subscribe_at),
+                            ),
+                            Ok(response) => (
+                                future::Either::Right(response.into_inner()),
+                                (reconnects, last_reconnects, subscribe_at),
+                            ),
+                        }
+                    };
+                    Some((stream, (reconnects, last_reconnects, subscribe_at)))
+                }
+            },
+        )
         .flatten();
 
         // The stream of `Notification`s that inserts increasing delays after retriable errors, and
