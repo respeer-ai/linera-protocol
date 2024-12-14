@@ -24,7 +24,7 @@ use linera_core::{
 };
 use linera_version::VersionInfo;
 use tonic::{Code, IntoRequest, Request, Status};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument};
 #[cfg(not(web))]
 use {
     super::GrpcProtoConversionError,
@@ -50,6 +50,12 @@ struct ClientMetrics {
     total_request_delay_ms: u128,
     total_error_delay_ms: u128,
     last_window_delay_ms: u128,
+
+    subscribed_chains: HashMap<ChainId, Instant>,
+    subscribed_at: Instant,
+    subscription_total_reconects: usize,
+    subscription_window_subscribe_at: Instant,
+    subscription_window_reconnects: usize,
 }
 
 lazy_static! {
@@ -98,13 +104,51 @@ fn client_response(address: String, success: bool, elapsed: u128) {
     }
 }
 
+fn client_subscribe_chain(address: String, chain_id: ChainId) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                metrics.subscribed_chains.insert(chain_id, Instant::now());
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn client_retry_subscribe_chain(address: String) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                metrics.subscription_total_reconects += 1;
+                metrics.subscription_window_reconnects += 1;
+                if metrics
+                    .subscription_window_subscribe_at
+                    .elapsed()
+                    .as_millis()
+                    > 300000
+                {
+                    metrics.subscription_window_subscribe_at = Instant::now();
+                    metrics.subscription_window_reconnects = 0;
+                }
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
 fn client_print_if_needed(address: String) {
     match CLIENT_METRICS.lock() {
         Ok(mut guard) => match guard.get(&address) {
             Some(metrics) => {
                 if metrics.last_window_delay_ms >= 60000 && metrics.requests > 0 {
                     info!(
-                        " -> Request to {} requests {} errors {} average rtt {}ms averate success rtt {}ms averate error rtt {}ms",
+                        "{} requests {} errors {} average rtt {}ms average success rtt {}ms average error rtt {}ms chains {} reconnects {}/{} elapsed {}ms/{}ms",
                         address,
                         metrics.requests,
                         metrics.request_errors,
@@ -119,6 +163,11 @@ fn client_print_if_needed(address: String) {
                         } else {
                             0
                         },
+                        metrics.subscribed_chains.len(),
+                        metrics.subscription_window_reconnects,
+                        metrics.subscription_total_reconects,
+                        metrics.subscription_window_subscribe_at.elapsed().as_millis(),
+                        metrics.subscribed_at.elapsed().as_millis(),
                     );
                     let mut metrics = metrics.clone();
                     metrics.last_window_delay_ms = 0;
@@ -151,6 +200,12 @@ impl GrpcClient {
             total_request_delay_ms: 0,
             total_error_delay_ms: 0,
             last_window_delay_ms: 0,
+
+            subscribed_chains: HashMap::new(),
+            subscribed_at: Instant::now(),
+            subscription_total_reconects: 0,
+            subscription_window_subscribe_at: Instant::now(),
+            subscription_window_reconnects: 0,
         };
         metrics.entry(address.clone()).or_insert(client_metrics);
 
@@ -353,60 +408,31 @@ impl ValidatorNode for GrpcClient {
                 .into_inner(),
         );
 
-        let first_subscribe_at = Instant::now();
+        for chain_id in chains {
+            client_subscribe_chain(address.clone(), chain_id);
+        }
 
         // A stream of `Result<grpc::Notification, tonic::Status>` that keeps calling
         // `client.subscribe(request)` endlessly and without delay.
-        let endlessly_retrying_notification_stream = stream::unfold(
-            (0, 0, first_subscribe_at),
-            move |(reconnects, last_reconnects, subscribe_at)| {
-                let mut client = client.clone();
-                let subscription_request = subscription_request.clone();
-                let mut stream = stream.take();
-                let chains = chains.clone();
-                let address = subscribe_address.clone();
-                async move {
-                    let (stream, (reconnects, last_reconnects, subscribe_at)) = if let Some(stream) = stream.take() {
-                        (
-                            future::Either::Right(stream),
-                            (reconnects, last_reconnects, subscribe_at),
-                        )
-                    } else {
-                        let mut subscribe_at = subscribe_at;
-                        let elapsed = subscribe_at.elapsed().as_secs();
-                        let elapsed_since_start = first_subscribe_at.elapsed().as_secs();
-                        let reconnects = reconnects + 1;
-                        let mut last_reconnects = last_reconnects + 1;
+        let endlessly_retrying_notification_stream = stream::unfold((), move |()| {
+            let mut client = client.clone();
+            let subscription_request = subscription_request.clone();
+            let mut stream = stream.take();
+            let address = subscribe_address.clone();
+            async move {
+                let stream = if let Some(stream) = stream.take() {
+                    future::Either::Right(stream)
+                } else {
+                    client_retry_subscribe_chain(address.clone());
 
-                        if reconnects % 100 == 0 || elapsed > 300 {
-                            warn!(
-                                "Subscription {}/{} retries within {}/{} seconds of chains {:?} to {}",
-                                last_reconnects,
-                                reconnects,
-                                elapsed,
-                                elapsed_since_start,
-                                chains,
-                                address,
-                            );
-                            subscribe_at = Instant::now();
-                            last_reconnects = 0;
-                        }
-
-                        match client.subscribe(subscription_request.clone()).await {
-                            Err(err) => (
-                                future::Either::Left(stream::iter(iter::once(Err(err)))),
-                                (reconnects, last_reconnects, subscribe_at),
-                            ),
-                            Ok(response) => (
-                                future::Either::Right(response.into_inner()),
-                                (reconnects, last_reconnects, subscribe_at),
-                            ),
-                        }
-                    };
-                    Some((stream, (reconnects, last_reconnects, subscribe_at)))
-                }
-            },
-        )
+                    match client.subscribe(subscription_request.clone()).await {
+                        Err(err) => future::Either::Left(stream::iter(iter::once(Err(err)))),
+                        Ok(response) => future::Either::Right(response.into_inner()),
+                    }
+                };
+                Some((stream, ()))
+            }
+        })
         .flatten();
 
         // The stream of `Notification`s that inserts increasing delays after retriable errors, and
