@@ -269,6 +269,7 @@ impl<C> MutationRoot<C>
 where
     C: ClientContext,
 {
+    #[cfg(not(feature = "disable-native-rpc"))]
     async fn execute_system_operation(
         &self,
         system_operation: SystemOperation,
@@ -391,6 +392,8 @@ impl<C> MutationRoot<C>
 where
     C: ClientContext,
 {
+
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Processes the inbox and returns the lists of certificate hashes that were created, if any.
     async fn process_inbox(&self, chain_id: ChainId) -> Result<Vec<CryptoHash>, Error> {
         let mut hashes = Vec::new();
@@ -412,6 +415,7 @@ where
         }
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Retries the pending block that was unsuccessfully proposed earlier.
     async fn retry_pending_block(&self, chain_id: ChainId) -> Result<Option<CryptoHash>, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
@@ -427,6 +431,7 @@ where
         }
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Transfers `amount` units of value from the given owner's account to the recipient.
     /// If no owner is given, try to take the units out of the unattributed account.
     async fn transfer(
@@ -447,6 +452,7 @@ where
         .await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Claims `amount` units of value from the given owner's account in the remote
     /// `target` chain. Depending on its configuration, the `target` chain may refuse to
     /// process the message.
@@ -488,6 +494,7 @@ where
         .await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Creates (or activates) a new chain by installing the given authentication key.
     /// This will automatically subscribe to the future committees created by `admin_id`.
     async fn open_chain(
@@ -514,6 +521,7 @@ where
         Ok(ChainId::child(message_id))
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Creates (or activates) a new chain by installing the given authentication keys.
     /// This will automatically subscribe to the future committees created by `admin_id`.
     #[expect(clippy::too_many_arguments)]
@@ -586,6 +594,7 @@ where
         Ok(ChainId::child(message_id))
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Closes the chain.
     async fn close_chain(&self, chain_id: ChainId) -> Result<CryptoHash, Error> {
         let certificate = self
@@ -597,6 +606,7 @@ where
         Ok(certificate.hash())
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Changes the authentication key of the chain.
     async fn change_owner(
         &self,
@@ -612,6 +622,7 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Changes the authentication key of the chain.
     #[expect(clippy::too_many_arguments)]
     async fn change_multiple_owners(
@@ -654,6 +665,7 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Changes the application permissions configuration on this chain.
     async fn change_application_permissions(
         &self,
@@ -670,6 +682,7 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// (admin chain only) Registers a new committee. This will notify the subscribers of
     /// the admin chain so that they can migrate to the new epoch (by accepting the
     /// notification as an "incoming message" in a next block).
@@ -684,6 +697,7 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Subscribes to a system channel.
     async fn subscribe(
         &self,
@@ -699,6 +713,7 @@ where
             .await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Unsubscribes from a system channel.
     async fn unsubscribe(
         &self,
@@ -714,6 +729,7 @@ where
             .await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// (admin chain only) Removes a committee. Once this message is accepted by a chain,
     /// blocks from the retired epoch will not be accepted until they are followed (hence
     /// re-certified) by a block certified by a recent committee.
@@ -722,6 +738,7 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Publishes a new application bytecode.
     async fn publish_bytecode(
         &self,
@@ -744,6 +761,7 @@ where
         .await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Publishes a new data blob.
     async fn publish_data_blob(
         &self,
@@ -765,6 +783,7 @@ where
         .await
     }
 
+    #[cfg(not(feature = "disable-native-rpc"))]
     /// Creates a new application.
     async fn create_application(
         &self,
@@ -795,6 +814,9 @@ where
         .await
     }
 
+    /// We enable request_application for SWAP application work around, this will be removed in
+    /// future
+    #[cfg(feature = "enable-request-application")]
     /// Requests a `RegisterApplications` message from another chain so the application can be used
     /// on this one.
     async fn request_application(
@@ -819,6 +841,7 @@ where
         }
     }
 
+    #[cfg(feature = "enable-wallet-rpc")]
     /// ResPeer::CheCko::Initialize offline wallet
     async fn wallet_init_without_keypair(
         &self,
@@ -880,6 +903,7 @@ where
         Ok(chain_id)
     }
 
+    #[cfg(feature = "enable-wallet-rpc")]
     /// Submit block proposal with signature
     async fn submit_block_and_signature(
         &self,
@@ -925,6 +949,7 @@ where
         Ok(hash)
     }
 
+    #[cfg(feature = "enable-wallet-rpc")]
     /// Calculate block execution state hash
     async fn execute_block_with_full_materials(
         &self,
@@ -950,6 +975,7 @@ where
         })
     }
 
+    #[cfg(feature = "enable-wallet-rpc")]
     pub async fn add_pending_blob(
         &self,
         chain_id: ChainId,
