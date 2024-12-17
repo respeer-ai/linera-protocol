@@ -1428,19 +1428,19 @@ where
                 application_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/content/:blob_hash",
+                "/chains/:chain_id/applications/:application_id/contents/:blob_hash",
                 blob_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/image/:blob_hash",
+                "/chains/:chain_id/applications/:application_id/images/:blob_hash",
                 blob_image_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/html/:blob_hash",
+                "/chains/:chain_id/applications/:application_id/htmls/:blob_hash",
                 blob_html_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/video/:blob_hash",
+                "/chains/:chain_id/applications/:application_id/videos/:blob_hash",
                 blob_video_handler,
             )
             .route("/ready", axum::routing::get(|| async { "ready!" }))
