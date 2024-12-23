@@ -1,6 +1,7 @@
+
+#[cfg(feature = "listen-localhost")]
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -392,7 +393,6 @@ impl<C> MutationRoot<C>
 where
     C: ClientContext,
 {
-
     #[cfg(not(feature = "disable-native-rpc"))]
     /// Processes the inbox and returns the lists of certificate hashes that were created, if any.
     async fn process_inbox(&self, chain_id: ChainId) -> Result<Vec<CryptoHash>, Error> {
@@ -1264,12 +1264,16 @@ impl ApplicationOverview {
         port: NonZeroU16,
         chain_id: ChainId,
     ) -> Self {
+        #[cfg(not(feature = "listen-localhost"))]
+        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        #[cfg(feature = "listen-localhost")]
+        let ip_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         Self {
             id,
             description,
             link: format!(
                 "http://{}:{}/chains/{}/applications/{}",
-                local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+                ip_addr,
                 port.get(),
                 chain_id,
                 id
@@ -1449,7 +1453,10 @@ where
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
 
+        #[cfg(not(feature = "listen-localhost"))]
         let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+        #[cfg(feature = "listen-localhost")]
+        let ip_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
         let chain_listener = ChainListener::new(self.config.clone());
