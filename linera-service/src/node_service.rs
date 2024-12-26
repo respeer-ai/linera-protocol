@@ -855,12 +855,14 @@ where
         struct Nonce(CryptoHash);
         impl BcsSignable for Nonce {}
 
+        tracing::info!("Verifing signature ...");
         let nonce = Nonce(certificate_hash);
         signature.check(&nonce, public_key)?;
 
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
+        tracing::info!("Preparing parent chain {}", chain_id);
         self.prepare_parent_chain(
             chain_id,
             public_key,
@@ -869,6 +871,8 @@ where
             validators.clone(),
         )
         .await?;
+
+        tracing::info!("Assigning new chain to public key ...");
         self.context
             .lock()
             .await
@@ -876,6 +880,7 @@ where
             .await
             .context("could not assign the new chain")?;
 
+        tracing::info!("Setting default chain with public key ...");
         self.context
             .lock()
             .await
@@ -883,6 +888,7 @@ where
             .await?;
         self.context.lock().await.save_wallet().await?;
 
+        tracing::info!("Running chain {}", chain_id);
         ChainListener::run_with_chain_id_retry(
             chain_id,
             self.context.clone(),
@@ -895,6 +901,7 @@ where
         tokio::task::yield_now().await;
         std::thread::sleep(std::time::Duration::from_millis(2000));
 
+        tracing.info!("Finalizing initialization ...");
         self.chain_initialized(chain_id, message_id).await?;
 
         tracing::info!("Initialized chain {}", chain_id);
