@@ -901,7 +901,7 @@ where
         tokio::task::yield_now().await;
         std::thread::sleep(std::time::Duration::from_millis(2000));
 
-        tracing.info!("Finalizing initialization ...");
+        tracing::info!("Finalizing initialization ...");
         self.chain_initialized(chain_id, message_id).await?;
 
         tracing::info!("Initialized chain {}", chain_id);
