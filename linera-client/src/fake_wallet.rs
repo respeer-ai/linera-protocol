@@ -60,6 +60,8 @@ impl FakeWallet {
         _key: PublicKey,
         _chain_id: ChainId,
         _timestamp: Timestamp,
+        _creation_message_id: MessageId,
+        _creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         Ok(())
     }

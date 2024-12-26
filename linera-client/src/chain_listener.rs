@@ -122,7 +122,7 @@ pub trait ClientContext: 'static {
         chain_id: ChainId,
         timestamp: Timestamp,
         creation_message_id: MessageId,
-        creation_certificate_hash: CryptoHash,
+        creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error>;
 
     async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error>;

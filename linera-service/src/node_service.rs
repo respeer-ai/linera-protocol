@@ -880,7 +880,7 @@ where
                 chain_id,
                 Timestamp::now(),
                 message_id,
-                certificate_hash,
+                Some(certificate_hash),
             )
             .await
             .context("could not assign the new chain")?;

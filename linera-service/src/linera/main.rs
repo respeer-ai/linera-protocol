@@ -1136,8 +1136,6 @@ impl Runnable for Job {
                 let validators = genesis_config.validators();
                 let chain_ids = context.wallet().chain_ids();
 
-                let chains = context.wallet().chains();
-
                 for chain_id in &chain_ids {
                     match context.wallet().get(*chain_id) {
                         Some(chain) => {
@@ -1251,7 +1249,7 @@ impl Job {
         context
             .wallet_mut()
             .mutate(|w| {
-                w.assign_new_chain_to_key(
+                w.assign_new_chain_to_public_key(
                     public_key,
                     chain_id,
                     executed_block.block.timestamp,

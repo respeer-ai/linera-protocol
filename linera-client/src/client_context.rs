@@ -142,7 +142,7 @@ where
         chain_id: ChainId,
         timestamp: Timestamp,
         creation_message_id: MessageId,
-        creation_certificate_hash: CryptoHash,
+        creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         self.assign_new_chain_to_public_key(
             key,
@@ -470,7 +470,7 @@ where
         chain_id: ChainId,
         timestamp: Timestamp,
         creation_message_id: MessageId,
-        creation_certificate_hash: CryptoHash,
+        creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         self.wallet.as_mut().assign_new_chain_to_public_key(
             key,
@@ -1063,7 +1063,7 @@ where
         _chain_id: ChainId,
         _timestamp: Timestamp,
         _creation_message_id: MessageId,
-        _creation_certificate_hash: CryptoHash,
+        _creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -1323,7 +1323,7 @@ where
         _chain_id: ChainId,
         _timestamp: Timestamp,
         _creation_message_id: MessageId,
-        _creation_certificate_hash: CryptoHash,
+        _creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         Ok(())
     }

@@ -177,7 +177,7 @@ impl Wallet {
         chain_id: ChainId,
         timestamp: Timestamp,
         creation_message_id: MessageId,
-        creation_certificate_hash: CryptoHash,
+        creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         let user_chain = UserChain {
             chain_id,
@@ -188,7 +188,7 @@ impl Wallet {
             pending_block: None,
             pending_blobs: BTreeMap::new(),
             creation_message_id: Some(creation_message_id),
-            creation_certificate_hash: Some(creation_certificate_hash),
+            creation_certificate_hash,
         };
         self.insert(user_chain);
         Ok(())
