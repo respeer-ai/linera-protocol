@@ -6,9 +6,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use async_trait::async_trait;
 use futures::Future;
 use linera_base::{
-    crypto::{KeyPair, PublicKey},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{BlockHeight, Timestamp},
-    identifiers::{Account, ChainId},
+    identifiers::{Account, ChainId, MessageId},
     ownership::ChainOwnership,
     time::{Duration, Instant},
 };
@@ -23,8 +23,6 @@ use linera_rpc::node_provider::{NodeOptions, NodeProvider};
 use linera_storage::Storage;
 use thiserror_context::Context;
 use tracing::{debug, info};
-#[cfg(feature = "no-storage")]
-use {crate::fake_wallet::FakeWallet, linera_base::crypto::CryptoHash};
 #[cfg(feature = "benchmark")]
 use {
     futures::{stream, StreamExt as _, TryStreamExt as _},
@@ -54,7 +52,6 @@ use {
 #[cfg(feature = "fs")]
 use {
     linera_base::{
-        crypto::CryptoHash,
         data_types::{BlobBytes, Bytecode},
         identifiers::BytecodeId,
     },
@@ -62,6 +59,8 @@ use {
     std::{fs, path::PathBuf},
 };
 
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
 #[cfg(web)]
 use crate::persistent::{LocalPersist as Persist, LocalPersistExt as _};
 #[cfg(not(web))]
@@ -142,9 +141,17 @@ where
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
+        creation_message_id: MessageId,
+        creation_certificate_hash: CryptoHash,
     ) -> Result<(), Error> {
-        self.assign_new_chain_to_public_key(key, chain_id, timestamp)
-            .await
+        self.assign_new_chain_to_public_key(
+            key,
+            chain_id,
+            timestamp,
+            creation_message_id,
+            creation_certificate_hash,
+        )
+        .await
     }
 
     async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
@@ -323,6 +330,8 @@ where
                     next_block_height: BlockHeight::ZERO,
                     pending_block: None,
                     pending_blobs: BTreeMap::new(),
+                    creation_message_id: None,
+                    creation_certificate_hash: None,
                 })
             })
             .await?;
@@ -460,10 +469,16 @@ where
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
+        creation_message_id: MessageId,
+        creation_certificate_hash: CryptoHash,
     ) -> Result<(), Error> {
-        self.wallet
-            .as_mut()
-            .assign_new_chain_to_public_key(key, chain_id, timestamp)?;
+        self.wallet.as_mut().assign_new_chain_to_public_key(
+            key,
+            chain_id,
+            timestamp,
+            creation_message_id,
+            creation_certificate_hash,
+        )?;
         self.save_wallet().await
     }
 
@@ -1047,6 +1062,8 @@ where
         _key: PublicKey,
         _chain_id: ChainId,
         _timestamp: Timestamp,
+        _creation_message_id: MessageId,
+        _creation_certificate_hash: CryptoHash,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -1305,6 +1322,8 @@ where
         _key: PublicKey,
         _chain_id: ChainId,
         _timestamp: Timestamp,
+        _creation_message_id: MessageId,
+        _creation_certificate_hash: CryptoHash,
     ) -> Result<(), Error> {
         Ok(())
     }

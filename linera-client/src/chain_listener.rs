@@ -10,9 +10,9 @@ use futures::{
     StreamExt,
 };
 use linera_base::{
-    crypto::{KeyPair, PublicKey},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::Timestamp,
-    identifiers::{ChainId, Destination},
+    identifiers::{ChainId, Destination, MessageId},
 };
 use linera_chain::data_types::OutgoingMessage;
 use linera_core::{
@@ -121,6 +121,8 @@ pub trait ClientContext: 'static {
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
+        creation_message_id: MessageId,
+        creation_certificate_hash: CryptoHash,
     ) -> Result<(), Error>;
 
     async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error>;

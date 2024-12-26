@@ -1006,6 +1006,7 @@ impl Runnable for Job {
                 Self::assign_new_chain_to_key(
                     chain_id,
                     message_id,
+                    None,
                     storage,
                     key,
                     None,
@@ -1112,6 +1113,7 @@ impl Runnable for Job {
                 Self::assign_new_chain_to_key(
                     outcome.chain_id,
                     outcome.message_id,
+                    Some(outcome.certificate_hash),
                     storage.clone(),
                     public_key,
                     Some(validators),
@@ -1141,6 +1143,7 @@ impl Job {
     pub async fn assign_new_chain_to_key<S>(
         chain_id: ChainId,
         message_id: MessageId,
+        certificate_hash: Option<CryptoHash>,
         storage: S,
         public_key: PublicKey,
         validators: Option<Vec<(ValidatorName, String)>>,
@@ -1215,7 +1218,13 @@ impl Job {
         context
             .wallet_mut()
             .mutate(|w| {
-                w.assign_new_chain_to_key(public_key, chain_id, executed_block.block.timestamp)
+                w.assign_new_chain_to_key(
+                    public_key,
+                    chain_id,
+                    executed_block.block.timestamp,
+                    message_id,
+                    certificate_hash,
+                )
             })
             .await?
             .context("could not assign the new chain")?;

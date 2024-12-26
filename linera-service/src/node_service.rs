@@ -1,4 +1,3 @@
-
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 use std::{
@@ -876,7 +875,13 @@ where
         self.context
             .lock()
             .await
-            .assign_new_chain_to_public_key(public_key, chain_id, Timestamp::now())
+            .assign_new_chain_to_public_key(
+                public_key,
+                chain_id,
+                Timestamp::now(),
+                message_id,
+                certificate_hash,
+            )
             .await
             .context("could not assign the new chain")?;
 

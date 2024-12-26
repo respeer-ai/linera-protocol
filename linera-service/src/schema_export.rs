@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use linera_base::{
     crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::{Blob, BlobContent, Timestamp},
-    identifiers::{BlobId, ChainId},
+    identifiers::{BlobId, ChainId, MessageId},
 };
 use linera_chain::data_types::{
     BlockProposal, Certificate, HashedCertificateValue, LiteCertificate,
@@ -186,6 +186,8 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
         _key: PublicKey,
         _chain_id: ChainId,
         _timestamp: Timestamp,
+        _creation_message_id: MessageId,
+        _creation_certificate_hash: CryptoHash,
     ) -> Result<(), Error> {
         unimplemented!()
     }
