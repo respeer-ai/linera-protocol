@@ -101,6 +101,10 @@ impl Wallet {
         self.chains.keys().copied().collect()
     }
 
+    pub fn chains(&self) -> Vec<&UserChain> {
+        self.chains.iter().map(|(_chain_id, chain)| chain).collect()
+    }
+
     /// Returns the list of all chain IDs for which we have a secret key.
     pub fn own_chain_ids(&self) -> Vec<ChainId> {
         self.chains

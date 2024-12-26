@@ -1131,6 +1131,39 @@ impl Runnable for Job {
                     .await??;
             }
 
+            Wallet(WalletCommand::Rebuild) => {
+                let genesis_config = context.wallet().genesis_config();
+                let validators = genesis_config.validators();
+                let chain_ids = context.wallet().chain_ids();
+
+                let chains = context.wallet().chains();
+
+                for chain_id in &chain_ids {
+                    match context.wallet().get(*chain_id) {
+                        Some(chain) => {
+                            println!("Rebuild chain {}", chain_id);
+                            if chain.creation_message_id.is_none() {
+                                continue;
+                            }
+                            if chain.key_pair.is_none() {
+                                continue;
+                            }
+                            Self::assign_new_chain_to_key(
+                                chain.chain_id,
+                                chain.creation_message_id.unwrap(),
+                                chain.creation_certificate_hash,
+                                storage.clone(),
+                                chain.key_pair.as_ref().unwrap().public(),
+                                Some(validators.clone()),
+                                &mut context,
+                            )
+                            .await?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
             CreateGenesisConfig { .. } | Keygen | Net(_) | Wallet(_) | HelpMarkdown => {
                 unreachable!()
             }
@@ -1645,6 +1678,12 @@ Make sure to use a Linera client compatible with this network.
                     );
                     options.run_with_storage(Job(options.clone())).await??;
                 }
+                Ok(())
+            }
+
+            WalletCommand::Rebuild => {
+                options.initialize_storage().boxed().await?;
+                options.run_with_storage(Job(options.clone())).await??;
                 Ok(())
             }
         },

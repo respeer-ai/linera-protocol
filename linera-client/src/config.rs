@@ -280,4 +280,15 @@ impl GenesisConfig {
     pub fn hash(&self) -> CryptoHash {
         CryptoHash::new(self)
     }
+
+    pub fn validators(&self) -> Vec<(ValidatorName, String)> {
+        let committee = self.committee.clone();
+        let policy = self.policy.clone();
+        committee
+            .into_committee(policy)
+            .validators()
+            .iter()
+            .map(|(name, validator)| (*name, validator.network_address.clone()))
+            .collect()
+    }
 }
