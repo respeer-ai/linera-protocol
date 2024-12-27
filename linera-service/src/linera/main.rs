@@ -1008,7 +1008,7 @@ impl Runnable for Job {
                     message_id,
                     None,
                     storage,
-                    key,
+                    Some(key),
                     None,
                     None,
                     &mut context,
@@ -1116,7 +1116,7 @@ impl Runnable for Job {
                     outcome.message_id,
                     Some(outcome.certificate_hash),
                     storage.clone(),
-                    public_key,
+                    Some(public_key),
                     None,
                     Some(validators),
                     &mut context,
@@ -1154,7 +1154,7 @@ impl Runnable for Job {
                                 chain.creation_certificate_hash,
                                 storage.clone(),
                                 None,
-                                chain.key_pair,
+                                Some(chain.key_pair.as_ref().unwrap().copy()),
                                 Some(validators.clone()),
                                 &mut context,
                             )
@@ -1245,23 +1245,20 @@ impl Job {
                 Please make sure you are connecting to a genuine faucet."
             );
         };
-        anyhow::ensure!(
-            config.ownership.verify_owner(&Owner::from(public_key)) == Some(public_key),
-            "The chain with the ID returned by the faucet is not owned by you. \
-            Please make sure you are connecting to a genuine faucet."
-        );
+        if public_key.is_some() {
+            anyhow::ensure!(
+                config
+                    .ownership
+                    .verify_owner(&Owner::from(public_key.unwrap()))
+                    == public_key,
+                "The chain with the ID returned by the faucet is not owned by you. \
+                Please make sure you are connecting to a genuine faucet."
+            );
+        }
         context
             .wallet_mut()
             .mutate(|w| {
-                if public_key.is_some() {
-                    w.assign_new_chain_to_key(
-                        public_key.unwrap(),
-                        chain_id,
-                        executed_block.block.timestamp,
-                        message_id,
-                        certificate_hash,
-                    )
-                } else if key_pair.is_some() {
+                if key_pair.is_some() {
                     w.assign_new_chain_to_key_pair(
                         key_pair.unwrap(),
                         chain_id,
@@ -1269,6 +1266,16 @@ impl Job {
                         message_id,
                         certificate_hash,
                     )
+                } else if public_key.is_some() {
+                    w.assign_new_chain_to_key(
+                        public_key.unwrap(),
+                        chain_id,
+                        executed_block.block.timestamp,
+                        message_id,
+                        certificate_hash,
+                    )
+                } else {
+                    Ok(())
                 }
             })
             .await?
