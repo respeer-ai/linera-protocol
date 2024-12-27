@@ -13,7 +13,7 @@ use chrono::Utc;
 use colored::Colorize;
 use futures::{lock::Mutex, FutureExt as _, StreamExt};
 use linera_base::{
-    crypto::{CryptoHash, CryptoRng, PublicKey},
+    crypto::{CryptoHash, CryptoRng, KeyPair, PublicKey},
     data_types::{ApplicationPermissions, Timestamp},
     identifiers::{ChainDescription, ChainId, MessageId, Owner},
     ownership::ChainOwnership,
@@ -1010,6 +1010,7 @@ impl Runnable for Job {
                     storage,
                     key,
                     None,
+                    None,
                     &mut context,
                 )
                 .await?;
@@ -1116,6 +1117,7 @@ impl Runnable for Job {
                     Some(outcome.certificate_hash),
                     storage.clone(),
                     public_key,
+                    None,
                     Some(validators),
                     &mut context,
                 )
@@ -1151,7 +1153,8 @@ impl Runnable for Job {
                                 chain.creation_message_id.unwrap(),
                                 chain.creation_certificate_hash,
                                 storage.clone(),
-                                chain.key_pair.as_ref().unwrap().public(),
+                                None,
+                                chain.key_pair,
                                 Some(validators.clone()),
                                 &mut context,
                             )
@@ -1176,7 +1179,8 @@ impl Job {
         message_id: MessageId,
         certificate_hash: Option<CryptoHash>,
         storage: S,
-        public_key: PublicKey,
+        public_key: Option<PublicKey>,
+        key_pair: Option<KeyPair>,
         validators: Option<Vec<(ValidatorName, String)>>,
         context: &mut ClientContext<S, impl Persist<Target = Wallet>>,
     ) -> anyhow::Result<()>
@@ -1249,13 +1253,23 @@ impl Job {
         context
             .wallet_mut()
             .mutate(|w| {
-                w.assign_new_chain_to_public_key(
-                    public_key,
-                    chain_id,
-                    executed_block.block.timestamp,
-                    message_id,
-                    certificate_hash,
-                )
+                if public_key.is_some() {
+                    w.assign_new_chain_to_key(
+                        public_key.unwrap(),
+                        chain_id,
+                        executed_block.block.timestamp,
+                        message_id,
+                        certificate_hash,
+                    )
+                } else if key_pair.is_some() {
+                    w.assign_new_chain_to_key_pair(
+                        key_pair.unwrap(),
+                        chain_id,
+                        executed_block.block.timestamp,
+                        message_id,
+                        certificate_hash,
+                    )
+                }
             })
             .await?
             .context("could not assign the new chain")?;

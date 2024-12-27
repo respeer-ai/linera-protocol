@@ -171,6 +171,29 @@ impl Wallet {
         Ok(())
     }
 
+    pub fn assign_new_chain_to_key_pair(
+        &mut self,
+        key_pair: KeyPair,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+        creation_message_id: MessageId,
+        creation_certificate_hash: CryptoHash,
+    ) -> Result<(), Error> {
+        let user_chain = UserChain {
+            chain_id,
+            key_pair: Some(key_pair),
+            block_hash: None,
+            timestamp,
+            next_block_height: BlockHeight(0),
+            pending_block: None,
+            pending_blobs: BTreeMap::new(),
+            creation_message_id: Some(creation_message_id),
+            creation_certificate_hash: Some(creation_certificate_hash),
+        };
+        self.insert(user_chain);
+        Ok(())
+    }
+
     pub fn assign_new_chain_to_public_key(
         &mut self,
         key: PublicKey,
