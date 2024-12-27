@@ -27,7 +27,7 @@ use tracing::{debug, error, info, instrument, warn, Instrument as _};
 #[cfg(feature = "no-storage")]
 use {
     crate::fake_wallet::FakeWallet,
-    linera_base::{crypto::CryptoHash, data_types::BlockHeight},
+    linera_base::data_types::BlockHeight,
 };
 
 #[cfg(not(feature = "no-storage"))]

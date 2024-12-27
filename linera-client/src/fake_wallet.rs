@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use linera_base::{
-    crypto::{KeyPair, PublicKey},
+    crypto::{KeyPair, PublicKey, CryptoHash},
     data_types::Timestamp,
-    identifiers::ChainId,
+    identifiers::{ChainId, MessageId},
 };
 use linera_core::{client::ChainClient, node::ValidatorNodeProvider};
 use linera_storage::Storage;
