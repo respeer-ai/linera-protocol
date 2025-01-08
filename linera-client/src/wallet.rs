@@ -152,10 +152,15 @@ impl Wallet {
         creation_message_id: MessageId,
         creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
+        let Some(key_pair) = self.key_pair_for_pk(&key) else {
+            return Err(error::Error::Base(error::Inner::NonexistentKeypair(chain_id)));
+        };
+        /*
         let key_pair = self
             .unassigned_key_pairs
             .remove(&key)
             .ok_or(error::Inner::NonexistentKeypair(chain_id))?;
+        */
         let user_chain = UserChain {
             chain_id,
             key_pair: Some(key_pair),
