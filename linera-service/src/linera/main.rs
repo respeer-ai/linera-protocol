@@ -1159,6 +1159,9 @@ impl Runnable for Job {
                                 &mut context,
                             )
                             .await?;
+                            let chain_client = context.make_chain_client(*chain_id)?;
+                            info!("Synchronizing chain {}", chain_id);
+                            chain_client.synchronize_from_validators().await?;
                         }
                         _ => {}
                     }
@@ -1255,6 +1258,7 @@ impl Job {
                 Please make sure you are connecting to a genuine faucet."
             );
         }
+
         context
             .wallet_mut()
             .mutate(|w| {
