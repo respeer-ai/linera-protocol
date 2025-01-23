@@ -257,6 +257,8 @@ where
             blob_ids.remove(&blob.id()); // Keep only blobs we may need to resend.
         }
 
+        let mut retries = 0;
+
         loop {
             match self
                 .remote_node
@@ -266,13 +268,14 @@ where
                 Ok(info) => return Ok(info),
                 Err(NodeError::MissingCrossChainUpdate { .. })
                 | Err(NodeError::InactiveChain(_))
-                    if !sent_cross_chain_updates =>
+                    if !sent_cross_chain_updates && retries < 10 =>
                 {
                     sent_cross_chain_updates = true;
                     // Some received certificates may be missing for this validator
                     // (e.g. to create the chain or make the balance sufficient) so we are going to
                     // synchronize them now and retry.
-                    info!("Send cross chain updates {}", chain_id);
+                    info!("Send cross chain updates {} retries {}", chain_id, retries);
+                    retries += 1;
                     match self.send_chain_information_for_senders(chain_id).await {
                         Ok(_) => {},
                         Err(e) => {
