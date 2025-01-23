@@ -256,6 +256,9 @@ where
         for blob in &proposal.blobs {
             blob_ids.remove(&blob.id()); // Keep only blobs we may need to resend.
         }
+
+        let mut retries = 20;
+
         loop {
             match self
                 .remote_node
@@ -271,7 +274,16 @@ where
                     // Some received certificates may be missing for this validator
                     // (e.g. to create the chain or make the balance sufficient) so we are going to
                     // synchronize them now and retry.
-                    self.send_chain_information_for_senders(chain_id).await?;
+                    match self.send_chain_information_for_senders(chain_id).await {
+                        Ok(_) => {},
+                        Err(err) => {
+                            retries -= 1;
+                            warn!("Failed send chain information {}", chain_id);
+                            if retries == 0 {
+                                return Err(err);
+                            }
+                        }
+                    }
                 }
                 Err(NodeError::BlobNotFoundOnRead(_)) if !blob_ids.is_empty() => {
                     // For `BlobNotFoundOnRead`, we assume that the local node should already be
