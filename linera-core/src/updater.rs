@@ -20,7 +20,7 @@ use linera_chain::data_types::{BlockProposal, Certificate, LiteVote};
 use linera_execution::committee::Committee;
 use linera_storage::Storage;
 use thiserror::Error;
-use tracing::{error, warn};
+use tracing::{error, warn, info};
 
 use crate::{
     data_types::{ChainInfo, ChainInfoQuery},
@@ -257,8 +257,6 @@ where
             blob_ids.remove(&blob.id()); // Keep only blobs we may need to resend.
         }
 
-        let mut retries = 20;
-
         loop {
             match self
                 .remote_node
@@ -274,14 +272,12 @@ where
                     // Some received certificates may be missing for this validator
                     // (e.g. to create the chain or make the balance sufficient) so we are going to
                     // synchronize them now and retry.
+                    info!("Send cross chain updates {}", chain_id);
                     match self.send_chain_information_for_senders(chain_id).await {
                         Ok(_) => {},
-                        Err(err) => {
-                            retries -= 1;
+                        Err(e) => {
                             warn!("Failed send chain information {}", chain_id);
-                            if retries == 0 {
-                                return Err(err);
-                            }
+                            return Err(e);
                         }
                     }
                 }
