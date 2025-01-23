@@ -20,7 +20,7 @@ use linera_chain::data_types::{BlockProposal, Certificate, LiteVote};
 use linera_execution::committee::Committee;
 use linera_storage::Storage;
 use thiserror::Error;
-use tracing::{error, warn, info};
+use tracing::{error, warn};
 
 use crate::{
     data_types::{ChainInfo, ChainInfoQuery},
@@ -145,6 +145,12 @@ where
                 highest_key_score = highest_key_score.max(entry.0);
             }
             Err(err) => {
+                match err {
+                    NodeError::MissingCrossChainUpdate { .. } => {
+                        continue;
+                    }
+                    _ => {}
+                }
                 let entry = error_scores.entry(err.clone()).or_insert(0);
                 *entry += committee.weight(&name);
                 if *entry >= committee.validity_threshold() {
