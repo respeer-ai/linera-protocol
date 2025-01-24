@@ -145,12 +145,8 @@ where
                 highest_key_score = highest_key_score.max(entry.0);
             }
             Err(err) => {
-                match err {
-                    NodeError::MissingCrossChainUpdate { .. } => {
-                        continue;
-                    }
-                    _ => {}
-                }
+                warn!("Failed to weight value {:?}", err);
+
                 let entry = error_scores.entry(err.clone()).or_insert(0);
                 *entry += committee.weight(&name);
                 if *entry >= committee.validity_threshold() {
