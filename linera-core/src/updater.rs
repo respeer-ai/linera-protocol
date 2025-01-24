@@ -128,6 +128,7 @@ where
     let mut highest_key_score = 0;
     let mut value_scores = HashMap::new();
     let mut error_scores = HashMap::new();
+    let mut error_counts = HashMap::new();
 
     while let Ok(Some((name, result))) = timeout(
         end_time.map_or(MAX_TIMEOUT, |t| t.saturating_duration_since(Instant::now())),
@@ -145,14 +146,20 @@ where
                 highest_key_score = highest_key_score.max(entry.0);
             }
             Err(err) => {
-                warn!("Failed to weight value {:?}", err);
+                let errors = error_counts.entry(name).or_insert(1);
 
-                let entry = error_scores.entry(err.clone()).or_insert(0);
-                *entry += committee.weight(&name);
-                if *entry >= committee.validity_threshold() {
-                    // At least one honest node returned this error.
-                    // No quorum can be reached, so return early.
-                    return Err(CommunicationError::Trusted(err));
+                warn!("{} failed({}) to weight value {:?}", name, *errors, err);
+
+                *errors += 1;
+
+                if *errors >= 10 {
+                    let entry = error_scores.entry(err.clone()).or_insert(0);
+                    *entry += committee.weight(&name);
+                    if *entry >= committee.validity_threshold() {
+                        // At least one honest node returned this error.
+                        // No quorum can be reached, so return early.
+                        return Err(CommunicationError::Trusted(err));
+                    }
                 }
             }
         }
