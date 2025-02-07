@@ -1115,6 +1115,7 @@ where
             options.long_lived_services,
             wallet.chain_ids(),
             "Client node",
+            Duration::from_secs(1),
         );
 
         ClientContext {
