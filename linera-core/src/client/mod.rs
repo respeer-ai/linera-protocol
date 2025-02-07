@@ -2856,6 +2856,13 @@ where
         self.publish_data_blobs(vec![bytes]).await
     }
 
+    /// Adds pending blobs
+    pub async fn add_pending_blobs(&self, pending_blobs: impl IntoIterator<Item = Blob>) {
+        for blob in pending_blobs {
+            self.state_mut().insert_pending_blob(blob);
+        }
+    }
+
     /// Creates an application by instantiating some bytecode.
     #[instrument(
         level = "trace",
@@ -3478,7 +3485,7 @@ where
             },
             owner: self.public_key().await?.into(),
             signature,
-            blobs,
+            blobs: blobs.clone(),
             validated_block_certificate: if retry && validated_block_certificate.is_some() {
                 Some(
                     validated_block_certificate
@@ -3496,7 +3503,7 @@ where
             .local_node
             .handle_block_proposal(proposal.clone())
             .await?;
-        self.state_mut().set_pending_block(block);
+        self.state_mut().set_pending_block(block, blobs);
         // Remember what we are trying to do before sending the proposal to the validators.
         // Send the query to validators.
         let certificate = self

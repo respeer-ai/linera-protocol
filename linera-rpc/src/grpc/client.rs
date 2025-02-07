@@ -236,6 +236,7 @@ impl GrpcClient {
             | Code::FailedPrecondition
             | Code::OutOfRange
             | Code::Unimplemented
+            | Code::Internal
             | Code::DataLoss
             | Code::Unauthenticated => {
                 debug!("Unexpected gRPC status: {}", status);

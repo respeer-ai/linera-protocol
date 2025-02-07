@@ -337,6 +337,7 @@ where
             false,
             vec![message_id.chain_id, chain_id],
             "Temporary client for fetching the parent chain",
+            std::time::Duration::from_secs(1),
         );
 
         let nodes: Vec<_> = node_provider

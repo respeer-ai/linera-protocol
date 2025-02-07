@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use linera_base::{
-    crypto::{KeyPair, PublicKey, CryptoHash},
+    crypto::{CryptoHash, KeyPair, PublicKey},
     data_types::Timestamp,
     identifiers::{ChainId, MessageId},
 };

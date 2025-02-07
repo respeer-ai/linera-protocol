@@ -25,10 +25,7 @@ use linera_rpc::node_provider::NodeProvider;
 use linera_storage::{Clock as _, Storage};
 use tracing::{debug, error, info, instrument, warn, Instrument as _};
 #[cfg(feature = "no-storage")]
-use {
-    crate::fake_wallet::FakeWallet,
-    linera_base::data_types::BlockHeight,
-};
+use {crate::fake_wallet::FakeWallet, linera_base::data_types::BlockHeight};
 
 #[cfg(not(feature = "no-storage"))]
 use crate::wallet::Wallet;

@@ -153,7 +153,9 @@ impl Wallet {
         creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         let Some(key_pair) = self.key_pair_for_pk(&key) else {
-            return Err(error::Error::Base(error::Inner::NonexistentKeypair(chain_id)));
+            return Err(error::Error::Base(error::Inner::NonexistentKeypair(
+                chain_id,
+            )));
         };
         /*
         let key_pair = self
