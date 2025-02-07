@@ -137,11 +137,11 @@ test-log = { version = "0.2.15", default-features = false, features = ["trace"] 
 test-strategy = "0.3.1"
 thiserror = "1.0.65"
 thiserror-context = "0.1.1"
-tonic = { version = "0.12", default-features = false }
-tonic-build = { version = "0.12", default-features = false }
-tonic-health = "0.12"
-tonic-reflection = "0.12"
-tonic-web = "0.12"
+tonic = { version = "0.12.3", default-features = false }
+tonic-build = { version = "0.12.3", default-features = false }
+tonic-health = "0.12.3"
+tonic-reflection = "0.12.3"
+tonic-web = "0.12.3"
 tonic-web-wasm-client = "0.6.0"
 tokio = "1.36.0"
 tokio-stream = "0.1.14"
@@ -171,6 +171,8 @@ web-sys = "0.3.69"
 web-time = "1.1.0"
 wit-bindgen = "0.24.0"
 zstd = "0.13.2"
+serde_with = "3.11.0"
+lazy_static = "1.5.0"
 
 linera-base = { version = "0.13.1", path = "./linera-base" }
 linera-chain = { version = "0.13.1", path = "./linera-chain" }
@@ -232,3 +234,9 @@ opt-level = 3
 version = "0.4.1"
 git = "https://github.com/Twey/rust-indexed-db"
 branch = "no-uuid-wasm-bindgen"
+
+[patch.crates-io.ed25519-dalek]
+version = "2.1.1"
+git = "https://github.com/respeer-ai/curve25519-dalek"
+branch = "respeer-pub-field-1efe6a93"
+

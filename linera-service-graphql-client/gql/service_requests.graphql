@@ -327,6 +327,14 @@ query Blocks($from: CryptoHash, $chainId: ChainId!, $limit: Int) {
   }
 }
 
+query PendingMessages($chainId: ChainId!) {
+  pendingMessages(chainId: $chainId) {
+    origin
+    event
+    action
+  }
+}
+
 subscription Notifications($chainId: ChainId!) {
   notifications(chainId: $chainId)
 }

@@ -10,7 +10,7 @@ use linera_base::{
     crypto::{CryptoHash, CryptoRng, KeyPair, PublicKey},
     data_types::{Blob, BlockHeight, Timestamp},
     ensure,
-    identifiers::{BlobId, ChainDescription, ChainId},
+    identifiers::{BlobId, ChainDescription, ChainId, MessageId},
 };
 use linera_chain::data_types::Block;
 use linera_core::{client::ChainClient, node::ValidatorNodeProvider};
@@ -25,6 +25,7 @@ pub struct Wallet {
     pub chains: BTreeMap<ChainId, UserChain>,
     pub unassigned_key_pairs: HashMap<PublicKey, KeyPair>,
     pub default: Option<ChainId>,
+    pub defaults: HashMap<PublicKey, ChainId>,
     pub genesis_config: GenesisConfig,
     pub testing_prng_seed: Option<u64>,
 }
@@ -49,6 +50,7 @@ impl Wallet {
             chains: BTreeMap::new(),
             unassigned_key_pairs: HashMap::new(),
             default: None,
+            defaults: HashMap::new(),
             genesis_config,
             testing_prng_seed,
         }
@@ -87,8 +89,20 @@ impl Wallet {
         self.default
     }
 
+    pub fn default_chains(&self) -> HashMap<PublicKey, ChainId> {
+        self.defaults.clone()
+    }
+
+    pub fn default_chain_with_public_key(&self, public_key: PublicKey) -> Option<ChainId> {
+        self.defaults.get(&public_key).copied()
+    }
+
     pub fn chain_ids(&self) -> Vec<ChainId> {
         self.chains.keys().copied().collect()
+    }
+
+    pub fn chains(&self) -> Vec<&UserChain> {
+        self.chains.iter().map(|(_chain_id, chain)| chain).collect()
     }
 
     /// Returns the list of all chain IDs for which we have a secret key.
@@ -135,11 +149,18 @@ impl Wallet {
         key: PublicKey,
         chain_id: ChainId,
         timestamp: Timestamp,
+        creation_message_id: MessageId,
+        creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
+        let Some(key_pair) = self.key_pair_for_pk(&key) else {
+            return Err(error::Error::Base(error::Inner::NonexistentKeypair(chain_id)));
+        };
+        /*
         let key_pair = self
             .unassigned_key_pairs
             .remove(&key)
             .ok_or(error::Inner::NonexistentKeypair(chain_id))?;
+        */
         let user_chain = UserChain {
             chain_id,
             key_pair: Some(key_pair),
@@ -148,6 +169,54 @@ impl Wallet {
             next_block_height: BlockHeight(0),
             pending_block: None,
             pending_blobs: BTreeMap::new(),
+            creation_message_id: Some(creation_message_id),
+            creation_certificate_hash,
+        };
+        self.insert(user_chain);
+        Ok(())
+    }
+
+    pub fn assign_new_chain_to_key_pair(
+        &mut self,
+        key_pair: KeyPair,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+        creation_message_id: MessageId,
+        creation_certificate_hash: Option<CryptoHash>,
+    ) -> Result<(), Error> {
+        let user_chain = UserChain {
+            chain_id,
+            key_pair: Some(key_pair),
+            block_hash: None,
+            timestamp,
+            next_block_height: BlockHeight(0),
+            pending_block: None,
+            pending_blobs: BTreeMap::new(),
+            creation_message_id: Some(creation_message_id),
+            creation_certificate_hash,
+        };
+        self.insert(user_chain);
+        Ok(())
+    }
+
+    pub fn assign_new_chain_to_public_key(
+        &mut self,
+        key: PublicKey,
+        chain_id: ChainId,
+        timestamp: Timestamp,
+        creation_message_id: MessageId,
+        creation_certificate_hash: Option<CryptoHash>,
+    ) -> Result<(), Error> {
+        let user_chain = UserChain {
+            chain_id,
+            key_pair: Some(KeyPair::from_public_key(key)),
+            block_hash: None,
+            timestamp,
+            next_block_height: BlockHeight(0),
+            pending_block: None,
+            pending_blobs: BTreeMap::new(),
+            creation_message_id: Some(creation_message_id),
+            creation_certificate_hash,
         };
         self.insert(user_chain);
         Ok(())
@@ -162,6 +231,19 @@ impl Wallet {
         Ok(())
     }
 
+    pub fn set_default_chain_with_public_key(
+        &mut self,
+        public_key: PublicKey,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        ensure!(
+            self.chains.contains_key(&chain_id),
+            error::Inner::NonexistentChain(chain_id)
+        );
+        self.defaults.insert(public_key, chain_id);
+        Ok(())
+    }
+
     pub async fn update_from_state<P, S>(&mut self, chain_client: &ChainClient<P, S>)
     where
         P: ValidatorNodeProvider + Sync + 'static,
@@ -169,6 +251,16 @@ impl Wallet {
     {
         let key_pair = chain_client.key_pair().await.map(|k| k.copy()).ok();
         let state = chain_client.state();
+
+        let creation_message_id = match self.get(chain_client.chain_id()) {
+            Some(chain) => chain.creation_message_id,
+            _ => None,
+        };
+        let creation_certificate_hash = match self.get(chain_client.chain_id()) {
+            Some(chain) => chain.creation_certificate_hash,
+            _ => None,
+        };
+
         self.chains.insert(
             chain_client.chain_id(),
             UserChain {
@@ -179,6 +271,8 @@ impl Wallet {
                 timestamp: state.timestamp(),
                 pending_block: state.pending_block().clone(),
                 pending_blobs: state.pending_blobs().clone(),
+                creation_message_id,
+                creation_certificate_hash,
             },
         );
     }
@@ -212,6 +306,8 @@ pub struct UserChain {
     pub pending_block: Option<Block>,
     #[serde(with = "serde_btreemap_keys_as_strings")]
     pub pending_blobs: BTreeMap<BlobId, Blob>,
+    pub creation_message_id: Option<MessageId>,
+    pub creation_certificate_hash: Option<CryptoHash>,
 }
 
 impl UserChain {
@@ -230,6 +326,8 @@ impl UserChain {
             next_block_height: BlockHeight::ZERO,
             pending_block: None,
             pending_blobs: BTreeMap::new(),
+            creation_message_id: None,
+            creation_certificate_hash: None,
         }
     }
 
@@ -244,6 +342,8 @@ impl UserChain {
             next_block_height: BlockHeight::ZERO,
             pending_block: None,
             pending_blobs: BTreeMap::new(),
+            creation_message_id: None,
+            creation_certificate_hash: None,
         }
     }
 }

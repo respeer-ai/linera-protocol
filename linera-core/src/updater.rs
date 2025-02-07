@@ -128,6 +128,7 @@ where
     let mut highest_key_score = 0;
     let mut value_scores = HashMap::new();
     let mut error_scores = HashMap::new();
+    let mut error_counts = HashMap::new();
 
     while let Ok(Some((name, result))) = timeout(
         end_time.map_or(MAX_TIMEOUT, |t| t.saturating_duration_since(Instant::now())),
@@ -145,12 +146,20 @@ where
                 highest_key_score = highest_key_score.max(entry.0);
             }
             Err(err) => {
-                let entry = error_scores.entry(err.clone()).or_insert(0);
-                *entry += committee.weight(&name);
-                if *entry >= committee.validity_threshold() {
-                    // At least one honest node returned this error.
-                    // No quorum can be reached, so return early.
-                    return Err(CommunicationError::Trusted(err));
+                let errors = error_counts.entry(name).or_insert(1);
+
+                warn!("{} failed({}) to weight value {:?}", name, *errors, err);
+
+                *errors += 1;
+
+                if *errors >= 10 {
+                    let entry = error_scores.entry(err.clone()).or_insert(0);
+                    *entry += committee.weight(&name);
+                    if *entry >= committee.validity_threshold() {
+                        // At least one honest node returned this error.
+                        // No quorum can be reached, so return early.
+                        return Err(CommunicationError::Trusted(err));
+                    }
                 }
             }
         }
@@ -256,6 +265,7 @@ where
         for blob in &proposal.blobs {
             blob_ids.remove(&blob.id()); // Keep only blobs we may need to resend.
         }
+
         loop {
             match self
                 .remote_node
@@ -271,7 +281,7 @@ where
                     // Some received certificates may be missing for this validator
                     // (e.g. to create the chain or make the balance sufficient) so we are going to
                     // synchronize them now and retry.
-                    self.send_chain_information_for_senders(chain_id).await?;
+                    let _ = self.send_chain_information_for_senders(chain_id).await;
                 }
                 Err(NodeError::BlobNotFoundOnRead(_)) if !blob_ids.is_empty() => {
                     // For `BlobNotFoundOnRead`, we assume that the local node should already be
