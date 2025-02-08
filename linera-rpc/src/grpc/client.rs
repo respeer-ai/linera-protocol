@@ -225,7 +225,7 @@ impl GrpcClient {
                 debug!("gRPC request interrupted: {}; retrying", status);
                 true
             }
-            Code::Ok | Code::Cancelled | Code::ResourceExhausted => {
+            Code::Ok | Code::Cancelled | Code::ResourceExhausted | Code::Internal => {
                 error!("Unexpected gRPC status: {}; retrying", status);
                 true
             }
@@ -236,7 +236,6 @@ impl GrpcClient {
             | Code::FailedPrecondition
             | Code::OutOfRange
             | Code::Unimplemented
-            | Code::Internal
             | Code::DataLoss
             | Code::Unauthenticated => {
                 debug!("Unexpected gRPC status: {}", status);
