@@ -254,7 +254,10 @@ impl ChainListener {
             let sleep = Box::pin(storage.clock().sleep_until(timeout));
             let notification = match future::select(local_stream.next(), sleep).await {
                 Either::Left((Some(notification), _)) => notification,
-                Either::Left((None, _)) => break,
+                Either::Left((None, _)) => {
+                    warn!("Exiting chain listener {}", chain_id);
+                    break;
+                }
                 Either::Right(((), _)) => {
                     timeout = Timestamp::from(u64::MAX);
                     if config.skip_process_inbox {
