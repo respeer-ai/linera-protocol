@@ -12,6 +12,7 @@ repository.workspace = true
 version.workspace = true
 
 [features]
+no-storage = []
 test = ["linera-views/test", "linera-execution/test"]
 benchmark = [
     "linera-base/test",

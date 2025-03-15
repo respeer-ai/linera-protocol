@@ -180,6 +180,7 @@ where
         Ok(self.node.state.stage_block_execution(block, round).await?)
     }
 
+<<<<<<< HEAD
     /// Reads blobs from storage.
     pub async fn read_blobs_from_storage(
         &self,
@@ -241,6 +242,20 @@ where
             self.node.state.handle_pending_blob(chain_id, blob).await?;
         }
         Ok(())
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub async fn calculate_block_state_hash(
+        &self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), LocalNodeError> {
+        let (executed_block, info) = self
+            .node
+            .state
+            .calculate_block_state_hash(block, local_time)
+            .await?;
+        Ok((executed_block, info))
     }
 
     /// Returns a read-only view of the [`ChainStateView`] of a chain referenced by its

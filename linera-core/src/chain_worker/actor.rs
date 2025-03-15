@@ -160,6 +160,13 @@ where
         new_trackers: BTreeMap<ValidatorPublicKey, u64>,
         callback: oneshot::Sender<Result<(), WorkerError>>,
     },
+
+    /// Execute a block but discard any changes to the chain state.
+    CalculateBlockStateHash {
+        block: Block,
+        local_time: Timestamp,
+        callback: oneshot::Sender<Result<(ExecutedBlock, ChainInfoResponse), WorkerError>>,
+    },
 }
 
 /// The actor worker type.
@@ -225,6 +232,7 @@ where
         tracked_chains: Option<Arc<RwLock<HashSet<ChainId>>>>,
         delivery_notifier: DeliveryNotifier,
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> Result<Self, WorkerError> {
         let (service_runtime_thread, service_runtime_endpoint) = {
             if config.long_lived_services {
@@ -261,7 +269,10 @@ where
         let context = QueryContext {
             chain_id,
             next_block_height: BlockHeight(0),
-            local_time: Timestamp::from(0),
+            local_time: match local_time {
+                Some(timestamp) => timestamp,
+                None => Timestamp::from(0),
+            },
         };
 
         let (execution_state_sender, incoming_execution_requests) =

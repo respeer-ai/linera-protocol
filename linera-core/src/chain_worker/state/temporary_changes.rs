@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use linera_base::{
-    data_types::{ArithmeticError, Timestamp, UserApplicationDescription},
+    data_types::{ArithmeticError, BlobContent, Timestamp, UserApplicationDescription},
     ensure,
     identifiers::{AccountOwner, ChannelFullName, GenericApplicationId, UserApplicationId},
 };
@@ -28,6 +28,7 @@ use {
 
 use super::ChainWorkerState;
 use crate::{
+    client::{MAXIMUM_BLOB_SIZE, MAXIMUM_BYTECODE_SIZE},
     data_types::{ChainInfo, ChainInfoQuery, ChainInfoResponse},
     worker::WorkerError,
 };
@@ -286,6 +287,57 @@ where
             info.manager.add_values(&chain.manager);
         }
         Ok(ChainInfoResponse::new(info, self.0.config.key_pair()))
+    }
+
+    fn check_blob_size(content: &BlobContent) -> Result<(), WorkerError> {
+        ensure!(
+            u64::try_from(content.size())
+                .ok()
+                .is_some_and(|size| size <= MAXIMUM_BLOB_SIZE),
+            WorkerError::BlobTooLarge
+        );
+        match content {
+            BlobContent::ContractBytecode(compressed_bytecode)
+            | BlobContent::ServiceBytecode(compressed_bytecode) => {
+                ensure!(
+                    compressed_bytecode.decompressed_size_at_most(MAXIMUM_BYTECODE_SIZE)?,
+                    WorkerError::BytecodeTooLarge
+                );
+            }
+            BlobContent::Data(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Executes a block without persisting any changes to the state.
+    pub(super) async fn calculate_block_state_hash(
+        &mut self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+        let signer = block.authenticated_signer;
+
+        let executed_block = Box::pin(
+            self.0
+                .chain
+                .calculate_block_state_hash(&block, local_time, None),
+        )
+        .await?
+        .with(block);
+
+        let mut response = ChainInfoResponse::new(&self.0.chain, None);
+        if let Some(signer) = signer {
+            response.info.requested_owner_balance = self
+                .0
+                .chain
+                .execution_state
+                .system
+                .balances
+                .get(&signer)
+                .await?;
+        }
+
+        Ok((executed_block, response))
     }
 }
 

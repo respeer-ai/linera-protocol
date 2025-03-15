@@ -570,6 +570,17 @@ where
         ChainWorkerStateWithAttemptedChanges::new(self)
             .await
             .update_received_certificate_trackers(new_trackers)
+    }
+
+    /// Executes a block without persisting any changes to the state.
+    pub(super) async fn calculate_block_state_hash(
+        &mut self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+        ChainWorkerStateWithTemporaryChanges::new(self)
+            .await
+            .calculate_block_state_hash(block, local_time)
             .await
     }
 }

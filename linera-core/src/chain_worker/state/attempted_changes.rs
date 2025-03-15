@@ -413,6 +413,9 @@ where
             .await;
         let info = ChainInfoResponse::new(&self.state.chain, self.state.config.key_pair());
 
+        self.register_delivery_notifier(block_height, &actions, notify_when_messages_are_delivered)
+            .await;
+
         Ok((info, actions))
     }
 

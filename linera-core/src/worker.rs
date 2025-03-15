@@ -100,6 +100,16 @@ static CERTIFICATES_SIGNED: LazyLock<IntCounterVec> = LazyLock::new(|| {
     )
 });
 
+#[cfg(with_metrics)]
+static CERTIFICATES_SIGNED: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    prometheus_util::register_int_counter_vec(
+        "certificates_signed",
+        "Number of confirmed block certificates signed by each validator",
+        &["validator_name"],
+    )
+    .expect("Counter creation should not fail")
+});
+
 /// Instruct the networking layer to send cross-chain requests and/or push notifications.
 #[derive(Default, Debug)]
 pub struct NetworkActions {
@@ -656,7 +666,31 @@ where
             oneshot::Sender<Result<Response, WorkerError>>,
         ) -> ChainWorkerRequest<StorageClient::Context>,
     ) -> Result<Response, WorkerError> {
-        let chain_actor = self.get_chain_worker_endpoint(chain_id).await?;
+        let chain_actor = self.get_chain_worker_endpoint(chain_id, None).await?;
+        let (callback, response) = oneshot::channel();
+
+        chain_actor
+            .send(request_builder(callback))
+            .expect("`ChainWorkerActor` stopped executing unexpectedly");
+
+        response
+            .await
+            .expect("`ChainWorkerActor` stopped executing without responding")
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, request_builder))]
+    /// Sends a request to the [`ChainWorker`] for a [`ChainId`] and waits for the `Response`.
+    async fn query_chain_worker_with_local_time<Response>(
+        &self,
+        chain_id: ChainId,
+        request_builder: impl FnOnce(
+            oneshot::Sender<Result<Response, WorkerError>>,
+        ) -> ChainWorkerRequest<StorageClient::Context>,
+        local_time: Timestamp,
+    ) -> Result<Response, WorkerError> {
+        let chain_actor = self
+            .get_chain_worker_endpoint(chain_id, Some(local_time))
+            .await?;
         let (callback, response) = oneshot::channel();
 
         chain_actor
@@ -674,6 +708,7 @@ where
     async fn get_chain_worker_endpoint(
         &self,
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> Result<ChainActorEndpoint<StorageClient>, WorkerError> {
         let (sender, new_receiver) = timeout(Duration::from_secs(3), async move {
             loop {
@@ -1047,6 +1082,24 @@ where
                 callback,
             }
         })
+    }
+
+    /// Tries to execute a block proposal without any verification other than block execution.
+    #[tracing::instrument(level = "trace", skip(self, block))]
+    pub async fn calculate_block_state_hash(
+        &self,
+        block: Block,
+        local_time: Timestamp,
+    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+        self.query_chain_worker_with_local_time(
+            block.chain_id,
+            move |callback| ChainWorkerRequest::CalculateBlockStateHash {
+                block,
+                local_time,
+                callback,
+            },
+            local_time,
+        )
         .await
     }
 }

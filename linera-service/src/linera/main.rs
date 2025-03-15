@@ -514,6 +514,10 @@ impl Runnable for Job {
 
                     Box::pin(chain.sync_validator(validator.clone())).await?;
                 }
+                if !faulty_validators.is_empty() {
+                    println!("{:#?}", faulty_validators);
+                }
+                println!("{}/{} OK.", num_ok_validators, committee.validators().len());
             }
 
             command @ (SetValidator { .. }
@@ -844,7 +848,16 @@ impl Runnable for Job {
 
             Service { config, port } => {
                 let default_chain = context.wallet().default_chain();
-                let service = NodeService::new(config, port, default_chain, storage, context).await;
+                let default_chains = context.wallet().default_chains();
+                let mut service = NodeService::new(
+                    config,
+                    port,
+                    default_chain,
+                    storage,
+                    context,
+                    default_chains,
+                )
+                .await;
                 service.run().await?;
             }
 
@@ -1215,6 +1228,41 @@ impl Runnable for Job {
             | HelpMarkdown => {
                 unreachable!()
             }
+
+            Wallet(WalletCommand::Rebuild) => {
+                let genesis_config = context.wallet().genesis_config();
+                let validators = genesis_config.validators();
+                let chain_ids = context.wallet().chain_ids();
+
+                for chain_id in &chain_ids {
+                    match context.wallet().get(*chain_id) {
+                        Some(chain) => {
+                            println!("Rebuild chain {}", chain_id);
+                            if chain.creation_message_id.is_none() {
+                                continue;
+                            }
+                            if chain.key_pair.is_none() {
+                                continue;
+                            }
+                            Self::assign_new_chain_to_key(
+                                chain.chain_id,
+                                chain.creation_message_id.unwrap(),
+                                chain.creation_certificate_hash,
+                                storage.clone(),
+                                None,
+                                Some(chain.key_pair.as_ref().unwrap().copy()),
+                                Some(validators.clone()),
+                                &mut context,
+                            )
+                            .await?;
+                            let chain_client = context.make_chain_client(*chain_id)?;
+                            info!("Synchronizing chain {}", chain_id);
+                            chain_client.synchronize_from_validators().await?;
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -1224,7 +1272,7 @@ impl Job {
     /// Prints a warning message to explain that the wallet has been initialized using data from
     /// untrusted nodes, and gives instructions to verify that we are connected to the right
     /// network.
-    async fn print_peg_certificate_hash<S>(
+    pub async fn print_peg_certificate_hash<S>(
         storage: S,
         chain_ids: impl IntoIterator<Item = ChainId>,
         context: &ClientContext<S, impl Persist<Target = Wallet>>,
@@ -1886,6 +1934,12 @@ Make sure to use a Linera client compatible with this network.
                     start_time.elapsed().as_millis()
                 );
                 Ok(0)
+            }
+
+            WalletCommand::Rebuild => {
+                options.initialize_storage().boxed().await?;
+                options.run_with_storage(Job(options.clone())).await??;
+                Ok(())
             }
         },
 
