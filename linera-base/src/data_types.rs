@@ -1048,17 +1048,6 @@ impl BlobContent {
     pub fn blob_type(&self) -> BlobType {
         self.blob_type
     }
-
-    /// Returns the size of the blob content in bytes.
-    pub fn size(&self) -> usize {
-        match self {
-            BlobContent::Data(bytes) => bytes.len(),
-            BlobContent::ContractBytecode(compressed_bytecode)
-            | BlobContent::ServiceBytecode(compressed_bytecode) => {
-                compressed_bytecode.compressed_bytes.len()
-            }
-        }
-    }
 }
 
 impl From<Blob> for BlobContent {
