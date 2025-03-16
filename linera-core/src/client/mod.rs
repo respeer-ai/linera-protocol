@@ -44,7 +44,7 @@ use linera_base::{
 use linera_base::{data_types::Bytecode, vm::VmRuntime};
 use linera_chain::{
     data_types::{
-        Block, BlockProposal, Certificate, CertificateValue, ChainAndHeight, ExecutedBlock, HashedCertificateValue, IncomingBundle, LiteCertificate, LiteVote, MessageAction,
+        BlockProposal, CertificateValue, ChainAndHeight, ExecutedBlock, IncomingBundle, LiteCertificate, LiteVote, MessageAction,
         ProposedBlock,
     },
     manager::LockingBlock,
@@ -60,7 +60,7 @@ use linera_execution::{
         AdminOperation, OpenChainConfig, Recipient, SystemOperation, EPOCH_STREAM_NAME,
         OPEN_CHAIN_MESSAGE_INDEX, REMOVED_EPOCH_STREAM_NAME,
     },
-    ExecutionError, Operation, Query, Response, SystemExecutionError, QueryOutcome, QueryResponse, SystemQuery, SystemResponse,
+    ExecutionError, Operation, Query, QueryOutcome, QueryResponse, SystemQuery, SystemResponse,
 };
 use linera_storage::{Clock as _, Storage};
 use linera_views::views::ViewError;

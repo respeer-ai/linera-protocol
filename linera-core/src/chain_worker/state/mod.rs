@@ -14,7 +14,7 @@ use std::{
 
 use linera_base::{
     crypto::{CryptoHash, ValidatorPublicKey},
-    data_types::{Blob, BlockHeight, UserApplicationDescription},
+    data_types::{Blob, BlockHeight, UserApplicationDescription, Timestamp},
     ensure,
     hashed::Hashed,
     identifiers::{BlobId, ChainId, UserApplicationId},

@@ -237,7 +237,7 @@ where
     ) -> Result<Self, WorkerError> {
         let (service_runtime_thread, service_runtime_endpoint) = {
             if config.long_lived_services {
-                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id).await;
+                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id, local_time).await;
                 (Some(thread), Some(endpoint))
             } else {
                 (None, None)
@@ -266,6 +266,7 @@ where
     /// Returns the task handle and the endpoints to interact with the actor.
     async fn spawn_service_runtime_actor(
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> (linera_base::task::Blocking, ServiceRuntimeEndpoint) {
         let context = QueryContext {
             chain_id,
