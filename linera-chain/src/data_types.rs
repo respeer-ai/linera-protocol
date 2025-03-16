@@ -70,11 +70,7 @@ pub struct ProposedBlock {
     /// fees. If set, this must be the `owner` in the block proposal. `None` means that
     /// the default account of the chain is used. This value is also used as recipient of
     /// potential refunds for the message grants created by the operations.
-<<<<<<< HEAD
     #[debug(skip_if = Option::is_none)]
-=======
-    #[serde(alias = "authenticatedSigner", alias = "authenticated_signer")]
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
     pub authenticated_signer: Option<Owner>,
     /// Certified hash (see `Certificate` below) of the previous block in the
     /// chain, if any.
@@ -289,36 +285,11 @@ pub struct BlockProposal {
     pub validated_block_certificate: Option<LiteCertificate<'static>>,
 }
 
-<<<<<<< HEAD
-=======
-/// A posted message together with routing information.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
-pub struct OutgoingMessage {
-    /// The destination of the message.
-    pub destination: Destination,
-    /// The user authentication carried by the message, if any.
-    #[serde(alias = "authenticatedSigner", alias = "authenticated_signer")]
-    pub authenticated_signer: Option<Owner>,
-    /// A grant to pay for the message execution.
-    pub grant: Amount,
-    /// Where to send a refund for the unused part of the grant after execution, if any.
-    pub refund_grant_to: Option<Account>,
-    /// The kind of message being sent.
-    pub kind: MessageKind,
-    /// The message itself.
-    pub message: Message,
-}
-
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
 /// A message together with kind, authentication and grant information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
-<<<<<<< HEAD
     #[debug(skip_if = Option::is_none)]
-=======
-    #[serde(alias = "authenticatedSigner", alias = "authenticated_signer")]
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
     pub authenticated_signer: Option<Owner>,
     /// A grant to pay for the message execution.
     #[debug(skip_if = Amount::is_zero)]
@@ -417,79 +388,11 @@ pub struct BlockExecutionOutcome {
     /// The record of oracle responses for each transaction.
     pub oracle_responses: Vec<Vec<OracleResponse>>,
     /// The list of events produced by each transaction.
-<<<<<<< HEAD
     pub events: Vec<Vec<Event>>,
     /// The list of blobs created by each transaction.
     pub blobs: Vec<Vec<Blob>>,
     /// The execution result for each operation.
     pub operation_results: Vec<OperationResult>,
-=======
-    pub events: Vec<Vec<EventRecord>>,
-}
-
-/// An event recorded in an executed block.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
-pub struct EventRecord {
-    /// The ID of the stream this event belongs to.
-    pub stream_id: StreamId,
-    /// The event key.
-    pub key: Vec<u8>,
-    /// The payload data.
-    pub value: Vec<u8>,
-}
-
-/// A statement to be certified by the validators.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Deserialize, Serialize)]
-pub enum CertificateValue {
-    ValidatedBlock {
-        executed_block: ExecutedBlock,
-    },
-    ConfirmedBlock {
-        executed_block: ExecutedBlock,
-    },
-    Timeout {
-        chain_id: ChainId,
-        height: BlockHeight,
-        epoch: Epoch,
-    },
-}
-
-#[async_graphql::Object(cache_control(no_cache))]
-impl CertificateValue {
-    #[graphql(derived(name = "executed_block"))]
-    async fn _executed_block(&self) -> Option<ExecutedBlock> {
-        self.executed_block().cloned()
-    }
-
-    async fn status(&self) -> String {
-        match self {
-            CertificateValue::ValidatedBlock { .. } => "validated".to_string(),
-            CertificateValue::ConfirmedBlock { .. } => "confirmed".to_string(),
-            CertificateValue::Timeout { .. } => "timeout".to_string(),
-        }
-    }
-}
-
-/// A statement to be certified by the validators, with its hash.
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct HashedCertificateValue {
-    pub value: CertificateValue,
-    /// Hash of the value (used as key for storage).
-    pub hash: CryptoHash,
-}
-
-#[async_graphql::Object(cache_control(no_cache))]
-impl HashedCertificateValue {
-    #[graphql(derived(name = "hash"))]
-    async fn _hash(&self) -> CryptoHash {
-        self.hash
-    }
-
-    #[graphql(derived(name = "value"))]
-    async fn _value(&self) -> CertificateValue {
-        self.value.clone()
-    }
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
 }
 
 /// The hash and chain ID of a `CertificateValue`.
@@ -583,104 +486,9 @@ impl LiteVote {
         })
     }
 
-<<<<<<< HEAD
     pub fn kind(&self) -> CertificateKind {
         self.value.kind
     }
-=======
-/// A certified statement from the committee, without the value.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[cfg_attr(with_testing, derive(Eq, PartialEq))]
-pub struct LiteCertificate<'a> {
-    /// Hash and chain ID of the certified value (used as key for storage).
-    pub value: LiteValue,
-    /// The round in which the value was certified.
-    pub round: Round,
-    /// Signatures on the value.
-    pub signatures: Cow<'a, [(ValidatorName, Signature)]>,
-}
-
-impl<'a> LiteCertificate<'a> {
-    pub fn new(
-        value: LiteValue,
-        round: Round,
-        mut signatures: Vec<(ValidatorName, Signature)>,
-    ) -> Self {
-        signatures.sort_by_key(|&(validator_name, _)| validator_name);
-
-        let signatures = Cow::Owned(signatures);
-        Self {
-            value,
-            round,
-            signatures,
-        }
-    }
-
-    /// Creates a `LiteCertificate` from a list of votes, without cryptographically checking the
-    /// signatures. Returns `None` if the votes are empty or don't have matching values and rounds.
-    pub fn try_from_votes(votes: impl IntoIterator<Item = LiteVote>) -> Option<Self> {
-        let mut votes = votes.into_iter();
-        let LiteVote {
-            value,
-            round,
-            validator,
-            signature,
-        } = votes.next()?;
-        let mut signatures = vec![(validator, signature)];
-        for vote in votes {
-            if vote.value.value_hash != value.value_hash || vote.round != round {
-                return None;
-            }
-            signatures.push((vote.validator, vote.signature));
-        }
-        Some(LiteCertificate::new(value, round, signatures))
-    }
-
-    /// Verifies the certificate.
-    pub fn check(&self, committee: &Committee) -> Result<&LiteValue, ChainError> {
-        check_signatures(
-            self.value.value_hash,
-            self.round,
-            &self.signatures,
-            committee,
-        )?;
-        Ok(&self.value)
-    }
-
-    /// Returns the `Certificate` with the specified value, if it matches.
-    pub fn with_value(self, value: HashedCertificateValue) -> Option<Certificate> {
-        if self.value.chain_id != value.inner().chain_id() || self.value.value_hash != value.hash()
-        {
-            return None;
-        }
-        Some(Certificate {
-            value,
-            round: self.round,
-            signatures: self.signatures.into_owned(),
-        })
-    }
-
-    /// Returns a `LiteCertificate` that owns the list of signatures.
-    pub fn cloned(&self) -> LiteCertificate<'static> {
-        LiteCertificate {
-            value: self.value.clone(),
-            round: self.round,
-            signatures: Cow::Owned(self.signatures.clone().into_owned()),
-        }
-    }
-}
-
-/// A certified statement from the committee.
-#[derive(Clone, Debug, Serialize)]
-#[cfg_attr(with_testing, derive(Eq, PartialEq))]
-pub struct Certificate {
-    /// The certified value.
-    pub value: HashedCertificateValue,
-    /// The round in which the value was certified.
-    pub round: Round,
-    /// Signatures on the value.
-    signatures: Vec<(ValidatorName, Signature)>,
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
 }
 
 impl fmt::Display for Origin {
@@ -724,139 +532,6 @@ impl Target {
     }
 }
 
-<<<<<<< HEAD
-=======
-impl Serialize for HashedCertificateValue {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.value.serialize(serializer)
-    }
-}
-
-impl<'a> Deserialize<'a> for HashedCertificateValue {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'a>,
-    {
-        Ok(CertificateValue::deserialize(deserializer)?.into())
-    }
-}
-
-impl From<CertificateValue> for HashedCertificateValue {
-    fn from(value: CertificateValue) -> HashedCertificateValue {
-        value.with_hash()
-    }
-}
-
-impl From<HashedCertificateValue> for CertificateValue {
-    fn from(hv: HashedCertificateValue) -> CertificateValue {
-        hv.value
-    }
-}
-
-impl CertificateValue {
-    pub fn chain_id(&self) -> ChainId {
-        match self {
-            CertificateValue::ConfirmedBlock { executed_block, .. }
-            | CertificateValue::ValidatedBlock { executed_block, .. } => {
-                executed_block.block.chain_id
-            }
-            CertificateValue::Timeout { chain_id, .. } => *chain_id,
-        }
-    }
-
-    pub fn height(&self) -> BlockHeight {
-        match self {
-            CertificateValue::ConfirmedBlock { executed_block, .. }
-            | CertificateValue::ValidatedBlock { executed_block, .. } => {
-                executed_block.block.height
-            }
-            CertificateValue::Timeout { height, .. } => *height,
-        }
-    }
-
-    pub fn epoch(&self) -> Epoch {
-        match self {
-            CertificateValue::ConfirmedBlock { executed_block, .. }
-            | CertificateValue::ValidatedBlock { executed_block, .. } => executed_block.block.epoch,
-            CertificateValue::Timeout { epoch, .. } => *epoch,
-        }
-    }
-
-    /// Creates a `HashedCertificateValue` checking that this is the correct hash.
-    pub fn with_hash_checked(self, hash: CryptoHash) -> Result<HashedCertificateValue, ChainError> {
-        let hashed_certificate_value = self.with_hash();
-        ensure!(
-            hashed_certificate_value.hash == hash,
-            ChainError::CertificateValueHashMismatch {
-                expected: hash,
-                actual: hashed_certificate_value.hash
-            }
-        );
-        Ok(hashed_certificate_value)
-    }
-
-    /// Creates a `HashedCertificateValue` by hashing `self`. No hash checks are made!
-    pub fn with_hash(self) -> HashedCertificateValue {
-        let hash = CryptoHash::new(&self);
-        HashedCertificateValue { value: self, hash }
-    }
-
-    /// Creates a `HashedCertificateValue` without checking that this is the correct hash!
-    pub fn with_hash_unchecked(self, hash: CryptoHash) -> HashedCertificateValue {
-        HashedCertificateValue { value: self, hash }
-    }
-
-    /// Returns whether this value contains the message with the specified ID.
-    pub fn has_message(&self, message_id: &MessageId) -> bool {
-        let Some(executed_block) = self.executed_block() else {
-            return false;
-        };
-        executed_block.message_by_id(message_id).is_some()
-    }
-
-    pub fn is_confirmed(&self) -> bool {
-        matches!(self, CertificateValue::ConfirmedBlock { .. })
-    }
-
-    pub fn is_validated(&self) -> bool {
-        matches!(self, CertificateValue::ValidatedBlock { .. })
-    }
-
-    pub fn is_timeout(&self) -> bool {
-        matches!(self, CertificateValue::Timeout { .. })
-    }
-
-    #[cfg(with_testing)]
-    pub fn messages(&self) -> Option<&Vec<Vec<OutgoingMessage>>> {
-        Some(self.executed_block()?.messages())
-    }
-
-    pub fn executed_block(&self) -> Option<&ExecutedBlock> {
-        match self {
-            CertificateValue::ConfirmedBlock { executed_block, .. }
-            | CertificateValue::ValidatedBlock { executed_block, .. } => Some(executed_block),
-            CertificateValue::Timeout { .. } => None,
-        }
-    }
-
-    pub fn block(&self) -> Option<&Block> {
-        self.executed_block()
-            .map(|executed_block| &executed_block.block)
-    }
-
-    pub fn to_log_str(&self) -> &'static str {
-        match self {
-            CertificateValue::ConfirmedBlock { .. } => "confirmed_block",
-            CertificateValue::ValidatedBlock { .. } => "validated_block",
-            CertificateValue::Timeout { .. } => "timeout",
-        }
-    }
-}
-
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
 impl MessageBundle {
     pub fn is_skippable(&self) -> bool {
         self.messages.iter().all(PostedMessage::is_skippable)
@@ -1238,156 +913,10 @@ pub(crate) fn is_strictly_ordered(values: &[(ValidatorPublicKey, ValidatorSignat
     values.windows(2).all(|pair| pair[0].0 < pair[1].0)
 }
 
-<<<<<<< HEAD
 /// Verifies certificate signatures.
 pub(crate) fn check_signatures(
     value_hash: CryptoHash,
     certificate_kind: CertificateKind,
-=======
-impl<'de> Deserialize<'de> for Certificate {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        #[derive(Debug, Deserialize)]
-        #[serde(rename = "Certificate")]
-        struct CertificateHelper {
-            value: HashedCertificateValue,
-            round: Round,
-            signatures: Vec<(ValidatorName, Signature)>,
-        }
-
-        let helper: CertificateHelper = Deserialize::deserialize(deserializer)?;
-        if !is_strictly_ordered(&helper.signatures) {
-            Err(serde::de::Error::custom("Vector is not strictly sorted"))
-        } else {
-            Ok(Self {
-                value: helper.value,
-                round: helper.round,
-                signatures: helper.signatures,
-            })
-        }
-    }
-}
-
-impl Certificate {
-    pub fn new(
-        value: HashedCertificateValue,
-        round: Round,
-        mut signatures: Vec<(ValidatorName, Signature)>,
-    ) -> Self {
-        signatures.sort_by_key(|&(validator_name, _)| validator_name);
-
-        Self {
-            value,
-            round,
-            signatures,
-        }
-    }
-
-    pub fn signatures(&self) -> &Vec<(ValidatorName, Signature)> {
-        &self.signatures
-    }
-
-    // Adds a signature to the certificate's list of signatures
-    // It's the responsibility of the caller to not insert duplicates
-    pub fn add_signature(
-        &mut self,
-        signature: (ValidatorName, Signature),
-    ) -> &Vec<(ValidatorName, Signature)> {
-        let index = self
-            .signatures
-            .binary_search_by(|(name, _)| name.cmp(&signature.0))
-            .unwrap_or_else(std::convert::identity);
-        self.signatures.insert(index, signature);
-        &self.signatures
-    }
-
-    /// Verifies the certificate.
-    pub fn check<'a>(
-        &'a self,
-        committee: &Committee,
-    ) -> Result<&'a HashedCertificateValue, ChainError> {
-        check_signatures(
-            self.lite_value().value_hash,
-            self.round,
-            &self.signatures,
-            committee,
-        )?;
-        Ok(&self.value)
-    }
-
-    /// Returns the certificate without the full value.
-    pub fn lite_certificate(&self) -> LiteCertificate<'_> {
-        LiteCertificate {
-            value: self.lite_value(),
-            round: self.round,
-            signatures: Cow::Borrowed(&self.signatures),
-        }
-    }
-
-    /// Returns the `LiteValue` corresponding to the certified value.
-    pub fn lite_value(&self) -> LiteValue {
-        LiteValue {
-            value_hash: self.hash(),
-            chain_id: self.value().chain_id(),
-        }
-    }
-
-    /// Returns the certified value.
-    pub fn value(&self) -> &CertificateValue {
-        &self.value.value
-    }
-
-    /// Returns the certified value's hash.
-    pub fn hash(&self) -> CryptoHash {
-        self.value.hash
-    }
-
-    /// Returns whether the validator is among the signatories of this certificate.
-    pub fn is_signed_by(&self, validator_name: &ValidatorName) -> bool {
-        self.signatures
-            .binary_search_by(|(name, _)| name.cmp(validator_name))
-            .is_ok()
-    }
-
-    /// Returns the bundles of messages sent via the given medium to the specified
-    /// recipient. Messages originating from different transactions of the original block
-    /// are kept in separate bundles. If the medium is a channel, does not verify that the
-    /// recipient is actually subscribed to that channel.
-    pub fn message_bundles_for<'a>(
-        &'a self,
-        medium: &'a Medium,
-        recipient: ChainId,
-    ) -> impl Iterator<Item = (Epoch, MessageBundle)> + 'a {
-        let certificate_hash = self.hash();
-        self.value()
-            .executed_block()
-            .into_iter()
-            .flat_map(move |executed_block| {
-                executed_block.message_bundles_for(medium, recipient, certificate_hash)
-            })
-    }
-
-    pub fn requires_blob(&self, blob_id: &BlobId) -> bool {
-        self.value()
-            .executed_block()
-            .is_some_and(|executed_block| executed_block.requires_blob(blob_id))
-    }
-
-    #[cfg(with_testing)]
-    pub fn outgoing_message_count(&self) -> usize {
-        let Some(executed_block) = self.value().executed_block() else {
-            return 0;
-        };
-        executed_block.messages().iter().map(Vec::len).sum()
-    }
-}
-
-/// Verifies certificate signatures.
-fn check_signatures(
-    value_hash: CryptoHash,
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
     round: Round,
     signatures: &[(ValidatorPublicKey, ValidatorSignature)],
     committee: &Committee,
@@ -1412,13 +941,8 @@ fn check_signatures(
         ChainError::CertificateRequiresQuorum
     );
     // All that is left is checking signatures!
-<<<<<<< HEAD
     let hash_and_round = VoteValue(value_hash, round, certificate_kind);
     ValidatorSignature::verify_batch(&hash_and_round, signatures.iter())?;
-=======
-    let hash_and_round = ValueHashAndRound(value_hash, round);
-    Signature::verify_batch(&hash_and_round, signatures.iter().map(|(v, s)| (&v.0, s)))?;
->>>>>>> respeer-maas-testnet_archimedes-e117e2cb-2025_02_05
     Ok(())
 }
 

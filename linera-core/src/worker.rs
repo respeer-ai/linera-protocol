@@ -1086,15 +1086,17 @@ where
 
     /// Tries to execute a block proposal without any verification other than block execution.
     #[tracing::instrument(level = "trace", skip(self, block))]
-    pub async fn calculate_block_state_hash(
+    pub async fn stage_block_execution_with_local_time(
         &self,
-        block: Block,
+        block: ProposedBlock,
+        round: Option<u32>,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
         self.query_chain_worker_with_local_time(
             block.chain_id,
-            move |callback| ChainWorkerRequest::CalculateBlockStateHash {
+            move |callback| ChainWorkerRequest::SimulateBlockExecution {
                 block,
+                round,
                 local_time,
                 callback,
             },

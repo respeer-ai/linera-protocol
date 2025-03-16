@@ -310,20 +310,17 @@ where
     }
 
     /// Executes a block without persisting any changes to the state.
-    pub(super) async fn calculate_block_state_hash(
+    pub(super) async fn stage_block_execution_with_local_time(
         &mut self,
-        block: Block,
+        block: ProposedBlock,
+        round: Option<u32>,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
         let signer = block.authenticated_signer;
 
-        let executed_block = Box::pin(
-            self.0
-                .chain
-                .calculate_block_state_hash(&block, local_time, None),
-        )
-        .await?
-        .with(block);
+        let executed_block = Box::pin(self.0.chain.execute_block(&block, local_time, round, None))
+            .await?
+            .with(block);
 
         let mut response = ChainInfoResponse::new(&self.0.chain, None);
         if let Some(signer) = signer {
@@ -333,7 +330,7 @@ where
                 .execution_state
                 .system
                 .balances
-                .get(&signer)
+                .get(&AccountOwner::User(signer))
                 .await?;
         }
 

@@ -3691,14 +3691,15 @@ where
     /// Attempts to execute the block locally. If any incoming message execution fails, that
     /// message is rejected and execution is retried, until the block accepts only messages
     /// that succeed.
-    async fn construct_block_with_full_materials_and_discard_failing_messages(
+    async fn stage_block_execution_with_local_time_and_discard_failing_messages(
         &self,
-        mut block: Block,
+        mut block: ProposedBlock,
+        round: Option<u32>,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), ChainClientError> {
         loop {
             let result = self
-                .calculate_block_state_hash(block.clone(), local_time)
+                .stage_block_execution_with_local_time(block.clone(), round, local_time)
                 .await;
             if let Err(ChainClientError::LocalNodeError(LocalNodeError::WorkerError(
                 WorkerError::ChainError(chain_error),
@@ -3735,16 +3736,15 @@ where
     #[tracing::instrument(level = "trace", skip(block))]
     /// Attempts to execute the block locally. If any attempt to read a blob fails, the blob is
     /// downloaded and execution is retried.
-    async fn calculate_block_state_hash(
+    async fn stage_block_execution_with_local_time(
         &self,
-        block: Block,
+        block: ProposedBlock,
+        round: Option<u32>,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), ChainClientError> {
         loop {
-            let result = self
-                .client
-                .local_node
-                .calculate_block_state_hash(block.clone(), local_time)
+            let result = self.client.local_node
+                .stage_block_execution_with_loca_time(block.clone(), round, local_time)
                 .await;
             if let Err(err) = &result {
                 if let Some(blob_ids) = err.get_blobs_not_found() {
@@ -3776,7 +3776,7 @@ where
 
     /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
     /// called, it will be proposed to the validators.
-    async fn construct_executed_block_with_full_materials(
+    async fn new_executed_block_with_full_materials(
         &self,
         incoming_bundles: Vec<IncomingBundle>,
         operations: Vec<Operation>,
@@ -3810,7 +3810,7 @@ where
         // Make sure every incoming message succeeds and otherwise remove them.
         // Also, compute the final certified hash while we're at it.
         let (executed_block, _) = self
-            .construct_block_with_full_materials_and_discard_failing_messages(block, local_time)
+            .stage_block_execution_with_local_time_and_discard_failing_messages(block, local_time)
             .await?;
         Ok(executed_block)
     }
@@ -3860,19 +3860,6 @@ where
         Ok(round)
     }
 
-    /// Execute block with operations and incoming bundles
-    async fn _execute_block_with_full_materials(
-        &self,
-        operations: Vec<Operation>,
-        incoming_bundles: Vec<IncomingBundle>,
-        local_time: Timestamp,
-    ) -> Result<ExecutedBlock, ChainClientError> {
-        // Construct block and executed block
-        Ok(self
-            .construct_executed_block_with_full_materials(incoming_bundles, operations, local_time)
-            .await?)
-    }
-
     /// Calculate block execution state hash
     pub async fn execute_block_with_full_materials(
         &self,
@@ -3910,7 +3897,7 @@ where
             .or_else(|| self.state().pending_block().clone())
         else {
             return Ok((
-                self._execute_block_with_full_materials(operations, incoming_bundles, local_time)
+                self.new_executed_block_with_full_materials(incoming_bundles, operations, local_time)
                     .await?,
                 None,
                 false,

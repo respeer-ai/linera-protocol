@@ -180,7 +180,6 @@ where
         Ok(self.node.state.stage_block_execution(block, round).await?)
     }
 
-<<<<<<< HEAD
     /// Reads blobs from storage.
     pub async fn read_blobs_from_storage(
         &self,
@@ -245,15 +244,16 @@ where
     }
 
     #[instrument(level = "trace", skip_all)]
-    pub async fn calculate_block_state_hash(
+    pub async fn stage_block_execution_with_local_time(
         &self,
-        block: Block,
+        block: ProposedBlock,
+        round: Option<u32>,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), LocalNodeError> {
         let (executed_block, info) = self
             .node
             .state
-            .calculate_block_state_hash(block, local_time)
+            .stage_block_execution_with_local_time(block, round, local_time)
             .await?;
         Ok((executed_block, info))
     }

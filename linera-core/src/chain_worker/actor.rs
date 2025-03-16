@@ -162,8 +162,9 @@ where
     },
 
     /// Execute a block but discard any changes to the chain state.
-    CalculateBlockStateHash {
-        block: Block,
+    StageBlockExecutionWithLocalTime {
+        block: ProposedBlock,
+        round: Option<u32>,
         local_time: Timestamp,
         callback: oneshot::Sender<Result<(ExecutedBlock, ChainInfoResponse), WorkerError>>,
     },
@@ -422,6 +423,14 @@ where
                         .await,
                 )
                 .is_ok(),
+            ChainWorkerRequest::StageBlockExecutionWithLocalTime {
+                block,
+                round,
+                local_time,
+                callback,
+            } => callback
+                .send(self.worker.simulate_block_execution(block, round, local_time).await)
+                .is_ok(),
         };
 
         if !responded {
@@ -485,6 +494,9 @@ where
                 callback.send(Err(error)).is_ok()
             }
             ChainWorkerRequest::UpdateReceivedCertificateTrackers { callback, .. } => {
+                callback.send(Err(error)).is_ok()
+            }
+            ChainWorkerRequest::StageBlockExecutionWithLocalTime { callback, .. } => {
                 callback.send(Err(error)).is_ok()
             }
         };

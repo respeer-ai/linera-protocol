@@ -573,14 +573,15 @@ where
     }
 
     /// Executes a block without persisting any changes to the state.
-    pub(super) async fn calculate_block_state_hash(
+    pub(super) async fn stage_block_execution_with_local_time(
         &mut self,
-        block: Block,
+        block: ProposedBlock,
+        round: Option<u32>,
         local_time: Timestamp,
     ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
         ChainWorkerStateWithTemporaryChanges::new(self)
             .await
-            .calculate_block_state_hash(block, local_time)
+            .stage_block_execution_with_local_time(block, round, local_time)
             .await
     }
 }
