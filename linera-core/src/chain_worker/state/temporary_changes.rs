@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use linera_base::{
-    data_types::{ArithmeticError, BlobContent, Timestamp, UserApplicationDescription},
+    data_types::{ArithmeticError, Timestamp, UserApplicationDescription},
     ensure,
     identifiers::{AccountOwner, ChannelFullName, GenericApplicationId, UserApplicationId},
 };
@@ -28,7 +28,6 @@ use {
 
 use super::ChainWorkerState;
 use crate::{
-    client::{MAXIMUM_BLOB_SIZE, MAXIMUM_BYTECODE_SIZE},
     data_types::{ChainInfo, ChainInfoQuery, ChainInfoResponse},
     worker::WorkerError,
 };
@@ -287,26 +286,6 @@ where
             info.manager.add_values(&chain.manager);
         }
         Ok(ChainInfoResponse::new(info, self.0.config.key_pair()))
-    }
-
-    fn check_blob_size(content: &BlobContent) -> Result<(), WorkerError> {
-        ensure!(
-            u64::try_from(content.size())
-                .ok()
-                .is_some_and(|size| size <= MAXIMUM_BLOB_SIZE),
-            WorkerError::BlobTooLarge
-        );
-        match content {
-            BlobContent::ContractBytecode(compressed_bytecode)
-            | BlobContent::ServiceBytecode(compressed_bytecode) => {
-                ensure!(
-                    compressed_bytecode.decompressed_size_at_most(MAXIMUM_BYTECODE_SIZE)?,
-                    WorkerError::BytecodeTooLarge
-                );
-            }
-            BlobContent::Data(_) => {}
-        }
-        Ok(())
     }
 
     /// Executes a block without persisting any changes to the state.

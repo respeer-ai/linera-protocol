@@ -10,7 +10,7 @@ use linera_base::{
     crypto::{AccountSecretKey, CryptoHash, CryptoRng},
     data_types::{BlockHeight, Timestamp},
     ensure,
-    identifiers::{ChainDescription, ChainId, Owner, MessageId},
+    identifiers::{ChainDescription, ChainId, MessageId, Owner},
 };
 use linera_core::{
     client::{ChainClient, PendingProposal},
@@ -154,7 +154,7 @@ impl Wallet {
         timestamp: Timestamp,
         creation_message_id: MessageId,
         creation_certificate_hash: Option<CryptoHash>,
-        ) -> Result<(), Error> {
+    ) -> Result<(), Error> {
         let key_pair = self
             .unassigned_key_pairs
             .remove(&owner)

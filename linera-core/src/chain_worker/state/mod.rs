@@ -14,7 +14,7 @@ use std::{
 
 use linera_base::{
     crypto::{CryptoHash, ValidatorPublicKey},
-    data_types::{Blob, BlockHeight, UserApplicationDescription, Timestamp},
+    data_types::{Blob, BlockHeight, Timestamp, UserApplicationDescription},
     ensure,
     hashed::Hashed,
     identifiers::{BlobId, ChainId, UserApplicationId},
@@ -570,6 +570,7 @@ where
         ChainWorkerStateWithAttemptedChanges::new(self)
             .await
             .update_received_certificate_trackers(new_trackers)
+            .await
     }
 
     /// Executes a block without persisting any changes to the state.

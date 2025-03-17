@@ -199,6 +199,7 @@ where
             ChainWorkerRequest<StorageClient::Context>,
             tracing::Span,
         )>,
+        local_time: Option<Timestamp>,
     ) {
         let actor = loop {
             let load_result = Self::load(
@@ -208,6 +209,7 @@ where
                 tracked_chains.clone(),
                 delivery_notifier.clone(),
                 chain_id,
+                local_time,
             )
             .await
             .inspect_err(|error| warn!("Failed to load chain state: {error:?}"));
@@ -237,7 +239,8 @@ where
     ) -> Result<Self, WorkerError> {
         let (service_runtime_thread, service_runtime_endpoint) = {
             if config.long_lived_services {
-                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id, local_time).await;
+                let (thread, endpoint) =
+                    Self::spawn_service_runtime_actor(chain_id, local_time).await;
                 (Some(thread), Some(endpoint))
             } else {
                 (None, None)
@@ -430,7 +433,11 @@ where
                 local_time,
                 callback,
             } => callback
-                .send(self.worker.simulate_block_execution(block, round, local_time).await)
+                .send(
+                    self.worker
+                        .stage_block_execution_with_local_time(block, round, local_time)
+                        .await,
+                )
                 .is_ok(),
         };
 

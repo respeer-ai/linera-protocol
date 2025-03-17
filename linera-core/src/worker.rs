@@ -15,7 +15,8 @@ use linera_base::crypto::AccountPublicKey;
 use linera_base::{
     crypto::{AccountSecretKey, CryptoError, CryptoHash, ValidatorPublicKey, ValidatorSecretKey},
     data_types::{
-        ArithmeticError, Blob, BlockHeight, DecompressionError, Round, UserApplicationDescription,
+        ArithmeticError, Blob, BlockHeight, DecompressionError, Round, Timestamp,
+        UserApplicationDescription,
     },
     doc_scalar,
     hashed::Hashed,
@@ -93,12 +94,11 @@ static NUM_BLOCKS: LazyLock<IntCounterVec> = LazyLock::new(|| {
 
 #[cfg(with_metrics)]
 static CERTIFICATES_SIGNED: LazyLock<IntCounterVec> = LazyLock::new(|| {
-    prometheus_util::register_int_counter_vec(
+    register_int_counter_vec(
         "certificates_signed",
         "Number of confirmed block certificates signed by each validator",
         &["validator_name"],
     )
-    .expect("Counter creation should not fail")
 });
 
 /// Instruct the networking layer to send cross-chain requests and/or push notifications.
@@ -661,7 +661,7 @@ where
         let (callback, response) = oneshot::channel();
 
         chain_actor
-            .send(request_builder(callback))
+            .send((request_builder(callback), tracing::Span::current()))
             .expect("`ChainWorkerActor` stopped executing unexpectedly");
 
         response
@@ -730,6 +730,7 @@ where
                 delivery_notifier,
                 chain_id,
                 receiver,
+                local_time,
             );
 
             self.chain_worker_tasks
@@ -1073,6 +1074,7 @@ where
                 callback,
             }
         })
+        .await
     }
 
     /// Tries to execute a block proposal without any verification other than block execution.
@@ -1085,7 +1087,7 @@ where
     ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
         self.query_chain_worker_with_local_time(
             block.chain_id,
-            move |callback| ChainWorkerRequest::SimulateBlockExecution {
+            move |callback| ChainWorkerRequest::StageBlockExecutionWithLocalTime {
                 block,
                 round,
                 local_time,

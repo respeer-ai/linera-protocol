@@ -20,9 +20,9 @@ use linera_core::{
     worker::{Notification, Reason},
 };
 use linera_execution::{Message, OutgoingMessage, SystemMessage};
+use linera_rpc::node_provider::NodeProvider;
 use linera_storage::{Clock as _, Storage};
 use tracing::{debug, error, info, instrument, warn, Instrument as _};
-use linera_rpc::node_provider::NodeProvider;
 #[cfg(feature = "no-storage")]
 use {crate::fake_wallet::FakeWallet, linera_base::data_types::BlockHeight};
 

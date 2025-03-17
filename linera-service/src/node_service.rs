@@ -22,35 +22,38 @@ use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Ex
 use futures::{lock::Mutex, Future};
 use linera_base::{
     crypto::{BcsSignable, CryptoError, CryptoHash, PublicKey, Signature},
-    data_types::{Amount, ApplicationPermissions, BlockHeight, Bytecode, Round, TimeDelta, Timestamp, UserApplicationDescription},
-    doc_scalar,
-    ensure,
+    data_types::{
+        Amount, ApplicationPermissions, BlockHeight, Bytecode, Round, TimeDelta, Timestamp,
+        UserApplicationDescription,
+    },
+    doc_scalar, ensure,
     hashed::Hashed,
-    identifiers::{ApplicationId, ChainId, ModuleId, MessageId, Owner, UserApplicationId},
+    identifiers::{ApplicationId, ChainId, MessageId, ModuleId, Owner, UserApplicationId},
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
     BcsHexParseError,
 };
 use linera_chain::{
-    types::{ConfirmedBlock, GenericCertificate},
     data_types::{
         Block, BlockExecutionOutcome, CandidateBlockMaterial, CertificateValue, ExecutedBlock,
         HashedCertificateValue, IncomingBundle, MessageAction, MessageBundle, Origin,
     },
+    types::{ConfirmedBlock, GenericCertificate},
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
 use linera_core::{
     client::{ChainClient, ChainClientError},
     data_types::ClientOutcome,
-    worker::Notification,
     node::{CrossChainMessageDelivery, NotificationStream, ValidatorNodeProvider},
     remote_node::RemoteNode,
+    worker::Notification,
 };
 use linera_execution::{
     committee::{Committee, Epoch, ValidatorName},
     system::{AdminOperation, Recipient, SystemChannel},
-    Message, Operation, Query, Response, QueryOutcome, QueryResponse, SystemMessage, SystemOperation,
+    Message, Operation, Query, QueryOutcome, QueryResponse, Response, SystemMessage,
+    SystemOperation,
 };
 use linera_sdk::linera_base_types::BlobContent;
 use linera_storage::Storage;
@@ -969,8 +972,9 @@ where
         })
     }
 
+    /// It not actually execute operation to publish blob, but just put blob to local node
     #[cfg(feature = "enable-wallet-rpc")]
-    pub async fn add_pending_blob(
+    pub async fn prepare_blob(
         &self,
         chain_id: ChainId,
         bytes: Vec<u8>,
@@ -978,7 +982,7 @@ where
         let blob = Blob::new_data(bytes);
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
-        client.add_pending_blobs(vec![blob.clone()]).await;
+        client.prepare_blob(vec![blob.clone()]).await?;
 
         Ok(blob.id().hash)
     }

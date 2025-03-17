@@ -10,7 +10,7 @@ use std::{
 use futures::{future::Either, stream, StreamExt as _, TryStreamExt as _};
 use linera_base::{
     crypto::ValidatorPublicKey,
-    data_types::{ArithmeticError, Blob, BlockHeight, UserApplicationDescription},
+    data_types::{ArithmeticError, Blob, BlockHeight, Timestamp, UserApplicationDescription},
     identifiers::{BlobId, ChainId, MessageId, UserApplicationId},
 };
 use linera_chain::{
