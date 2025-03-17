@@ -12,8 +12,6 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(feature = "enable-wallet-rpc")]
-use anyhow::anyhow;
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -32,14 +30,21 @@ use linera_base::{
 };
 use linera_base::{
     crypto::{CryptoError, CryptoHash},
-    data_types::{Amount, ApplicationPermissions, Bytecode, TimeDelta, UserApplicationDescription},
+    data_types::{Amount, UserApplicationDescription},
     doc_scalar, ensure,
     hashed::Hashed,
-    identifiers::{AccountOwner, ApplicationId, ChainId, ModuleId, Owner, UserApplicationId},
-    ownership::{ChainOwnership, TimeoutConfig},
-    vm::VmRuntime,
+    identifiers::{AccountOwner, ChainId, Owner, UserApplicationId},
     BcsHexParseError,
 };
+#[cfg(not(feature = "disable-native-rpc"))]
+use linera_base::{
+    data_types::{ApplicationPermissions, Bytecode, TimeDelta},
+    identifiers::{ApplicationId, ModuleId},
+    ownership::{ChainOwnership, TimeoutConfig},
+    vm::VmRuntime,
+};
+#[cfg(not(feature = "disable-native-rpc"))]
+use linera_chain::types::GenericCertificate;
 #[cfg(feature = "enable-wallet-rpc")]
 use linera_chain::types::ValidatedBlockCertificate;
 use linera_chain::{
@@ -47,7 +52,7 @@ use linera_chain::{
         BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock, IncomingBundle,
         MessageAction, MessageBundle, Origin, ProposedBlock,
     },
-    types::{ConfirmedBlock, GenericCertificate},
+    types::ConfirmedBlock,
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
@@ -56,13 +61,17 @@ use linera_core::{
     data_types::ClientOutcome,
     worker::Notification,
 };
+#[cfg(not(feature = "disable-native-rpc"))]
 use linera_execution::{
     committee::{Committee, Epoch},
     system::{AdminOperation, Recipient, SystemChannel},
-    Operation, Query, QueryOutcome, QueryResponse, SystemOperation,
+    SystemOperation,
 };
+use linera_execution::{Operation, Query, QueryOutcome, QueryResponse};
+#[cfg(not(feature = "disable-native-rpc"))]
 use linera_sdk::linera_base_types::BlobContent;
 use linera_storage::Storage;
+#[cfg(not(feature = "listen-localhost"))]
 use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
@@ -237,10 +246,6 @@ enum NodeServiceError {
     InvalidChainId(CryptoError),
     #[error("unexpected application operations added during non-mutation query")]
     UnexpectedOperationsFromQuery,
-
-    #[cfg(feature = "enable-wallet-rpc")]
-    #[error("Unexpected certificate")]
-    UnexpectedCertificate,
 }
 
 impl From<ServerError> for NodeServiceError {
@@ -285,10 +290,6 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
-            #[cfg(feature = "enable-wallet-rpc")]
-            NodeServiceError::UnexpectedCertificate => {
-                (StatusCode::BAD_REQUEST, vec![self.to_string()])
-            }
         };
         let tuple = (tuple.0, json!({"error": tuple.1}).to_string());
         tuple.into_response()

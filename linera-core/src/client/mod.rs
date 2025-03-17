@@ -3757,7 +3757,8 @@ where
 
     /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
     /// called, it will be proposed to the validators.
-    async fn new_executed_block_with_full_materials(
+    #[tracing::instrument(level = "trace", skip(incoming_bundles, operations))]
+    async fn new_executed_block(
         &self,
         incoming_bundles: Vec<IncomingBundle>,
         operations: Vec<Operation>,
@@ -3771,8 +3772,11 @@ where
             ));
         }
         let identity = self.identity().await?;
-        let state = self.state();
-        let (previous_block_hash, height) = (state.block_hash(), state.next_block_height());
+
+        let (previous_block_hash, height) = {
+            let state = self.state();
+            (state.block_hash(), state.next_block_height())
+        };
         let block = ProposedBlock {
             epoch: self.epoch().await?,
             chain_id: self.chain_id,
@@ -3834,6 +3838,7 @@ where
     }
 
     /// Calculate block execution state hash
+    #[tracing::instrument(level = "trace", skip(incoming_bundles, operations))]
     pub async fn simulate_execute_block(
         &self,
         operations: Vec<Operation>,
@@ -3847,6 +3852,9 @@ where
         )>,
         ChainClientError,
     > {
+        let mutex = self.state().client_mutex();
+        let _guard = mutex.lock_owned().await;
+
         self.prepare_chain().await?;
         let info = self.request_leader_timeout_if_needed().await?;
 
@@ -3887,7 +3895,7 @@ where
         }
 
         let (executed_block, blob_ids) = self
-            .new_executed_block_with_full_materials(incoming_bundles, operations, local_time)
+            .new_executed_block(incoming_bundles, operations, local_time)
             .await?;
 
         return Ok(Some((executed_block, blob_ids, None)));

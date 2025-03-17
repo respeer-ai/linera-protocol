@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use linera_base::{
     crypto::{AccountSecretKey, CryptoHash},
     data_types::{BlobContent, Timestamp},
-    identifiers::{BlobId, ChainId, Owner},
+    identifiers::{BlobId, ChainId, MessageId, Owner},
 };
 use linera_chain::{
     data_types::BlockProposal,
@@ -223,6 +223,16 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
         &mut self,
         _owner: Owner,
         _chain_id: ChainId,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        _chain_id: ChainId,
+        _message_id: MessageId,
+        _owner: Owner,
+        _validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error> {
         unimplemented!()
     }
