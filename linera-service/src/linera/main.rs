@@ -514,10 +514,6 @@ impl Runnable for Job {
 
                     Box::pin(chain.sync_validator(validator.clone())).await?;
                 }
-                if !faulty_validators.is_empty() {
-                    println!("{:#?}", faulty_validators);
-                }
-                println!("{}/{} OK.", num_ok_validators, committee.validators().len());
             }
 
             command @ (SetValidator { .. }
@@ -1219,16 +1215,6 @@ impl Runnable for Job {
                 );
             }
 
-            CreateGenesisConfig { .. }
-            | Keygen
-            | Net(_)
-            | Storage { .. }
-            | Wallet(_)
-            | ExtractScriptFromMarkdown { .. }
-            | HelpMarkdown => {
-                unreachable!()
-            }
-
             Wallet(WalletCommand::Rebuild) => {
                 let genesis_config = context.wallet().genesis_config();
                 let validators = genesis_config.validators();
@@ -1244,17 +1230,14 @@ impl Runnable for Job {
                             if chain.key_pair.is_none() {
                                 continue;
                             }
-                            Self::assign_new_chain_to_key(
-                                chain.chain_id,
-                                chain.creation_message_id.unwrap(),
-                                chain.creation_certificate_hash,
-                                storage.clone(),
-                                None,
-                                Some(chain.key_pair.as_ref().unwrap().copy()),
-                                Some(validators.clone()),
-                                &mut context,
-                            )
-                            .await?;
+                            context
+                                .assign_new_chain_to_key(
+                                    chain.chain_id,
+                                    chain.creation_message_id.unwrap(),
+                                    chain.key_pair.as_ref().unwrap().public().into(),
+                                    Some(validators.clone()),
+                                )
+                                .await?;
                             let chain_client = context.make_chain_client(*chain_id)?;
                             info!("Synchronizing chain {}", chain_id);
                             chain_client.synchronize_from_validators().await?;
@@ -1262,6 +1245,16 @@ impl Runnable for Job {
                         _ => {}
                     }
                 }
+            }
+
+            CreateGenesisConfig { .. }
+            | Keygen
+            | Net(_)
+            | Storage { .. }
+            | Wallet(_)
+            | ExtractScriptFromMarkdown { .. }
+            | HelpMarkdown => {
+                unreachable!()
             }
         }
         Ok(())
@@ -1939,7 +1932,7 @@ Make sure to use a Linera client compatible with this network.
             WalletCommand::Rebuild => {
                 options.initialize_storage().boxed().await?;
                 options.run_with_storage(Job(options.clone())).await??;
-                Ok(())
+                Ok(0)
             }
         },
 
