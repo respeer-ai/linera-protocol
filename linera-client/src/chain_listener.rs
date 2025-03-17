@@ -10,9 +10,9 @@ use std::{
 use async_trait::async_trait;
 use futures::{lock::Mutex, stream, StreamExt};
 use linera_base::{
-    crypto::AccountSecretKey,
+    crypto::{AccountSecretKey, ValidatorPublicKey},
     data_types::Timestamp,
-    identifiers::{ChainId, Destination, Owner},
+    identifiers::{ChainId, Destination, MessageId, Owner},
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
@@ -114,6 +114,14 @@ pub trait ClientContext: 'static {
         &mut self,
         owner: Owner,
         chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        message_id: MessageId,
+        owner: Owner,
+        validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error>;
 }
 

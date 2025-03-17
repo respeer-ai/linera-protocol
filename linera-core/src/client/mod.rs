@@ -3569,7 +3569,6 @@ where
         executed_block: ExecutedBlock,
         round: Round,
         signature: AccountSignature,
-        retry: bool,
         validated_block_certificate: Option<ValidatedBlockCertificate>,
     ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
         self.prepare_chain().await?;
@@ -3587,6 +3586,18 @@ where
             self.finalize_locking_block(info).await?;
             return Err(ChainClientError::WaitFinalizingBlock);
         }
+
+        let (executed_block, outcome, lite_cert) = match validated_block_certificate {
+            Some(cert) => {
+                let executed_block: ExecutedBlock = cert.clone().into_inner().into_inner().into();
+                (
+                    executed_block.clone(),
+                    Some(executed_block.outcome),
+                    Some(cert.lite_certificate().cloned()),
+                )
+            }
+            _ => (executed_block, None, None),
+        };
 
         let block = executed_block.block.clone();
         ensure!(
@@ -3606,25 +3617,11 @@ where
             content: ProposalContent {
                 round,
                 block: block.clone(),
-                // TODO: initial and retry
-                outcome: if retry {
-                    Some(executed_block.outcome.clone())
-                } else {
-                    None
-                },
+                outcome,
             },
             public_key: self.public_key().await?,
             signature,
-            validated_block_certificate: if retry && validated_block_certificate.is_some() {
-                Some(
-                    validated_block_certificate
-                        .unwrap()
-                        .lite_certificate()
-                        .cloned(),
-                )
-            } else {
-                None
-            },
+            validated_block_certificate: lite_cert,
         });
 
         if !already_handled_locally {
@@ -3837,13 +3834,19 @@ where
     }
 
     /// Calculate block execution state hash
-    pub async fn execute_block_with_full_materials(
+    pub async fn simulate_execute_block(
         &self,
         operations: Vec<Operation>,
         incoming_bundles: Vec<IncomingBundle>,
         local_time: Timestamp,
-    ) -> Result<Option<(ExecutedBlock, Vec<BlobId>, Option<CryptoHash>, bool)>, ChainClientError>
-    {
+    ) -> Result<
+        Option<(
+            ExecutedBlock,
+            Vec<BlobId>,
+            Option<ValidatedBlockCertificate>,
+        )>,
+        ChainClientError,
+    > {
         self.prepare_chain().await?;
         let info = self.request_leader_timeout_if_needed().await?;
 
@@ -3856,7 +3859,7 @@ where
         }
 
         if let Some(locking) = &info.manager.requested_locking {
-            let (executed_block, blob_ids, certificate_hash) = match &**locking {
+            let (executed_block, blob_ids, maybe_validated_cert) = match &**locking {
                 LockingBlock::Regular(certificate) => (
                     certificate.block().clone().into(),
                     certificate
@@ -3864,30 +3867,30 @@ where
                         .required_blob_ids()
                         .into_iter()
                         .collect::<Vec<BlobId>>(),
-                    Some(certificate.hash()),
+                    Some(certificate),
                 ),
                 LockingBlock::Fast(proposal) => {
                     let block = proposal.content.block.clone();
                     let blob_ids: Vec<BlobId> = block.published_blob_ids().into_iter().collect();
-                    let hash = match &proposal.validated_block_certificate {
-                        Some(cert) => Some(cert.value.value_hash),
-                        None => None,
-                    };
                     (
                         self.stage_block_execution(block, None).await?.0,
                         blob_ids,
-                        hash,
+                        None,
                     )
                 }
             };
-            return Ok(Some((executed_block, blob_ids, certificate_hash, true)));
+            return Ok(Some((
+                executed_block,
+                blob_ids,
+                maybe_validated_cert.cloned(),
+            )));
         }
 
         let (executed_block, blob_ids) = self
             .new_executed_block_with_full_materials(incoming_bundles, operations, local_time)
             .await?;
 
-        return Ok(Some((executed_block, blob_ids, None, false)));
+        return Ok(Some((executed_block, blob_ids, None)));
     }
 }
 

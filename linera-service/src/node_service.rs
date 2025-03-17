@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #[cfg(feature = "enable-wallet-rpc")]
 use std::collections::HashSet;
+#[cfg(not(feature = "disable-native-rpc"))]
+use std::iter;
 use std::{
     borrow::Cow,
     collections::HashMap,
-    iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
     sync::Arc,
@@ -26,8 +27,8 @@ use futures::{lock::Mutex, Future};
 #[cfg(feature = "enable-wallet-rpc")]
 use linera_base::{
     crypto::{AccountPublicKey, AccountSignature, BcsSignable},
-    data_types::{BlockHeight, Round, Timestamp},
-    identifiers::MessageId,
+    data_types::{Blob, BlockHeight, Round, Timestamp},
+    identifiers::{BlobId, MessageId},
 };
 use linera_base::{
     crypto::{CryptoError, CryptoHash},
@@ -40,7 +41,7 @@ use linera_base::{
     BcsHexParseError,
 };
 #[cfg(feature = "enable-wallet-rpc")]
-use linera_chain::types::CertificateValue;
+use linera_chain::types::ValidatedBlockCertificate;
 use linera_chain::{
     data_types::{
         BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock, IncomingBundle,
@@ -109,6 +110,7 @@ where
 }
 
 /// A bundle of cross-chain messages.
+#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct UserIncomingBundle {
     /// The origin of the messages (chain and channel if any).
@@ -119,6 +121,7 @@ pub struct UserIncomingBundle {
     pub action: MessageAction,
 }
 
+#[cfg(feature = "enable-wallet-rpc")]
 impl Into<IncomingBundle> for UserIncomingBundle {
     fn into(self) -> IncomingBundle {
         IncomingBundle {
@@ -129,20 +132,24 @@ impl Into<IncomingBundle> for UserIncomingBundle {
     }
 }
 
+#[cfg(feature = "enable-wallet-rpc")]
 doc_scalar!(UserIncomingBundle, "Input shadow of IncomingBundle.");
 
+#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct Balances {
     chain_balance: Amount,
     owner_balances: HashMap<AccountOwner, Amount>,
 }
 
+#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct UserExecutedBlock {
     pub block: ProposedBlock,
     pub outcome: BlockExecutionOutcome,
 }
 
+#[cfg(feature = "enable-wallet-rpc")]
 impl Into<ExecutedBlock> for UserExecutedBlock {
     fn into(self) -> ExecutedBlock {
         ExecutedBlock {
@@ -152,17 +159,55 @@ impl Into<ExecutedBlock> for UserExecutedBlock {
     }
 }
 
+#[cfg(feature = "enable-wallet-rpc")]
 doc_scalar!(
     UserExecutedBlock,
-    "A executed block which will be submitted to blockchain with its signature."
+    "A executed block which will be signed by wallet."
 );
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[cfg(feature = "enable-wallet-rpc")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutedBlockMaterial {
     executed_block: ExecutedBlock,
-    validated_block_certificate_hash: Option<CryptoHash>,
-    retry: bool,
+    blob_ids: Vec<BlobId>,
+    validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
+
+#[cfg(feature = "enable-wallet-rpc")]
+doc_scalar!(
+    ExecutedBlockMaterial,
+    "Block material waiting for signing and submitting."
+);
+
+#[cfg(feature = "enable-wallet-rpc")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignedBlock {
+    executed_block: UserExecutedBlock,
+    round: Round,
+    signature: AccountSignature,
+    validated_block_certificate: Option<ValidatedBlockCertificate>,
+}
+
+#[cfg(feature = "enable-wallet-rpc")]
+doc_scalar!(
+    SignedBlock,
+    "A signed block which will be submitted to blockchain with its signature."
+);
+
+#[cfg(feature = "enable-wallet-rpc")]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub struct WalletInitializer {
+    public_key: AccountPublicKey,
+    signature: AccountSignature,
+    faucet_url: String,
+    message_id: MessageId,
+}
+
+#[cfg(feature = "enable-wallet-rpc")]
+doc_scalar!(
+    WalletInitializer,
+    "Input parameters of wallet initialization."
+);
 
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
@@ -778,20 +823,23 @@ where
     /// ResPeer::CheCko::Initialize offline wallet
     async fn wallet_init_without_keypair(
         &self,
-        public_key: AccountPublicKey,
-        signature: AccountSignature,
-        faucet_url: String,
         chain_id: ChainId,
-        message_id: MessageId,
-        certificate_hash: CryptoHash,
+        initializer: WalletInitializer,
     ) -> Result<ChainId, Error> {
+        let WalletInitializer {
+            public_key,
+            signature,
+            faucet_url,
+            message_id,
+        } = initializer;
+
         #[derive(Debug, Serialize, Deserialize)]
-        struct Nonce(CryptoHash);
-        impl BcsSignable for Nonce {}
+        struct Nonce(MessageId);
+        impl BcsSignable<'_> for Nonce {}
 
         tracing::info!("Verifing signature ...");
-        let nonce = Nonce(certificate_hash);
-        signature.check(&nonce, public_key)?;
+        let nonce = Nonce(message_id);
+        signature.verify(&nonce, public_key)?;
 
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
@@ -801,9 +849,8 @@ where
         self.context
             .lock()
             .await
-            .assign_new_chain_to_key(chain_id, message_id, public_key.into(), validators)
-            .await
-            .context("could not assign the new chain")?;
+            .assign_new_chain_to_key(chain_id, message_id, public_key.into(), Some(validators))
+            .await?;
 
         tracing::info!("Setting default chain with public key ...");
         self.context
@@ -840,29 +887,16 @@ where
         &self,
         chain_id: ChainId,
         height: BlockHeight,
-        executed_block: UserExecutedBlock,
-        round: Round,
-        signature: AccountSignature,
-        retry: bool,
-        validated_block_certificate_hash: Option<CryptoHash>,
+        block: SignedBlock,
     ) -> Result<CryptoHash, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
-        let certificate = if retry && validated_block_certificate_hash.is_some() {
-            let certificate = self
-                .storage
-                .read_certificate(validated_block_certificate_hash.unwrap())
-                .await?;
-            if let CertificateValue::ValidatedBlock { .. } = certificate.value.clone().into_inner()
-            {
-                // DO NOTHING
-            } else {
-                return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
-            }
-            Some(certificate)
-        } else {
-            None
-        };
+        let SignedBlock {
+            executed_block,
+            round,
+            signature,
+            validated_block_certificate,
+        } = block;
 
         let hash = client
             .submit_external_signed_block_proposal_and_signature(
@@ -870,11 +904,10 @@ where
                 executed_block.into(),
                 round,
                 signature,
-                retry,
-                certificate,
+                validated_block_certificate,
             )
             .await?
-            .value
+            .value()
             .hash();
         self.context.lock().await.update_wallet(&client).await?;
         Ok(hash)
@@ -882,13 +915,13 @@ where
 
     #[cfg(feature = "enable-wallet-rpc")]
     /// Calculate block execution state hash
-    async fn execute_block_with_full_materials(
+    async fn simulate_execute_block(
         &self,
         chain_id: ChainId,
         operations: Vec<Operation>,
         incoming_bundles: Vec<UserIncomingBundle>,
         local_time: Timestamp,
-    ) -> Result<ExecutedBlockMaterial, Error> {
+    ) -> Result<Option<ExecutedBlockMaterial>, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
         let bundles: Vec<_> = incoming_bundles
@@ -896,14 +929,18 @@ where
             .map(|bundle| bundle.clone().into())
             .collect();
 
-        let (executed_block, validated_block_certificate_hash, retry) = client
-            .execute_block_with_full_materials(operations, bundles, local_time)
-            .await?;
-        Ok(ExecutedBlockMaterial {
+        let Some((executed_block, blob_ids, validated_block_certificate)) = client
+            .simulate_execute_block(operations, bundles, local_time)
+            .await?
+        else {
+            // Finalizing last block, waiting for a moment
+            return Ok(None);
+        };
+        Ok(Some(ExecutedBlockMaterial {
             executed_block,
-            validated_block_certificate_hash,
-            retry,
-        })
+            blob_ids,
+            validated_block_certificate,
+        }))
     }
 
     /// It not actually execute operation to publish blob, but just put blob to local node
@@ -916,7 +953,7 @@ where
         let blob = Blob::new_data(bytes);
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
-        client.prepare_blob(vec![blob.clone()]).await?;
+        client.prepare_blob(&vec![blob.clone()]).await?;
 
         Ok(blob.id().hash)
     }

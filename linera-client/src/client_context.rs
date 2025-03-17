@@ -140,6 +140,17 @@ where
     ) -> Result<(), Error> {
         self.set_owner_default_chain(owner, chain_id).await
     }
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        message_id: MessageId,
+        owner: Owner,
+        validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error> {
+        self.assign_new_chain_to_key(chain_id, message_id, owner, validators)
+            .await
+    }
 }
 
 #[cfg(not(feature = "no-storage"))]
