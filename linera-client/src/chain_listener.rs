@@ -12,7 +12,7 @@ use futures::{lock::Mutex, stream, StreamExt};
 use linera_base::{
     crypto::AccountSecretKey,
     data_types::Timestamp,
-    identifiers::{ChainId, Destination, MessageId},
+    identifiers::{ChainId, Destination, Owner},
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
@@ -108,20 +108,11 @@ pub trait ClientContext: 'static {
 
     fn make_node_provider(&self) -> NodeProvider;
 
-    async fn assign_new_chain_to_public_key(
-        &mut self,
-        key: PublicKey,
-        chain_id: ChainId,
-        timestamp: Timestamp,
-        creation_message_id: MessageId,
-        creation_certificate_hash: Option<CryptoHash>,
-    ) -> Result<(), Error>;
-
     async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error>;
 
-    async fn set_default_chain_with_public_key(
+    async fn set_owner_default_chain(
         &mut self,
-        public_key: PublicKey,
+        owner: Owner,
         chain_id: ChainId,
     ) -> Result<(), Error>;
 }

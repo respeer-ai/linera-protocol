@@ -27,7 +27,7 @@ pub struct Wallet {
     pub chains: BTreeMap<ChainId, UserChain>,
     pub unassigned_key_pairs: HashMap<Owner, AccountSecretKey>,
     pub default: Option<ChainId>,
-    pub defaults: HashMap<PublicKey, ChainId>,
+    pub defaults: HashMap<Owner, ChainId>,
     pub genesis_config: GenesisConfig,
     pub testing_prng_seed: Option<u64>,
 }
@@ -91,12 +91,12 @@ impl Wallet {
         self.default
     }
 
-    pub fn default_chains(&self) -> HashMap<PublicKey, ChainId> {
+    pub fn default_chains(&self) -> HashMap<Owner, ChainId> {
         self.defaults.clone()
     }
 
-    pub fn default_chain_with_public_key(&self, public_key: PublicKey) -> Option<ChainId> {
-        self.defaults.get(&public_key).copied()
+    pub fn owner_default_chain(&self, owner: Owner) -> Option<ChainId> {
+        self.defaults.get(&owner).copied()
     }
 
     pub fn chain_ids(&self) -> Vec<ChainId> {
@@ -153,7 +153,6 @@ impl Wallet {
         chain_id: ChainId,
         timestamp: Timestamp,
         creation_message_id: MessageId,
-        creation_certificate_hash: Option<CryptoHash>,
     ) -> Result<(), Error> {
         let key_pair = self
             .unassigned_key_pairs
@@ -167,7 +166,6 @@ impl Wallet {
             next_block_height: BlockHeight(0),
             pending_proposal: None,
             creation_message_id: Some(creation_message_id),
-            creation_certificate_hash,
         };
         self.insert(user_chain);
         Ok(())
@@ -182,16 +180,16 @@ impl Wallet {
         Ok(())
     }
 
-    pub fn set_default_chain_with_public_key(
+    pub fn set_owner_default_chain(
         &mut self,
-        public_key: PublicKey,
+        owner: Owner,
         chain_id: ChainId,
     ) -> Result<(), Error> {
         ensure!(
             self.chains.contains_key(&chain_id),
             error::Inner::NonexistentChain(chain_id)
         );
-        self.defaults.insert(public_key, chain_id);
+        self.defaults.insert(owner, chain_id);
         Ok(())
     }
 
@@ -207,10 +205,6 @@ impl Wallet {
             Some(chain) => chain.creation_message_id,
             _ => None,
         };
-        let creation_certificate_hash = match self.get(chain_client.chain_id()) {
-            Some(chain) => chain.creation_certificate_hash,
-            _ => None,
-        };
 
         self.chains.insert(
             chain_client.chain_id(),
@@ -222,7 +216,6 @@ impl Wallet {
                 timestamp: state.timestamp(),
                 pending_proposal: state.pending_proposal().clone(),
                 creation_message_id,
-                creation_certificate_hash,
             },
         );
     }
@@ -255,7 +248,6 @@ pub struct UserChain {
     pub next_block_height: BlockHeight,
     pub pending_proposal: Option<PendingProposal>,
     pub creation_message_id: Option<MessageId>,
-    pub creation_certificate_hash: Option<CryptoHash>,
 }
 
 impl Clone for UserChain {
@@ -267,8 +259,7 @@ impl Clone for UserChain {
             timestamp: self.timestamp,
             next_block_height: self.next_block_height,
             pending_proposal: self.pending_proposal.clone(),
-            creation_message_id: self.creation_message.clone(),
-            creation_certificate_hash: self.creation_certificate_hash.clone(),
+            creation_message_id: self.creation_message_id.clone(),
         }
     }
 }
@@ -288,7 +279,6 @@ impl UserChain {
             next_block_height: BlockHeight::ZERO,
             pending_proposal: None,
             creation_message_id: None,
-            creation_certificate_hash: None,
         }
     }
 
@@ -303,7 +293,6 @@ impl UserChain {
             next_block_height: BlockHeight::ZERO,
             pending_proposal: None,
             creation_message_id: None,
-            creation_certificate_hash: None,
         }
     }
 }

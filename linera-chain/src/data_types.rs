@@ -371,7 +371,7 @@ doc_scalar!(
 );
 
 /// A [`ProposedBlock`], together with the outcome from its execution.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct ExecutedBlock {
     pub block: ProposedBlock,
     pub outcome: BlockExecutionOutcome,

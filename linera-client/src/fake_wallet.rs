@@ -55,24 +55,13 @@ impl FakeWallet {
     {
     }
 
-    pub fn assign_new_chain_to_public_key(
-        &mut self,
-        _key: PublicKey,
-        _chain_id: ChainId,
-        _timestamp: Timestamp,
-        _creation_message_id: MessageId,
-        _creation_certificate_hash: Option<CryptoHash>,
-    ) -> Result<(), Error> {
-        Ok(())
-    }
-
     pub fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
         Ok(())
     }
 
-    pub fn set_default_chain_with_public_key(
+    pub fn set_owner_default_chain(
         &mut self,
-        _public_key: PublicKey,
+        _owner: Owner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
         Ok(())

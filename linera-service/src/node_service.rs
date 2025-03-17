@@ -1,15 +1,18 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
+#[cfg(feature = "enable-wallet-rpc")]
+use std::collections::HashSet;
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
     sync::Arc,
 };
 
-use anyhow::{anyhow, Context};
+#[cfg(feature = "enable-wallet-rpc")]
+use anyhow::anyhow;
 use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
@@ -20,23 +23,28 @@ use async_graphql::{
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
 use futures::{lock::Mutex, Future};
+#[cfg(feature = "enable-wallet-rpc")]
 use linera_base::{
-    crypto::{BcsSignable, CryptoError, CryptoHash, PublicKey, Signature},
-    data_types::{
-        Amount, ApplicationPermissions, BlockHeight, Bytecode, Round, TimeDelta, Timestamp,
-        UserApplicationDescription,
-    },
+    crypto::{AccountPublicKey, AccountSignature, BcsSignable},
+    data_types::{BlockHeight, Round, Timestamp},
+    identifiers::MessageId,
+};
+use linera_base::{
+    crypto::{CryptoError, CryptoHash},
+    data_types::{Amount, ApplicationPermissions, Bytecode, TimeDelta, UserApplicationDescription},
     doc_scalar, ensure,
     hashed::Hashed,
-    identifiers::{ApplicationId, ChainId, MessageId, ModuleId, Owner, UserApplicationId},
+    identifiers::{AccountOwner, ApplicationId, ChainId, ModuleId, Owner, UserApplicationId},
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
     BcsHexParseError,
 };
+#[cfg(feature = "enable-wallet-rpc")]
+use linera_chain::types::CertificateValue;
 use linera_chain::{
     data_types::{
-        Block, BlockExecutionOutcome, CandidateBlockMaterial, CertificateValue, ExecutedBlock,
-        HashedCertificateValue, IncomingBundle, MessageAction, MessageBundle, Origin,
+        BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock, IncomingBundle,
+        MessageAction, MessageBundle, Origin, ProposedBlock,
     },
     types::{ConfirmedBlock, GenericCertificate},
     ChainStateView,
@@ -45,15 +53,12 @@ use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientCo
 use linera_core::{
     client::{ChainClient, ChainClientError},
     data_types::ClientOutcome,
-    node::{CrossChainMessageDelivery, NotificationStream, ValidatorNodeProvider},
-    remote_node::RemoteNode,
     worker::Notification,
 };
 use linera_execution::{
-    committee::{Committee, Epoch, ValidatorName},
+    committee::{Committee, Epoch},
     system::{AdminOperation, Recipient, SystemChannel},
-    Message, Operation, Query, QueryOutcome, QueryResponse, Response, SystemMessage,
-    SystemOperation,
+    Operation, Query, QueryOutcome, QueryResponse, SystemOperation,
 };
 use linera_sdk::linera_base_types::BlobContent;
 use linera_storage::Storage;
@@ -65,7 +70,9 @@ use tokio::sync::OwnedRwLockReadGuard;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::{cli_wrappers::Faucet, util};
+#[cfg(feature = "enable-wallet-rpc")]
+use crate::cli_wrappers::Faucet;
+use crate::util;
 
 #[derive(SimpleObject, Serialize, Deserialize, Clone)]
 pub struct Chains {
@@ -78,7 +85,7 @@ pub struct QueryRoot<C> {
     context: Arc<Mutex<C>>,
     port: NonZeroU16,
     default_chain: Option<ChainId>,
-    default_chains: HashMap<PublicKey, ChainId>,
+    default_chains: HashMap<Owner, ChainId>,
 }
 
 /// Our root GraphQL subscription type.
@@ -91,10 +98,13 @@ pub struct MutationRoot<C>
 where
     C: ClientContext,
 {
-    storage: C::Storage,
     context: Arc<Mutex<C>>,
 
+    #[cfg(feature = "enable-wallet-rpc")]
+    storage: C::Storage,
+    #[cfg(feature = "enable-wallet-rpc")]
     config: ChainListenerConfig,
+    #[cfg(feature = "enable-wallet-rpc")]
     chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
@@ -121,21 +131,15 @@ impl Into<IncomingBundle> for UserIncomingBundle {
 
 doc_scalar!(UserIncomingBundle, "Input shadow of IncomingBundle.");
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
-pub struct RawBlockProposalPayload {
-    pub height: BlockHeight,
-    pub payload_bytes: Vec<u8>,
-}
-
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct Balances {
     chain_balance: Amount,
-    account_balances: HashMap<PublicKey, Amount>,
+    owner_balances: HashMap<AccountOwner, Amount>,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct UserExecutedBlock {
-    pub block: Block,
+    pub block: ProposedBlock,
     pub outcome: BlockExecutionOutcome,
 }
 
@@ -189,10 +193,9 @@ enum NodeServiceError {
     #[error("unexpected application operations added during non-mutation query")]
     UnexpectedOperationsFromQuery,
 
-    #[error("Unexpected certificate. Please make sure you are connecting to the right network and are using a current software version.")]
+    #[cfg(feature = "enable-wallet-rpc")]
+    #[error("Unexpected certificate")]
     UnexpectedCertificate,
-    #[error("The message with the ID returned by the faucet is not OpenChain. please make sure you are connecting to a genuine faucet.")]
-    NotOpenChainMessage,
 }
 
 impl From<ServerError> for NodeServiceError {
@@ -237,10 +240,8 @@ impl IntoResponse for NodeServiceError {
                 StatusCode::BAD_REQUEST,
                 vec!["invalid chain ID".to_string()],
             ),
+            #[cfg(feature = "enable-wallet-rpc")]
             NodeServiceError::UnexpectedCertificate => {
-                (StatusCode::BAD_REQUEST, vec![self.to_string()])
-            }
-            NodeServiceError::NotOpenChainMessage => {
                 (StatusCode::BAD_REQUEST, vec![self.to_string()])
             }
         };
@@ -320,59 +321,7 @@ where
         }
     }
 
-    async fn prepare_parent_chain(
-        &self,
-        chain_id: ChainId,
-        public_key: PublicKey,
-        message_id: MessageId,
-        certificate_hash: CryptoHash,
-        validators: Vec<(ValidatorName, String)>,
-    ) -> Result<(), Error> {
-        let node_provider = self.context.lock().await.make_node_provider();
-        let client = client::Client::new(
-            node_provider,
-            self.storage.clone(),
-            100,
-            CrossChainMessageDelivery::Blocking,
-            false,
-            vec![message_id.chain_id, chain_id],
-            "Temporary client for fetching the parent chain",
-            std::time::Duration::from_secs(1),
-        );
-
-        let nodes: Vec<_> = node_provider
-            .make_nodes_from_list(validators)?
-            .map(|(name, node)| RemoteNode { name, node })
-            .collect();
-        let target_height = message_id.height.try_add_one()?;
-        client
-            .download_certificates(&nodes, message_id.chain_id, target_height)
-            .await?;
-
-        let certificate = self
-            .storage
-            .read_hashed_certificate_value(certificate_hash)
-            .await?;
-        let CertificateValue::ConfirmedBlock { executed_block, .. } = certificate.inner() else {
-            return Err(anyhow!(NodeServiceError::UnexpectedCertificate).into());
-        };
-        let Some(Message::System(SystemMessage::OpenChain(config))) = executed_block
-            .message_by_id(&message_id)
-            .map(|msg| &msg.message)
-        else {
-            return Err(anyhow!(NodeServiceError::NotOpenChainMessage).into());
-        };
-        if config.ownership.verify_owner(&Owner::from(public_key)) != Some(public_key) {
-            return Err(anyhow!(
-                "The chain with the ID returned by the faucet is not owned by you. \
-                Please make sure you are connecting to a genuine faucet."
-            )
-            .into());
-        }
-
-        Ok(())
-    }
-
+    #[cfg(feature = "enable-wallet-rpc")]
     async fn chain_initialized(
         &self,
         chain_id: ChainId,
@@ -829,8 +778,8 @@ where
     /// ResPeer::CheCko::Initialize offline wallet
     async fn wallet_init_without_keypair(
         &self,
-        public_key: PublicKey,
-        signature: Signature,
+        public_key: AccountPublicKey,
+        signature: AccountSignature,
         faucet_url: String,
         chain_id: ChainId,
         message_id: MessageId,
@@ -847,27 +796,12 @@ where
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
-        tracing::info!("Preparing parent chain {}", chain_id);
-        self.prepare_parent_chain(
-            chain_id,
-            public_key,
-            message_id,
-            certificate_hash,
-            validators.clone(),
-        )
-        .await?;
-
         tracing::info!("Assigning new chain to public key ...");
+        // TODO: add unassigned key
         self.context
             .lock()
             .await
-            .assign_new_chain_to_public_key(
-                public_key,
-                chain_id,
-                Timestamp::now(),
-                message_id,
-                Some(certificate_hash),
-            )
+            .assign_new_chain_to_key(chain_id, message_id, public_key.into(), validators)
             .await
             .context("could not assign the new chain")?;
 
@@ -875,7 +809,7 @@ where
         self.context
             .lock()
             .await
-            .set_default_chain_with_public_key(public_key, chain_id)
+            .set_owner_default_chain(public_key.into(), chain_id)
             .await?;
         self.context.lock().await.save_wallet().await?;
 
@@ -908,7 +842,7 @@ where
         height: BlockHeight,
         executed_block: UserExecutedBlock,
         round: Round,
-        signature: Signature,
+        signature: AccountSignature,
         retry: bool,
         validated_block_certificate_hash: Option<CryptoHash>,
     ) -> Result<CryptoHash, Error> {
@@ -1112,11 +1046,11 @@ where
     async fn balance(
         &self,
         chain_id: ChainId,
-        public_key: Option<PublicKey>,
+        owner: Option<AccountOwner>,
     ) -> Result<Amount, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id)?;
-        Ok(match public_key {
-            Some(public_key) => client.query_owner_balance(Owner::from(public_key)).await?,
+        Ok(match owner {
+            Some(owner) => client.query_owner_balance(owner).await?,
             _ => client.query_balance().await?,
         })
     }
@@ -1124,11 +1058,10 @@ where
     /// Returns the balances of given owners
     async fn balances(
         &self,
-        chain_ids: Vec<ChainId>,
-        public_keys: Vec<PublicKey>,
+        chain_owners: HashMap<ChainId, Vec<AccountOwner>>,
     ) -> Result<HashMap<ChainId, Balances>, Error> {
         let mut chain_balances = HashMap::new();
-        for chain_id in &chain_ids {
+        for (chain_id, owners) in &chain_owners {
             let Ok(client) = self
                 .context
                 .lock()
@@ -1137,18 +1070,15 @@ where
             else {
                 continue;
             };
-            let mut account_balances = HashMap::new();
-            for public_key in &public_keys {
-                account_balances.insert(
-                    *public_key,
-                    client.query_owner_balance(Owner::from(public_key)).await?,
-                );
+            let mut owner_balances = HashMap::new();
+            for &owner in owners {
+                owner_balances.insert(owner, client.query_owner_balance(owner).await?);
             }
             chain_balances.insert(
                 *chain_id,
                 Balances {
                     chain_balance: client.query_balance().await?,
-                    account_balances,
+                    owner_balances,
                 },
             );
         }
@@ -1156,7 +1086,7 @@ where
     }
 
     /// Returns the maintained chains of given owner
-    async fn chains_with_public_key(&self, public_key: PublicKey) -> Result<Chains, Error> {
+    async fn owner_chains(&self, owner: Owner) -> Result<Chains, Error> {
         let all_chain_ids = self.context.lock().await.wallet().chain_ids();
         let mut chain_ids = Vec::new();
 
@@ -1166,14 +1096,14 @@ where
                 .lock()
                 .await
                 .make_chain_client(chain_id.clone())?;
-            if client.public_key().await? == public_key {
+            if Owner::from(client.public_key().await?) == owner {
                 chain_ids.push(chain_id.clone());
             }
         }
 
         Ok(Chains {
             list: chain_ids,
-            default: self.default_chains.get(&public_key).copied(),
+            default: self.default_chains.get(&owner).copied(),
         })
     }
 }
@@ -1311,8 +1241,9 @@ where
     default_chain: Option<ChainId>,
     storage: C::Storage,
     context: Arc<Mutex<C>>,
-    default_chains: HashMap<PublicKey, ChainId>,
+    default_chains: HashMap<Owner, ChainId>,
 
+    #[cfg(feature = "enable-wallet-rpc")]
     chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
@@ -1329,6 +1260,7 @@ where
             context: Arc::clone(&self.context),
             default_chains: self.default_chains.clone(),
 
+            #[cfg(feature = "enable-wallet-rpc")]
             chain_guard: Arc::clone(&self.chain_guard),
         }
     }
@@ -1345,7 +1277,7 @@ where
         default_chain: Option<ChainId>,
         storage: C::Storage,
         context: C,
-        default_chains: HashMap<PublicKey, ChainId>,
+        default_chains: HashMap<Owner, ChainId>,
     ) -> Self {
         Self {
             config: config.clone(),
@@ -1355,6 +1287,7 @@ where
             storage,
             context: Arc::new(Mutex::new(context)),
 
+            #[cfg(feature = "enable-wallet-rpc")]
             chain_guard: Default::default(),
         }
     }
@@ -1369,9 +1302,12 @@ where
             },
             MutationRoot {
                 context: Arc::clone(&self.context),
-                storage: self.storage.clone(),
-                config: self.config.clone(),
 
+                #[cfg(feature = "enable-wallet-rpc")]
+                storage: self.storage.clone(),
+                #[cfg(feature = "enable-wallet-rpc")]
+                config: self.config.clone(),
+                #[cfg(feature = "enable-wallet-rpc")]
                 chain_guard: Arc::clone(&self.chain_guard),
             },
             SubscriptionRoot {
@@ -1428,7 +1364,12 @@ where
         info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
         let chain_listener = ChainListener::new(self.config.clone());
-        self.chain_guard = Arc::clone(&chain_listener.listening);
+
+        #[cfg(feature = "enable-wallet-rpc")]
+        {
+            self.chain_guard = Arc::clone(&chain_listener.listening);
+        }
+
         chain_listener
             .run(Arc::clone(&self.context), self.storage.clone())
             .await;

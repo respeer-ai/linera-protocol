@@ -92,13 +92,6 @@ mod chain_client_state;
 #[path = "../unit_tests/client_tests.rs"]
 mod client_tests;
 
-const MEBIBYTE: u64 = 1024 * 1024;
-
-/// The maximum size of a data or bytecode blob, in bytes.
-pub(crate) const MAXIMUM_BLOB_SIZE: u64 = 3 * MEBIBYTE;
-/// The maximum size of decompressed bytecode, in bytes.
-pub(crate) const MAXIMUM_BYTECODE_SIZE: u64 = 30 * MEBIBYTE;
-
 #[cfg(with_metrics)]
 mod metrics {
     use std::sync::LazyLock;
@@ -152,11 +145,6 @@ mod metrics {
         )
     });
 }
-
-/// The number of chain workers that can be in memory at the same time. More workers improve
-/// perfomance whenever the client interacts with multiple chains at the same time, but also
-/// increases memory usage.
-const CHAIN_WORKER_LIMIT: usize = 20;
 
 /// A builder that creates [`ChainClient`]s which share the cache and notifiers.
 pub struct Client<ValidatorNodeProvider, Storage>

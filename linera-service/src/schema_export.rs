@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use linera_base::{
     crypto::{AccountSecretKey, CryptoHash},
     data_types::{BlobContent, Timestamp},
-    identifiers::{BlobId, ChainId},
+    identifiers::{BlobId, ChainId, Owner},
 };
 use linera_chain::{
     data_types::BlockProposal,
@@ -28,6 +28,7 @@ use linera_core::{
     },
 };
 use linera_execution::committee::Committee;
+use linera_rpc::NodeProvider;
 use linera_sdk::linera_base_types::ValidatorPublicKey;
 use linera_service::node_service::NodeService;
 use linera_storage::{DbStorage, Storage};
@@ -214,24 +215,13 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
         unimplemented!()
     }
 
-    async fn assign_new_chain_to_public_key(
-        &mut self,
-        _key: PublicKey,
-        _chain_id: ChainId,
-        _timestamp: Timestamp,
-        _creation_message_id: MessageId,
-        _creation_certificate_hash: Option<CryptoHash>,
-    ) -> Result<(), Error> {
-        unimplemented!()
-    }
-
     async fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
         unimplemented!()
     }
 
-    async fn set_default_chain_with_public_key(
+    async fn set_owner_default_chain(
         &mut self,
-        _public_key: PublicKey,
+        _owner: Owner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
         unimplemented!()

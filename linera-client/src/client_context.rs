@@ -129,35 +129,16 @@ where
         self.make_node_provider()
     }
 
-    async fn assign_new_chain_to_public_key(
-        &mut self,
-        key: PublicKey,
-        chain_id: ChainId,
-        timestamp: Timestamp,
-        creation_message_id: MessageId,
-        creation_certificate_hash: Option<CryptoHash>,
-    ) -> Result<(), Error> {
-        self.assign_new_chain_to_public_key(
-            key,
-            chain_id,
-            timestamp,
-            creation_message_id,
-            creation_certificate_hash,
-        )
-        .await
-    }
-
     async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
         self.set_default_chain(chain_id).await
     }
 
-    async fn set_default_chain_with_public_key(
+    async fn set_owner_default_chain(
         &mut self,
-        public_key: PublicKey,
+        owner: Owner,
         chain_id: ChainId,
     ) -> Result<(), Error> {
-        self.set_default_chain_with_public_key(public_key, chain_id)
-            .await
+        self.set_owner_default_chain(owner, chain_id).await
     }
 }
 
@@ -393,7 +374,6 @@ where
                     next_block_height: BlockHeight::ZERO,
                     pending_proposal: None,
                     creation_message_id: None,
-                    creation_certificate_hash: None,
                 })
             })
             .await?;
@@ -518,7 +498,12 @@ where
 
         self.wallet_mut()
             .mutate(|w| {
-                w.assign_new_chain_to_owner(owner, chain_id, executed_block.header.timestamp)
+                w.assign_new_chain_to_owner(
+                    owner,
+                    chain_id,
+                    executed_block.header.timestamp,
+                    message_id,
+                )
             })
             .await
             .map_err(|e| error::Inner::Persistence(Box::new(e)))?
@@ -597,33 +582,15 @@ where
     }
 
     /// Retrieve the default chains.
-    pub fn default_chains(&self) -> std::collections::HashMap<PublicKey, ChainId> {
+    pub fn default_chains(&self) -> std::collections::HashMap<Owner, ChainId> {
         self.wallet.default_chains()
     }
 
     /// Retrieve default chain of public key
-    pub fn default_chain_with_public_key(&self, public_key: PublicKey) -> ChainId {
+    pub fn owner_default_chain(&self, owner: Owner) -> ChainId {
         self.wallet
-            .default_chain_with_public_key(public_key)
+            .owner_default_chain(owner)
             .expect("No chain specified in wallet with no default chain")
-    }
-
-    pub async fn assign_new_chain_to_public_key(
-        &mut self,
-        key: PublicKey,
-        chain_id: ChainId,
-        timestamp: Timestamp,
-        creation_message_id: MessageId,
-        creation_certificate_hash: Option<CryptoHash>,
-    ) -> Result<(), Error> {
-        self.wallet.as_mut().assign_new_chain_to_public_key(
-            key,
-            chain_id,
-            timestamp,
-            creation_message_id,
-            creation_certificate_hash,
-        )?;
-        self.save_wallet().await
     }
 
     pub async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
@@ -631,14 +598,14 @@ where
         self.save_wallet().await
     }
 
-    pub async fn set_default_chain_with_public_key(
+    pub async fn set_owner_default_chain(
         &mut self,
-        public_key: PublicKey,
+        owner: Owner,
         chain_id: ChainId,
     ) -> Result<(), Error> {
         self.wallet
             .as_mut()
-            .set_default_chain_with_public_key(public_key, chain_id)?;
+            .set_owner_default_chain(owner, chain_id)?;
         self.save_wallet().await
     }
 }
@@ -1105,24 +1072,13 @@ where
         self.make_node_provider()
     }
 
-    async fn assign_new_chain_to_public_key(
-        &mut self,
-        _key: PublicKey,
-        _chain_id: ChainId,
-        _timestamp: Timestamp,
-        _creation_message_id: MessageId,
-        _creation_certificate_hash: Option<CryptoHash>,
-    ) -> Result<(), Error> {
-        Ok(())
-    }
-
     async fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
         Ok(())
     }
 
-    async fn set_default_chain_with_public_key(
+    async fn set_owner_default_chain(
         &mut self,
-        _public_key: PublicKey,
+        _owner: Owner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
         Ok(())
@@ -1366,24 +1322,13 @@ where
         Ok(())
     }
 
-    pub fn assign_new_chain_to_public_key(
-        &mut self,
-        _key: PublicKey,
-        _chain_id: ChainId,
-        _timestamp: Timestamp,
-        _creation_message_id: MessageId,
-        _creation_certificate_hash: Option<CryptoHash>,
-    ) -> Result<(), Error> {
-        Ok(())
-    }
-
     pub fn set_default_chain(&mut self, _chain_id: ChainId) -> Result<(), Error> {
         Ok(())
     }
 
-    pub fn set_default_chain_with_public_key(
+    pub fn set_owner_default_chain(
         &mut self,
-        _public_key: PublicKey,
+        _owner: Owner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
         Ok(())

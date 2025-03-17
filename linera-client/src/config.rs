@@ -11,7 +11,7 @@ use std::{
 use linera_base::crypto::CryptoRng;
 use linera_base::{
     crypto::{
-        AccountPublicKey, AccountSecretKey, BcsSignable, CryptoHash, CryptoRng, Ed25519SecretKey,
+        AccountPublicKey, AccountSecretKey, BcsSignable, CryptoHash, Ed25519SecretKey,
         ValidatorPublicKey, ValidatorSecretKey,
     },
     data_types::{Amount, Timestamp},
@@ -288,7 +288,7 @@ impl GenesisConfig {
         CryptoHash::new(self)
     }
 
-    pub fn validators(&self) -> Vec<(ValidatorName, String)> {
+    pub fn validators(&self) -> Vec<(ValidatorPublicKey, String)> {
         let committee = self.committee.clone();
         let policy = self.policy.clone();
         committee

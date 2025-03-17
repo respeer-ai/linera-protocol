@@ -4935,6 +4935,7 @@ dependencies = [
  "linera-storage",
  "linera-version",
  "linera-views",
+ "local-ip-address",
  "serde",
  "serde_json",
  "tokio",
