@@ -62,6 +62,14 @@ impl Ed25519SecretKey {
     pub fn copy(&self) -> Ed25519SecretKey {
         Ed25519SecretKey(self.0.clone())
     }
+
+    /// Create key-pair only have public key field
+    pub fn from_public_key(public_key: Ed25519PublicKey) -> Self {
+        Ed25519SecretKey(dalek::SigningKey {
+            secret_key: [0u8; dalek::SECRET_KEY_LENGTH],
+            verifying_key: public_key.to_verifying_key().expect("Invalid public key"),
+        })
+    }
 }
 
 impl Ed25519PublicKey {
@@ -89,6 +97,11 @@ impl Ed25519PublicKey {
                 expected: dalek::PUBLIC_KEY_LENGTH,
             })?;
         Ok(Ed25519PublicKey(key))
+    }
+
+    /// Convert public key to dalek verifying key
+    pub fn to_verifying_key(&self) -> Result<dalek::VerifyingKey, dalek::SignatureError> {
+        dalek::VerifyingKey::from_bytes(&self.0)
     }
 }
 
