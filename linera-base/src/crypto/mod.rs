@@ -121,6 +121,16 @@ impl AccountSecretKey {
     pub fn generate() -> Self {
         AccountSecretKey::Ed25519(Ed25519SecretKey::generate())
     }
+
+    /// Construct fake secret key with public key
+    pub fn from_public_key(public_key: AccountPublicKey) -> Self {
+        match public_key {
+            AccountPublicKey::Ed25519(public_key) => {
+                AccountSecretKey::Ed25519(Ed25519SecretKey::from_public_key(public_key))
+            }
+            AccountPublicKey::Secp256k1(_) => panic!("Not supported"),
+        }
+    }
 }
 
 impl AccountPublicKey {
