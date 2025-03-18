@@ -66,4 +66,14 @@ impl FakeWallet {
     ) -> Result<(), Error> {
         Ok(())
     }
+
+    pub fn assign_new_chain_to_owner(
+        &mut self,
+        _owner: Owner,
+        _chain_id: ChainId,
+        _timestamp: Timestamp,
+        _creation_message_id: MessageId,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
 }
