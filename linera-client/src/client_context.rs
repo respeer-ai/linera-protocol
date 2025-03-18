@@ -1122,7 +1122,7 @@ where
         &mut self.wallet
     }
 
-    pub fn new(storage: S, options: ClientOptions, wallet: WalletState<W>) -> Self {
+    pub fn new(storage: S, options: ClientOptions, wallet: W) -> Self {
         let node_options = NodeOptions {
             send_timeout: options.send_timeout,
             recv_timeout: options.recv_timeout,
@@ -1152,13 +1152,14 @@ where
 
         ClientContext {
             client: Arc::new(client),
-            wallet,
+            wallet: WalletState::new(wallet),
             send_timeout: options.send_timeout,
             recv_timeout: options.recv_timeout,
             retry_delay: options.retry_delay,
             max_retries: options.max_retries,
-            options,
             chain_listeners: JoinSet::default(),
+            blanket_message_policy: options.blanket_message_policy,
+            restrict_chain_ids_to: options.restrict_chain_ids_to,
         }
     }
 
