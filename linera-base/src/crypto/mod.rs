@@ -122,6 +122,12 @@ impl AccountSecretKey {
         AccountSecretKey::Ed25519(Ed25519SecretKey::generate())
     }
 
+    #[cfg(with_getrandom)]
+    /// Generates a new key pair from the given RNG. Use with care.
+    pub fn generate_from<R: CryptoRng>(rng: &mut R) -> Self {
+        AccountSecretKey::Ed25519(Ed25519SecretKey::generate_from(rng))
+    }
+
     /// Construct fake secret key with public key
     pub fn from_public_key(public_key: AccountPublicKey) -> Self {
         match public_key {
