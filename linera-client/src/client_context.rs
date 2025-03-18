@@ -1041,7 +1041,7 @@ where
     fn make_chain_client_ext(
         &self,
         chain_id: ChainId,
-        key_pair: KeyPair,
+        secret_key: AccountSecretKey,
         admin_id: ChainId,
         block_hash: Option<CryptoHash>,
         timestamp: Timestamp,
@@ -1049,7 +1049,7 @@ where
     ) -> Result<ChainClient<NodeProvider, S>, Error> {
         self.make_chain_client_ext(
             chain_id,
-            key_pair,
+            secret_key,
             admin_id,
             block_hash,
             timestamp,
@@ -1064,7 +1064,7 @@ where
     async fn update_wallet_for_new_chain(
         &mut self,
         chain_id: ChainId,
-        key_pair: Option<KeyPair>,
+        key_pair: Option<AccountSecretKey>,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
         self.update_wallet_for_new_chain(chain_id, key_pair, timestamp)?;
@@ -1178,15 +1178,13 @@ where
             .map(|kp| kp.copy())
             .into_iter()
             .collect();
-        let mut chain_client = self.client.create_chain_client(
+        let mut chain_client = self.make_chain_client_internal(
             chain_id,
             known_key_pairs,
-            self.wallet.genesis_admin_chain(),
             chain.block_hash,
             chain.timestamp,
             chain.next_block_height,
-            chain.pending_block.clone(),
-            chain.pending_blobs.clone(),
+            chain.pending_proposal,
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
             self.options.blanket_message_policy,
@@ -1198,24 +1196,22 @@ where
     fn make_chain_client_ext(
         &self,
         chain_id: ChainId,
-        key_pair: KeyPair,
+        secret_key: AccountSecretKey,
         admin_id: ChainId,
         block_hash: Option<CryptoHash>,
         timestamp: Timestamp,
         next_block_height: BlockHeight,
     ) -> Result<ChainClient<NodeProvider, S>, Error> {
         let mut known_key_pairs = Vec::new();
-        known_key_pairs.push(key_pair);
+        known_key_pairs.push(secret_key);
 
-        let mut chain_client = self.client.create_chain_client(
+        let mut chain_client = self.make_chain_client_internal(
             chain_id,
             known_key_pairs,
-            admin_id,
             block_hash,
             timestamp,
             next_block_height,
             None,
-            BTreeMap::new(),
         );
         chain_client.options_mut().message_policy = MessagePolicy::new(
             self.options.blanket_message_policy,
@@ -1263,7 +1259,7 @@ where
     pub fn update_wallet_for_new_chain(
         &mut self,
         _chain_id: ChainId,
-        _key_pair: Option<KeyPair>,
+        _key_pair: Option<AccountSecretKey>,
         _timestamp: Timestamp,
     ) -> Result<(), Error> {
         Ok(())
@@ -1272,7 +1268,7 @@ where
     pub async fn process_inbox(
         &mut self,
         _chain_client: &ChainClient<NodeProvider, S>,
-    ) -> Result<Vec<Certificate>, Error> {
+    ) -> Result<Vec<ConfirmedBlockCertificate>, Error> {
         Ok(Vec::new())
     }
 

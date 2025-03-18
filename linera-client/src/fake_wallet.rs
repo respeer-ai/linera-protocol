@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use linera_base::{
-    crypto::{CryptoHash, KeyPair},
+    crypto::{AccountSecretKey, CryptoHash},
     data_types::Timestamp,
     identifiers::{ChainId, MessageId, Owner},
 };
@@ -30,7 +30,7 @@ impl FakeWallet {
         Vec::new()
     }
 
-    pub fn key_pair_for_owner(&self, _key: &Owner) -> Option<KeyPair> {
+    pub fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
         None
     }
 

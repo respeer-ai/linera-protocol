@@ -10,7 +10,7 @@ use std::{
 use async_trait::async_trait;
 use futures::{lock::Mutex, stream, StreamExt};
 use linera_base::{
-    crypto::{AccountSecretKey, ValidatorPublicKey},
+    crypto::{AccountSecretKey, CryptoHash, ValidatorPublicKey},
     data_types::Timestamp,
     identifiers::{ChainId, Destination, MessageId, Owner},
 };
