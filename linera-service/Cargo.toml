@@ -143,7 +143,7 @@ tonic-web.workspace = true
 tower.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 tracing.workspace = true
-local-ip-address = "0.6.1"
+local-ip-address.workspace = true
 
 [build-dependencies]
 cfg_aliases.workspace = true
