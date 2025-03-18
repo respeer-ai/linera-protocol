@@ -1212,19 +1212,14 @@ where
             .map(|kp| kp.copy())
             .into_iter()
             .collect();
-        let mut chain_client = self.make_chain_client_internal(
+        Ok(self.make_chain_client_internal(
             chain_id,
             known_key_pairs,
             chain.block_hash,
             chain.timestamp,
             chain.next_block_height,
             chain.pending_proposal,
-        );
-        chain_client.options_mut().message_policy = MessagePolicy::new(
-            self.options.blanket_message_policy,
-            self.options.restrict_chain_ids_to.clone(),
-        );
-        Ok(chain_client)
+        ))
     }
 
     fn make_chain_client_ext(
@@ -1239,19 +1234,14 @@ where
         let mut known_key_pairs = Vec::new();
         known_key_pairs.push(secret_key);
 
-        let mut chain_client = self.make_chain_client_internal(
+        Ok(self.make_chain_client_internal(
             chain_id,
             known_key_pairs,
             block_hash,
             timestamp,
             next_block_height,
             None,
-        );
-        chain_client.options_mut().message_policy = MessagePolicy::new(
-            self.options.blanket_message_policy,
-            self.options.restrict_chain_ids_to.clone(),
-        );
-        Ok(chain_client)
+        ))
     }
 
     fn destroy_chain_client(&self, chain_id: ChainId) {
