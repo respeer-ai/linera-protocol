@@ -1094,6 +1094,16 @@ where
     ) -> Result<(), Error> {
         Ok(())
     }
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        _chain_id: ChainId,
+        _message_id: MessageId,
+        _owner: Owner,
+        _validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 #[cfg(feature = "no-storage")]
