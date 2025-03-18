@@ -1265,7 +1265,7 @@ impl Job {
     /// Prints a warning message to explain that the wallet has been initialized using data from
     /// untrusted nodes, and gives instructions to verify that we are connected to the right
     /// network.
-    pub async fn print_peg_certificate_hash<S>(
+    async fn print_peg_certificate_hash<S>(
         storage: S,
         chain_ids: impl IntoIterator<Item = ChainId>,
         context: &ClientContext<S, impl Persist<Target = Wallet>>,

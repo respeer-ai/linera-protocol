@@ -46,7 +46,6 @@ pub enum AccountOwner {
 )]
 pub struct Account {
     /// The chain of the account.
-    #[serde(alias = "chainId", alias = "chain_id")]
     pub chain_id: ChainId,
     /// The owner of the account, or `None` for the chain balance.
     #[debug(skip_if = Option::is_none)]

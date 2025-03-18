@@ -3,11 +3,7 @@
 
 //! The server component of the Linera faucet.
 
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    num::NonZeroU16,
-    sync::Arc,
-};
+use std::{net::SocketAddr, num::NonZeroU16, sync::Arc};
 
 use async_graphql::{EmptySubscription, Error, Schema, SimpleObject};
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
@@ -25,7 +21,6 @@ use linera_client::{
 };
 use linera_core::data_types::ClientOutcome;
 use linera_storage::{Clock as _, Storage};
-use local_ip_address::local_ip;
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
 use tracing::info;
@@ -287,8 +282,7 @@ where
             .layer(Extension(self.clone()))
             .layer(CorsLayer::permissive());
 
-        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
+        info!("GraphiQL IDE: http://localhost:{}", port);
 
         ChainListener::new(self.config.clone())
             .run(Arc::clone(&self.context), self.storage.clone())

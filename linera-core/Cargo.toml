@@ -47,7 +47,6 @@ web = [
     "linera-storage/web",
     "linera-views/web",
     "wasm-bindgen-futures",
-    "wasmtimer",
 ]
 
 [dependencies]
@@ -80,7 +79,6 @@ tonic.workspace = true
 tracing.workspace = true
 trait-variant.workspace = true
 wasm-bindgen-futures = { workspace = true, optional = true }
-wasmtimer = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 linera-storage-service = { workspace = true, optional = true }

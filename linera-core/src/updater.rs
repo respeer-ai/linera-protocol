@@ -292,7 +292,7 @@ where
                     // Some received certificates may be missing for this validator
                     // (e.g. to create the chain or make the balance sufficient) so we are going to
                     // synchronize them now and retry.
-                    let _ = self.send_chain_information_for_senders(chain_id).await;
+                    self.send_chain_information_for_senders(chain_id).await?;
                 }
                 Err(NodeError::BlobsNotFound(_)) if !blob_ids.is_empty() => {
                     // For `BlobsNotFound`, we assume that the local node should already be
