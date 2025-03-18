@@ -1218,7 +1218,7 @@ where
             chain.block_hash,
             chain.timestamp,
             chain.next_block_height,
-            chain.pending_proposal,
+            chain.pending_proposal.clone(),
         ))
     }
 
