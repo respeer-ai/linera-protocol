@@ -274,10 +274,7 @@ where
         let context = QueryContext {
             chain_id,
             next_block_height: BlockHeight(0),
-            local_time: match local_time {
-                Some(timestamp) => timestamp,
-                None => Timestamp::from(0),
-            },
+            local_time: local_time.unwrap_or(Timestamp::from(0)),
         };
 
         let (execution_state_sender, incoming_execution_requests) =
