@@ -1131,15 +1131,23 @@ where
         };
         let node_provider = NodeProvider::new(node_options);
         let delivery = CrossChainMessageDelivery::new(options.wait_for_outgoing_messages);
+        let chain_ids = wallet.chain_ids();
+        let name = match chain_ids.len() {
+            0 => "Client node".to_string(),
+            1 => format!("Client node for {:.8}", chain_ids[0]),
+            n => format!("Client node for {:.8} and {} others", chain_ids[0], n - 1),
+        };
         let client = Client::new(
             node_provider,
             storage,
             options.max_pending_message_bundles,
             delivery,
             options.long_lived_services,
-            wallet.chain_ids(),
-            "Client node",
-            Duration::from_secs(1),
+            chain_ids,
+            name,
+            options.max_loaded_chains,
+            options.grace_period,
+            options.blob_download_timeout,
         );
 
         ClientContext {

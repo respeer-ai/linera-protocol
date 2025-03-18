@@ -95,7 +95,7 @@ pub trait ClientContext: 'static {
     fn make_chain_client_ext(
         &self,
         chain_id: ChainId,
-        key_pair: KeyPair,
+        key_pair: AccountSecretKey,
         admin_id: ChainId,
         block_hash: Option<CryptoHash>,
         timestamp: Timestamp,
