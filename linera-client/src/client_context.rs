@@ -1176,6 +1176,31 @@ where
             .expect("No chain specified in wallet with no default chain")
     }
 
+    fn make_chain_client_internal(
+        &self,
+        chain_id: ChainId,
+        known_key_pairs: Vec<AccountSecretKey>,
+        block_hash: Option<CryptoHash>,
+        timestamp: Timestamp,
+        next_block_height: BlockHeight,
+        pending_proposal: Option<PendingProposal>,
+    ) -> ChainClient<NodeProvider, S> {
+        let mut chain_client = self.client.create_chain_client(
+            chain_id,
+            known_key_pairs,
+            self.wallet.genesis_admin_chain(),
+            block_hash,
+            timestamp,
+            next_block_height,
+            pending_proposal,
+        );
+        chain_client.options_mut().message_policy = MessagePolicy::new(
+            self.blanket_message_policy,
+            self.restrict_chain_ids_to.clone(),
+        );
+        chain_client
+    }
+
     fn make_chain_client(&self, chain_id: ChainId) -> Result<ChainClient<NodeProvider, S>, Error> {
         let chain = self
             .wallet
