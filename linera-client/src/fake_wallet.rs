@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
 use linera_base::{
-    crypto::{CryptoHash, KeyPair, PublicKey},
+    crypto::{CryptoHash, KeyPair},
     data_types::Timestamp,
-    identifiers::{ChainId, MessageId},
+    identifiers::{ChainId, MessageId, Owner},
 };
 use linera_core::{client::ChainClient, node::ValidatorNodeProvider};
 use linera_storage::Storage;
@@ -30,7 +30,7 @@ impl FakeWallet {
         Vec::new()
     }
 
-    pub fn key_pair_for_pk(&self, _key: &PublicKey) -> Option<KeyPair> {
+    pub fn key_pair_for_owner(&self, _key: &Owner) -> Option<KeyPair> {
         None
     }
 
