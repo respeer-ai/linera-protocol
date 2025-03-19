@@ -22,7 +22,7 @@ use futures::{lock::Mutex, Future};
 use linera_base::{
     crypto::{AccountPublicKey, AccountSignature, BcsSignable, CryptoError, CryptoHash},
     data_types::{
-        Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta, Timestamp,
+        Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta,
         UserApplicationDescription,
     },
     doc_scalar, ensure,
@@ -96,28 +96,13 @@ where
     chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
-/// A bundle of cross-chain messages.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-pub struct UserIncomingBundle {
-    /// The origin of the messages (chain and channel if any).
-    pub origin: Origin,
-    /// The messages to be delivered to the inbox identified by `origin`.
-    pub bundle: MessageBundle,
-    /// What to do with the message.
-    pub action: MessageAction,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockMaterial {
+    operations: Vec<Operation>,
+    candidate: CandidateBlockMaterial,
 }
 
-impl Into<IncomingBundle> for UserIncomingBundle {
-    fn into(self) -> IncomingBundle {
-        IncomingBundle {
-            origin: self.origin,
-            bundle: self.bundle,
-            action: self.action,
-        }
-    }
-}
-
-doc_scalar!(UserIncomingBundle, "Input shadow of IncomingBundle.");
+doc_scalar!(BlockMaterial, "Materials of a new block.");
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct Balances {
@@ -125,17 +110,17 @@ pub struct Balances {
     owner_balances: HashMap<AccountOwner, Amount>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct ExecutedBlockMaterial {
     executed_block: ExecutedBlock,
     blob_ids: Vec<BlobId>,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
 
-doc_scalar!(
-    ExecutedBlockMaterial,
-    "Block material waiting for signing and submitting."
-);
+// doc_scalar!(
+//     ExecutedBlockMaterial,
+//     "Block material waiting for signing and submitting."
+// );
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedBlock {
@@ -882,17 +867,25 @@ where
     async fn simulate_execute_block(
         &self,
         chain_id: ChainId,
-        operations: Vec<Operation>,
-        incoming_bundles: Vec<UserIncomingBundle>,
-        local_time: Timestamp,
+        block_material: BlockMaterial,
     ) -> Result<Option<ExecutedBlockMaterial>, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        let BlockMaterial {
+            operations,
+            candidate,
+        } = block_material;
+        let CandidateBlockMaterial {
+            incoming_bundles,
+            local_time,
+            ..
+        } = candidate;
 
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
         let bundles: Vec<_> = incoming_bundles
             .iter()
-            .map(|bundle| bundle.clone().into())
+            .map(|bundle| bundle.clone())
             .collect();
 
         let Some((executed_block, blob_ids, validated_block_certificate)) = client
