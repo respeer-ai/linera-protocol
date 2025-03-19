@@ -23,6 +23,8 @@ use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
 use futures::{lock::Mutex, Future};
 #[cfg(feature = "enable-wallet-rpc")]
+use linera_base::doc_scalar;
+#[cfg(feature = "enable-wallet-rpc")]
 use linera_base::{
     crypto::{AccountPublicKey, AccountSignature, BcsSignable},
     data_types::{Blob, BlockHeight, Round, Timestamp},
@@ -31,7 +33,7 @@ use linera_base::{
 use linera_base::{
     crypto::{CryptoError, CryptoHash},
     data_types::{Amount, UserApplicationDescription},
-    doc_scalar, ensure,
+    ensure,
     hashed::Hashed,
     identifiers::{AccountOwner, ChainId, Owner, UserApplicationId},
     BcsHexParseError,
@@ -46,12 +48,14 @@ use linera_base::{
 #[cfg(not(feature = "disable-native-rpc"))]
 use linera_chain::types::GenericCertificate;
 #[cfg(feature = "enable-wallet-rpc")]
-use linera_chain::types::ValidatedBlockCertificate;
 use linera_chain::{
     data_types::{
-        BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock, IncomingBundle,
-        MessageAction, MessageBundle, Origin, ProposedBlock,
+        BlockExecutionOutcome, ExecutedBlock, MessageAction, MessageBundle, Origin, ProposedBlock,
     },
+    types::ValidatedBlockCertificate,
+};
+use linera_chain::{
+    data_types::{CandidateBlockMaterial, IncomingBundle},
     types::ConfirmedBlock,
     ChainStateView,
 };
@@ -822,7 +826,7 @@ where
 
     #[cfg(feature = "enable-wallet-rpc")]
     /// ResPeer::CheCko::Initialize offline wallet
-    async fn wallet_init_without_keypair(
+    async fn wallet_init_without_secret_key(
         &self,
         chain_id: ChainId,
         initializer: WalletInitializer,
@@ -1093,6 +1097,7 @@ where
         })
     }
 
+    #[cfg(feature = "enable-wallet-rpc")]
     /// Returns the balances of given owners
     async fn balances(
         &self,

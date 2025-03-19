@@ -25,39 +25,6 @@ type ApplicationOverview {
 }
 
 """
-Permissions for applications on a chain.
-"""
-input ApplicationPermissions {
-	"""
-	If this is `None`, all system operations and application operations are allowed.
-	If it is `Some`, only operations from the specified applications are allowed, and
-	no system operations.
-	"""
-	executeOperations: [ApplicationId!]
-	"""
-	At least one operation or incoming message from each of these applications must occur in
-	every block.
-	"""
-	mandatoryApplications: [ApplicationId!]! = []
-	"""
-	These applications are allowed to close the current chain using the system API.
-	"""
-	closeChain: [ApplicationId!]! = []
-	"""
-	These applications are allowed to change the application permissions using the system API.
-	"""
-	changeApplicationPermissions: [ApplicationId!]! = []
-	"""
-	These applications are allowed to perform calls to services as oracles.
-	"""
-	callServiceAsOracle: [ApplicationId!] = null
-	"""
-	These applications are allowed to perform HTTP requests.
-	"""
-	makeHttpRequests: [ApplicationId!] = null
-}
-
-"""
 A blob of binary data, with its content-addressed blob ID.
 """
 scalar Blob
@@ -207,11 +174,6 @@ type BundleInInbox {
 	"""
 	cursor: Cursor!
 }
-
-"""
-A WebAssembly module's bytecode
-"""
-scalar Bytecode
 
 type CandidateBlockMaterial {
 	incomingBundles: [IncomingBundle!]!
@@ -415,32 +377,6 @@ type ChannelSubscription {
 	The name of the channel.
 	"""
 	name: ChannelName!
-}
-
-"""
-A set of validators (identified by their public keys) and their voting rights.
-"""
-input Committee {
-	"""
-	The validators in the committee.
-	"""
-	validators: JSONObject!
-	"""
-	The sum of all voting rights.
-	"""
-	totalVotes: Int!
-	"""
-	The threshold to form a quorum.
-	"""
-	quorumThreshold: Int!
-	"""
-	The threshold to prove the validity of a statement.
-	"""
-	validityThreshold: Int!
-	"""
-	The policy agreed on for this epoch.
-	"""
-	policy: ResourceControlPolicy!
 }
 
 type ConfirmedBlock {
@@ -740,131 +676,15 @@ The kind of outgoing message being sent
 """
 scalar MessageKind
 
-"""
-A unique identifier for an application module
-"""
-scalar ModuleId
-
 type MutationRoot {
-	"""
-	Processes the inbox and returns the lists of certificate hashes that were created, if any.
-	"""
-	processInbox(chainId: ChainId!): [CryptoHash!]!
-	"""
-	Retries the pending block that was unsuccessfully proposed earlier.
-	"""
-	retryPendingBlock(chainId: ChainId!): CryptoHash
-	"""
-	Transfers `amount` units of value from the given owner's account to the recipient.
-	If no owner is given, try to take the units out of the unattributed account.
-	"""
-	transfer(chainId: ChainId!, owner: Owner, recipient: Recipient!, amount: Amount!): CryptoHash!
-	"""
-	Claims `amount` units of value from the given owner's account in the remote
-	`target` chain. Depending on its configuration, the `target` chain may refuse to
-	process the message.
-	"""
-	claim(chainId: ChainId!, owner: Owner!, targetId: ChainId!, recipient: Recipient!, amount: Amount!): CryptoHash!
 	"""
 	Test if a data blob is readable from a transaction in the current chain.
 	"""
 	readDataBlob(chainId: ChainId!, hash: CryptoHash!): CryptoHash!
 	"""
-	Creates (or activates) a new chain with the given owner.
-	This will automatically subscribe to the future committees created by `admin_id`.
-	"""
-	openChain(chainId: ChainId!, owner: Owner!, balance: Amount): ChainId!
-	"""
-	Creates (or activates) a new chain by installing the given authentication keys.
-	This will automatically subscribe to the future committees created by `admin_id`.
-	"""
-	openMultiOwnerChain(		chainId: ChainId!,		applicationPermissions: ApplicationPermissions,		owners: [Owner!]!,		weights: [Int!],		multiLeaderRounds: Int,		balance: Amount,
-		"""
-		The duration of the fast round, in milliseconds; default: no timeout
-		"""
-		fastRoundMs: Int,
-		"""
-		The duration of the first single-leader and all multi-leader rounds
-		"""
-		baseTimeoutMs: Int! = 10000,
-		"""
-		The number of milliseconds by which the timeout increases after each single-leader round
-		"""
-		timeoutIncrementMs: Int! = 1000,
-		"""
-		The age of an incoming tracked or protected message after which the validators start transitioning the chain to fallback mode, in milliseconds.
-		"""
-		fallbackDurationMs: Int! = 86400000
-	): ChainId!
-	"""
-	Closes the chain. Returns `None` if it was already closed.
-	"""
-	closeChain(chainId: ChainId!): CryptoHash
-	"""
-	Changes the authentication key of the chain.
-	"""
-	changeOwner(chainId: ChainId!, newOwner: Owner!): CryptoHash!
-	"""
-	Changes the authentication key of the chain.
-	"""
-	changeMultipleOwners(		chainId: ChainId!,		newOwners: [Owner!]!,		newWeights: [Int!]!,		multiLeaderRounds: Int!,		openMultiLeaderRounds: Boolean!,
-		"""
-		The duration of the fast round, in milliseconds; default: no timeout
-		"""
-		fastRoundMs: Int,
-		"""
-		The duration of the first single-leader and all multi-leader rounds
-		"""
-		baseTimeoutMs: Int! = 10000,
-		"""
-		The number of milliseconds by which the timeout increases after each single-leader round
-		"""
-		timeoutIncrementMs: Int! = 1000,
-		"""
-		The age of an incoming tracked or protected message after which the validators start transitioning the chain to fallback mode, in milliseconds.
-		"""
-		fallbackDurationMs: Int! = 86400000
-	): CryptoHash!
-	"""
-	Changes the application permissions configuration on this chain.
-	"""
-	changeApplicationPermissions(chainId: ChainId!, closeChain: [ApplicationId!]!, executeOperations: [ApplicationId!], mandatoryApplications: [ApplicationId!]!, changeApplicationPermissions: [ApplicationId!]!, callServiceAsOracle: [ApplicationId!], makeHttpRequests: [ApplicationId!]): CryptoHash!
-	"""
-	(admin chain only) Registers a new committee. This will notify the subscribers of
-	the admin chain so that they can migrate to the new epoch (by accepting the
-	notification as an "incoming message" in a next block).
-	"""
-	createCommittee(chainId: ChainId!, committee: Committee!): CryptoHash!
-	"""
-	Subscribes to a system channel.
-	"""
-	subscribe(subscriberChainId: ChainId!, publisherChainId: ChainId!, channel: SystemChannel!): CryptoHash!
-	"""
-	Unsubscribes from a system channel.
-	"""
-	unsubscribe(subscriberChainId: ChainId!, publisherChainId: ChainId!, channel: SystemChannel!): CryptoHash!
-	"""
-	(admin chain only) Removes a committee. Once this message is accepted by a chain,
-	blocks from the retired epoch will not be accepted until they are followed (hence
-	re-certified) by a block certified by a recent committee.
-	"""
-	removeCommittee(chainId: ChainId!, epoch: Epoch!): CryptoHash!
-	"""
-	Publishes a new application module.
-	"""
-	publishModule(chainId: ChainId!, contract: Bytecode!, service: Bytecode!, vmRuntime: VmRuntime!): ModuleId!
-	"""
-	Publishes a new data blob.
-	"""
-	publishDataBlob(chainId: ChainId!, bytes: [Int!]!): CryptoHash!
-	"""
-	Creates a new application.
-	"""
-	createApplication(chainId: ChainId!, moduleId: ModuleId!, parameters: String!, instantiationArgument: String!, requiredApplicationIds: [ApplicationId!]!): ApplicationId!
-	"""
 	ResPeer::CheCko::Initialize offline wallet
 	"""
-	walletInitWithoutKeypair(chainId: ChainId!, initializer: WalletInitializer!): ChainId!
+	walletInitWithoutSecretKey(chainId: ChainId!, initializer: WalletInitializer!): ChainId!
 	"""
 	Submit block proposal with signature
 	"""
@@ -1056,11 +876,6 @@ type QueueView_TimestampedBundleInInbox_5a630c55 {
 	entries(count: Int): [TimestampedBundleInInbox!]!
 }
 
-"""
-The recipient of a transfer
-"""
-scalar Recipient
-
 type ReentrantCollectionView_ChannelFullName_ChannelStateView_3660287053 {
 	keys: [ChannelFullName!]!
 	entry(key: ChannelFullName!): Entry_ChannelFullName_ChannelStateView_bd1de7ae!
@@ -1083,109 +898,6 @@ type ReentrantCollectionView_Target_OutboxStateView_2789119133 {
 	keys: [Target!]!
 	entry(key: Target!): Entry_Target_OutboxStateView_50a86149!
 	entries(input: MapInput_Target_7aac1e1c): [Entry_Target_OutboxStateView_50a86149!]!
-}
-
-"""
-A collection of prices and limits associated with block execution.
-"""
-input ResourceControlPolicy {
-	"""
-	The base price for creating a new block.
-	"""
-	block: Amount!
-	"""
-	The price per unit of fuel (aka gas) for VM execution.
-	"""
-	fuelUnit: Amount!
-	"""
-	The price of one read operation.
-	"""
-	readOperation: Amount!
-	"""
-	The price of one write operation.
-	"""
-	writeOperation: Amount!
-	"""
-	The price of reading a byte.
-	"""
-	byteRead: Amount!
-	"""
-	The price of writing a byte
-	"""
-	byteWritten: Amount!
-	"""
-	The price of increasing storage by a byte.
-	"""
-	byteStored: Amount!
-	"""
-	The base price of adding an operation to a block.
-	"""
-	operation: Amount!
-	"""
-	The additional price for each byte in the argument of a user operation.
-	"""
-	operationByte: Amount!
-	"""
-	The base price of sending a message from a block.
-	"""
-	message: Amount!
-	"""
-	The additional price for each byte in the argument of a user message.
-	"""
-	messageByte: Amount!
-	"""
-	The price for a performing an HTTP request.
-	"""
-	httpRequest: Amount!
-	"""
-	The maximum amount of fuel a block can consume.
-	"""
-	maximumFuelPerBlock: Int!
-	"""
-	The maximum time in milliseconds that a block can spend executing services as oracles.
-	"""
-	maximumServiceOracleExecutionMs: Int!
-	"""
-	The maximum size of an executed block. This includes the block proposal itself as well as
-	the execution outcome.
-	"""
-	maximumExecutedBlockSize: Int!
-	"""
-	The maximum size of decompressed contract or service bytecode, in bytes.
-	"""
-	maximumBytecodeSize: Int!
-	"""
-	The maximum size of a blob.
-	"""
-	maximumBlobSize: Int!
-	"""
-	The maximum number of published blobs per block.
-	"""
-	maximumPublishedBlobs: Int!
-	"""
-	The maximum size of a block proposal.
-	"""
-	maximumBlockProposalSize: Int!
-	"""
-	The maximum data to read per block
-	"""
-	maximumBytesReadPerBlock: Int!
-	"""
-	The maximum data to write per block
-	"""
-	maximumBytesWrittenPerBlock: Int!
-	"""
-	The maximum size in bytes of a received HTTP response.
-	"""
-	maximumHttpResponseBytes: Int!
-	"""
-	The maximum amount of time allowed to wait for an HTTP response.
-	"""
-	httpRequestTimeoutMs: Int!
-	"""
-	The list of hosts that contracts and services can send HTTP requests to.
-	"""
-	httpRequestAllowList: [String!]!
 }
 
 """
@@ -1223,16 +935,6 @@ type SubscriptionRoot {
 	Subscribes to notifications from the specified chain.
 	"""
 	notifications(chainId: ChainId!): Notification!
-}
-
-"""
-The channels available in the system application.
-"""
-enum SystemChannel {
-	"""
-	Channel used to broadcast reconfigurations.
-	"""
-	ADMIN
 }
 
 type SystemExecutionStateView {
@@ -1282,8 +984,6 @@ Input shadow of IncomingBundle.
 scalar UserIncomingBundle
 
 scalar VersionInfo
-
-scalar VmRuntime
 
 """
 Input parameters of wallet initialization.
