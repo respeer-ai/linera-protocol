@@ -36,8 +36,7 @@ use linera_base::{
 };
 use linera_chain::{
     data_types::{
-        BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock, IncomingBundle,
-        MessageAction, MessageBundle, Origin, ProposedBlock,
+        CandidateBlockMaterial, ExecutedBlock, IncomingBundle, MessageAction, MessageBundle, Origin,
     },
     types::{ConfirmedBlock, GenericCertificate, ValidatedBlockCertificate},
     ChainStateView,
@@ -126,26 +125,6 @@ pub struct Balances {
     owner_balances: HashMap<AccountOwner, Amount>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-pub struct UserExecutedBlock {
-    pub block: ProposedBlock,
-    pub outcome: BlockExecutionOutcome,
-}
-
-impl Into<ExecutedBlock> for UserExecutedBlock {
-    fn into(self) -> ExecutedBlock {
-        ExecutedBlock {
-            block: self.block,
-            outcome: self.outcome,
-        }
-    }
-}
-
-doc_scalar!(
-    UserExecutedBlock,
-    "A executed block which will be signed by wallet."
-);
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutedBlockMaterial {
     executed_block: ExecutedBlock,
@@ -160,7 +139,7 @@ doc_scalar!(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedBlock {
-    executed_block: UserExecutedBlock,
+    executed_block: ExecutedBlock,
     round: Round,
     signature: AccountSignature,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
@@ -887,7 +866,7 @@ where
         let hash = client
             .submit_external_signed_block_proposal_and_signature(
                 height,
-                executed_block.into(),
+                executed_block,
                 round,
                 signature,
                 validated_block_certificate,
