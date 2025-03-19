@@ -2,11 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #[cfg(feature = "enable-wallet-rpc")]
 use std::collections::HashSet;
-#[cfg(not(feature = "disable-native-rpc"))]
-use std::iter;
 use std::{
     borrow::Cow,
     collections::HashMap,
+    iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
     sync::Arc,
@@ -32,21 +31,14 @@ use linera_base::{
 };
 use linera_base::{
     crypto::{CryptoError, CryptoHash},
-    data_types::{Amount, UserApplicationDescription},
+    data_types::{Amount, ApplicationPermissions, Bytecode, TimeDelta, UserApplicationDescription},
     ensure,
     hashed::Hashed,
-    identifiers::{AccountOwner, ChainId, Owner, UserApplicationId},
-    BcsHexParseError,
-};
-#[cfg(not(feature = "disable-native-rpc"))]
-use linera_base::{
-    data_types::{ApplicationPermissions, Bytecode, TimeDelta},
-    identifiers::{ApplicationId, ModuleId},
+    identifiers::{AccountOwner, ApplicationId, ChainId, ModuleId, Owner, UserApplicationId},
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
+    BcsHexParseError,
 };
-#[cfg(not(feature = "disable-native-rpc"))]
-use linera_chain::types::GenericCertificate;
 #[cfg(feature = "enable-wallet-rpc")]
 use linera_chain::{
     data_types::{
@@ -56,7 +48,7 @@ use linera_chain::{
 };
 use linera_chain::{
     data_types::{CandidateBlockMaterial, IncomingBundle},
-    types::ConfirmedBlock,
+    types::{ConfirmedBlock, GenericCertificate},
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
@@ -65,14 +57,11 @@ use linera_core::{
     data_types::ClientOutcome,
     worker::Notification,
 };
-#[cfg(not(feature = "disable-native-rpc"))]
 use linera_execution::{
     committee::{Committee, Epoch},
     system::{AdminOperation, Recipient, SystemChannel},
-    SystemOperation,
+    Operation, Query, QueryOutcome, QueryResponse, SystemOperation,
 };
-use linera_execution::{Operation, Query, QueryOutcome, QueryResponse};
-#[cfg(not(feature = "disable-native-rpc"))]
 use linera_sdk::linera_base_types::BlobContent;
 use linera_storage::Storage;
 #[cfg(not(feature = "listen-localhost"))]
@@ -319,12 +308,13 @@ impl<C> MutationRoot<C>
 where
     C: ClientContext,
 {
-    #[cfg(not(feature = "disable-native-rpc"))]
     async fn execute_system_operation(
         &self,
         system_operation: SystemOperation,
         chain_id: ChainId,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let certificate = self
             .apply_client_command(&chain_id, move |client| {
                 let operation = Operation::System(system_operation.clone());
@@ -391,9 +381,10 @@ impl<C> MutationRoot<C>
 where
     C: ClientContext,
 {
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Processes the inbox and returns the lists of certificate hashes that were created, if any.
     async fn process_inbox(&self, chain_id: ChainId) -> Result<Vec<CryptoHash>, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let mut hashes = Vec::new();
         loop {
             let client = self.context.lock().await.make_chain_client(chain_id)?;
@@ -413,9 +404,10 @@ where
         }
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Retries the pending block that was unsuccessfully proposed earlier.
     async fn retry_pending_block(&self, chain_id: ChainId) -> Result<Option<CryptoHash>, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let client = self.context.lock().await.make_chain_client(chain_id)?;
         let outcome = client.process_pending_block().await?;
         self.context.lock().await.update_wallet(&client).await?;
@@ -429,7 +421,6 @@ where
         }
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Transfers `amount` units of value from the given owner's account to the recipient.
     /// If no owner is given, try to take the units out of the unattributed account.
     async fn transfer(
@@ -439,6 +430,8 @@ where
         recipient: Recipient,
         amount: Amount,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| async move {
             let result = client
                 .transfer(owner, amount, recipient)
@@ -450,7 +443,6 @@ where
         .await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Claims `amount` units of value from the given owner's account in the remote
     /// `target` chain. Depending on its configuration, the `target` chain may refuse to
     /// process the message.
@@ -462,6 +454,8 @@ where
         recipient: Recipient,
         amount: Amount,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| async move {
             let result = client
                 .claim(owner, target_id, recipient, amount)
@@ -492,7 +486,6 @@ where
         .await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Creates (or activates) a new chain with the given owner.
     /// This will automatically subscribe to the future committees created by `admin_id`.
     async fn open_chain(
@@ -501,6 +494,8 @@ where
         owner: Owner,
         balance: Option<Amount>,
     ) -> Result<ChainId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let ownership = ChainOwnership::single(owner);
         let balance = balance.unwrap_or(Amount::ZERO);
         let message_id = self
@@ -519,7 +514,6 @@ where
         Ok(ChainId::child(message_id))
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Creates (or activates) a new chain by installing the given authentication keys.
     /// This will automatically subscribe to the future committees created by `admin_id`.
     #[expect(clippy::too_many_arguments)]
@@ -551,6 +545,8 @@ where
         )]
         fallback_duration_ms: u64,
     ) -> Result<ChainId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let owners = if let Some(weights) = weights {
             if weights.len() != owners.len() {
                 return Err(Error::new(format!(
@@ -592,9 +588,10 @@ where
         Ok(ChainId::child(message_id))
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Closes the chain. Returns `None` if it was already closed.
     async fn close_chain(&self, chain_id: ChainId) -> Result<Option<CryptoHash>, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let maybe_cert = self
             .apply_client_command(&chain_id, |client| async move {
                 let result = client.close_chain().await.map_err(Error::from);
@@ -604,9 +601,10 @@ where
         Ok(maybe_cert.as_ref().map(GenericCertificate::hash))
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Changes the authentication key of the chain.
     async fn change_owner(&self, chain_id: ChainId, new_owner: Owner) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::ChangeOwnership {
             super_owners: vec![new_owner],
             owners: Vec::new(),
@@ -617,7 +615,6 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Changes the authentication key of the chain.
     #[expect(clippy::too_many_arguments)]
     async fn change_multiple_owners(
@@ -647,6 +644,8 @@ where
         )]
         fallback_duration_ms: u64,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::ChangeOwnership {
             super_owners: Vec::new(),
             owners: new_owners.into_iter().zip(new_weights).collect(),
@@ -662,7 +661,6 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Changes the application permissions configuration on this chain.
     #[expect(clippy::too_many_arguments)]
     async fn change_application_permissions(
@@ -675,6 +673,8 @@ where
         call_service_as_oracle: Option<Vec<ApplicationId>>,
         make_http_requests: Option<Vec<ApplicationId>>,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::ChangeApplicationPermissions(ApplicationPermissions {
             execute_operations,
             mandatory_applications,
@@ -686,7 +686,6 @@ where
         self.execute_system_operation(operation, chain_id).await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// (admin chain only) Registers a new committee. This will notify the subscribers of
     /// the admin chain so that they can migrate to the new epoch (by accepting the
     /// notification as an "incoming message" in a next block).
@@ -695,6 +694,8 @@ where
         chain_id: ChainId,
         committee: Committee,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         Ok(self
             .apply_client_command(&chain_id, move |client| {
                 let committee = committee.clone();
@@ -710,7 +711,6 @@ where
             .hash())
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Subscribes to a system channel.
     async fn subscribe(
         &self,
@@ -718,6 +718,8 @@ where
         publisher_chain_id: ChainId,
         channel: SystemChannel,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::Subscribe {
             chain_id: publisher_chain_id,
             channel,
@@ -726,7 +728,6 @@ where
             .await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Unsubscribes from a system channel.
     async fn unsubscribe(
         &self,
@@ -734,6 +735,8 @@ where
         publisher_chain_id: ChainId,
         channel: SystemChannel,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::Unsubscribe {
             chain_id: publisher_chain_id,
             channel,
@@ -742,16 +745,16 @@ where
             .await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// (admin chain only) Removes a committee. Once this message is accepted by a chain,
     /// blocks from the retired epoch will not be accepted until they are followed (hence
     /// re-certified) by a block certified by a recent committee.
     async fn remove_committee(&self, chain_id: ChainId, epoch: Epoch) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::Admin(AdminOperation::RemoveCommittee { epoch });
         self.execute_system_operation(operation, chain_id).await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Publishes a new application module.
     async fn publish_module(
         &self,
@@ -760,6 +763,8 @@ where
         service: Bytecode,
         vm_runtime: VmRuntime,
     ) -> Result<ModuleId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| {
             let contract = contract.clone();
             let service = service.clone();
@@ -775,13 +780,14 @@ where
         .await
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Publishes a new data blob.
     async fn publish_data_blob(
         &self,
         chain_id: ChainId,
         bytes: Vec<u8>,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, |client| {
             let bytes = bytes.clone();
             async move {
@@ -793,7 +799,6 @@ where
         .map(|_| CryptoHash::new(&BlobContent::new_data(bytes)))
     }
 
-    #[cfg(not(feature = "disable-native-rpc"))]
     /// Creates a new application.
     async fn create_application(
         &self,
@@ -803,6 +808,8 @@ where
         instantiation_argument: String,
         required_application_ids: Vec<UserApplicationId>,
     ) -> Result<ApplicationId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| {
             let parameters = parameters.as_bytes().to_vec();
             let instantiation_argument = instantiation_argument.as_bytes().to_vec();
