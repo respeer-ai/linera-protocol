@@ -1,10 +1,8 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-#[cfg(feature = "enable-wallet-rpc")]
-use std::collections::HashSet;
 use std::{
     borrow::Cow,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
@@ -21,34 +19,27 @@ use async_graphql::{
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
 use futures::{lock::Mutex, Future};
-#[cfg(feature = "enable-wallet-rpc")]
-use linera_base::doc_scalar;
-#[cfg(feature = "enable-wallet-rpc")]
 use linera_base::{
-    crypto::{AccountPublicKey, AccountSignature, BcsSignable},
-    data_types::{Blob, BlockHeight, Round, Timestamp},
-    identifiers::{BlobId, MessageId},
-};
-use linera_base::{
-    crypto::{CryptoError, CryptoHash},
-    data_types::{Amount, ApplicationPermissions, Bytecode, TimeDelta, UserApplicationDescription},
-    ensure,
+    crypto::{AccountPublicKey, AccountSignature, BcsSignable, CryptoError, CryptoHash},
+    data_types::{
+        Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta, Timestamp,
+        UserApplicationDescription,
+    },
+    doc_scalar, ensure,
     hashed::Hashed,
-    identifiers::{AccountOwner, ApplicationId, ChainId, ModuleId, Owner, UserApplicationId},
+    identifiers::{
+        AccountOwner, ApplicationId, BlobId, ChainId, MessageId, ModuleId, Owner, UserApplicationId,
+    },
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
     BcsHexParseError,
 };
-#[cfg(feature = "enable-wallet-rpc")]
 use linera_chain::{
     data_types::{
-        BlockExecutionOutcome, ExecutedBlock, MessageAction, MessageBundle, Origin, ProposedBlock,
+        BlockExecutionOutcome, CandidateBlockMaterial, ExecutedBlock, IncomingBundle,
+        MessageAction, MessageBundle, Origin, ProposedBlock,
     },
-    types::ValidatedBlockCertificate,
-};
-use linera_chain::{
-    data_types::{CandidateBlockMaterial, IncomingBundle},
-    types::{ConfirmedBlock, GenericCertificate},
+    types::{ConfirmedBlock, GenericCertificate, ValidatedBlockCertificate},
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
@@ -73,9 +64,7 @@ use tokio::sync::OwnedRwLockReadGuard;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, instrument, trace};
 
-#[cfg(feature = "enable-wallet-rpc")]
-use crate::cli_wrappers::Faucet;
-use crate::util;
+use crate::{cli_wrappers::Faucet, util};
 
 #[derive(SimpleObject, Serialize, Deserialize, Clone)]
 pub struct Chains {
@@ -103,16 +92,12 @@ where
 {
     context: Arc<Mutex<C>>,
 
-    #[cfg(feature = "enable-wallet-rpc")]
     storage: C::Storage,
-    #[cfg(feature = "enable-wallet-rpc")]
     config: ChainListenerConfig,
-    #[cfg(feature = "enable-wallet-rpc")]
     chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
 /// A bundle of cross-chain messages.
-#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct UserIncomingBundle {
     /// The origin of the messages (chain and channel if any).
@@ -123,7 +108,6 @@ pub struct UserIncomingBundle {
     pub action: MessageAction,
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 impl Into<IncomingBundle> for UserIncomingBundle {
     fn into(self) -> IncomingBundle {
         IncomingBundle {
@@ -134,24 +118,20 @@ impl Into<IncomingBundle> for UserIncomingBundle {
     }
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 doc_scalar!(UserIncomingBundle, "Input shadow of IncomingBundle.");
 
-#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct Balances {
     chain_balance: Amount,
     owner_balances: HashMap<AccountOwner, Amount>,
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
 pub struct UserExecutedBlock {
     pub block: ProposedBlock,
     pub outcome: BlockExecutionOutcome,
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 impl Into<ExecutedBlock> for UserExecutedBlock {
     fn into(self) -> ExecutedBlock {
         ExecutedBlock {
@@ -161,13 +141,11 @@ impl Into<ExecutedBlock> for UserExecutedBlock {
     }
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 doc_scalar!(
     UserExecutedBlock,
     "A executed block which will be signed by wallet."
 );
 
-#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutedBlockMaterial {
     executed_block: ExecutedBlock,
@@ -175,13 +153,11 @@ pub struct ExecutedBlockMaterial {
     validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 doc_scalar!(
     ExecutedBlockMaterial,
     "Block material waiting for signing and submitting."
 );
 
-#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedBlock {
     executed_block: UserExecutedBlock,
@@ -190,13 +166,11 @@ pub struct SignedBlock {
     validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 doc_scalar!(
     SignedBlock,
     "A signed block which will be submitted to blockchain with its signature."
 );
 
-#[cfg(feature = "enable-wallet-rpc")]
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 pub struct WalletInitializer {
     public_key: AccountPublicKey,
@@ -205,7 +179,6 @@ pub struct WalletInitializer {
     message_id: MessageId,
 }
 
-#[cfg(feature = "enable-wallet-rpc")]
 doc_scalar!(
     WalletInitializer,
     "Input parameters of wallet initialization."
@@ -361,7 +334,6 @@ where
         }
     }
 
-    #[cfg(feature = "enable-wallet-rpc")]
     async fn chain_initialized(
         &self,
         chain_id: ChainId,
@@ -831,13 +803,14 @@ where
         .await
     }
 
-    #[cfg(feature = "enable-wallet-rpc")]
     /// ResPeer::CheCko::Initialize offline wallet
     async fn wallet_init_without_secret_key(
         &self,
         chain_id: ChainId,
         initializer: WalletInitializer,
     ) -> Result<ChainId, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
         let WalletInitializer {
             public_key,
             signature,
@@ -893,7 +866,6 @@ where
         Ok(chain_id)
     }
 
-    #[cfg(feature = "enable-wallet-rpc")]
     /// Submit block proposal with signature
     async fn submit_block_and_signature(
         &self,
@@ -901,6 +873,8 @@ where
         height: BlockHeight,
         block: SignedBlock,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
         let SignedBlock {
@@ -925,7 +899,6 @@ where
         Ok(hash)
     }
 
-    #[cfg(feature = "enable-wallet-rpc")]
     /// Calculate block execution state hash
     async fn simulate_execute_block(
         &self,
@@ -934,6 +907,8 @@ where
         incoming_bundles: Vec<UserIncomingBundle>,
         local_time: Timestamp,
     ) -> Result<Option<ExecutedBlockMaterial>, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
         let bundles: Vec<_> = incoming_bundles
@@ -956,12 +931,13 @@ where
     }
 
     /// It not actually execute operation to publish blob, but just put blob to local node
-    #[cfg(feature = "enable-wallet-rpc")]
     pub async fn prepare_blob(
         &self,
         chain_id: ChainId,
         bytes: Vec<u8>,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
         let blob = Blob::new_data(bytes);
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
@@ -1104,12 +1080,13 @@ where
         })
     }
 
-    #[cfg(feature = "enable-wallet-rpc")]
     /// Returns the balances of given owners
     async fn balances(
         &self,
         chain_owners: HashMap<ChainId, Vec<AccountOwner>>,
     ) -> Result<HashMap<ChainId, Balances>, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
         let mut chain_balances = HashMap::new();
         for (chain_id, owners) in &chain_owners {
             let Ok(client) = self
@@ -1293,7 +1270,6 @@ where
     context: Arc<Mutex<C>>,
     default_chains: HashMap<Owner, ChainId>,
 
-    #[cfg(feature = "enable-wallet-rpc")]
     chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
@@ -1310,7 +1286,6 @@ where
             context: Arc::clone(&self.context),
             default_chains: self.default_chains.clone(),
 
-            #[cfg(feature = "enable-wallet-rpc")]
             chain_guard: Arc::clone(&self.chain_guard),
         }
     }
@@ -1337,7 +1312,6 @@ where
             storage,
             context: Arc::new(Mutex::new(context)),
 
-            #[cfg(feature = "enable-wallet-rpc")]
             chain_guard: Default::default(),
         }
     }
@@ -1353,11 +1327,8 @@ where
             MutationRoot {
                 context: Arc::clone(&self.context),
 
-                #[cfg(feature = "enable-wallet-rpc")]
                 storage: self.storage.clone(),
-                #[cfg(feature = "enable-wallet-rpc")]
                 config: self.config.clone(),
-                #[cfg(feature = "enable-wallet-rpc")]
                 chain_guard: Arc::clone(&self.chain_guard),
             },
             SubscriptionRoot {
@@ -1414,11 +1385,7 @@ where
         info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
 
         let chain_listener = ChainListener::new(self.config.clone());
-
-        #[cfg(feature = "enable-wallet-rpc")]
-        {
-            self.chain_guard = Arc::clone(&chain_listener.listening);
-        }
+        self.chain_guard = Arc::clone(&chain_listener.listening);
 
         chain_listener
             .run(Arc::clone(&self.context), self.storage.clone())

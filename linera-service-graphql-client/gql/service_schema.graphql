@@ -542,6 +542,11 @@ type Event {
 	value: [Int!]!
 }
 
+"""
+Block material waiting for signing and submitting.
+"""
+scalar ExecutedBlockMaterial
+
 type ExecutionStateView {
 	system: SystemExecutionStateView!
 }
@@ -856,6 +861,22 @@ type MutationRoot {
 	Creates a new application.
 	"""
 	createApplication(chainId: ChainId!, moduleId: ModuleId!, parameters: String!, instantiationArgument: String!, requiredApplicationIds: [ApplicationId!]!): ApplicationId!
+	"""
+	ResPeer::CheCko::Initialize offline wallet
+	"""
+	walletInitWithoutSecretKey(chainId: ChainId!, initializer: WalletInitializer!): ChainId!
+	"""
+	Submit block proposal with signature
+	"""
+	submitBlockAndSignature(chainId: ChainId!, height: BlockHeight!, block: SignedBlock!): CryptoHash!
+	"""
+	Calculate block execution state hash
+	"""
+	simulateExecuteBlock(chainId: ChainId!, operations: [Operation!]!, incomingBundles: [UserIncomingBundle!]!, localTime: Timestamp!): ExecutedBlockMaterial
+	"""
+	It not actually execute operation to publish blob, but just put blob to local node
+	"""
+	prepareBlob(chainId: ChainId!, bytes: [Int!]!): CryptoHash!
 }
 
 """
@@ -1014,6 +1035,10 @@ type QueryRoot {
 	"""
 	balance(chainId: ChainId!, owner: AccountOwner): Amount!
 	"""
+	Returns the balances of given owners
+	"""
+	balances(chainOwners: JSONObject!): JSONObject!
+	"""
 	Returns the maintained chains of given owner
 	"""
 	ownerChains(owner: Owner!): Chains!
@@ -1169,6 +1194,11 @@ A number to identify successive attempts to decide a value in a consensus protoc
 scalar Round
 
 """
+A signed block which will be submitted to blockchain with its signature.
+"""
+scalar SignedBlock
+
+"""
 An event stream ID.
 """
 type StreamId {
@@ -1246,9 +1276,19 @@ Description of the necessary information to run a user application
 """
 scalar UserApplicationDescription
 
+"""
+Input shadow of IncomingBundle.
+"""
+scalar UserIncomingBundle
+
 scalar VersionInfo
 
 scalar VmRuntime
+
+"""
+Input parameters of wallet initialization.
+"""
+scalar WalletInitializer
 
 directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
