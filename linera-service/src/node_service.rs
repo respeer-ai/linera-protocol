@@ -35,9 +35,7 @@ use linera_base::{
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{
-        CandidateBlockMaterial, ExecutedBlock, IncomingBundle, MessageAction, MessageBundle, Origin,
-    },
+    data_types::{CandidateBlockMaterial, ExecutedBlock, IncomingBundle},
     types::{ConfirmedBlock, GenericCertificate, ValidatedBlockCertificate},
     ChainStateView,
 };
