@@ -115,11 +115,6 @@ pub struct ExecutedBlockMaterial {
     validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
 
-// doc_scalar!(
-//     ExecutedBlockMaterial,
-//     "Block material waiting for signing and submitting."
-// );
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SignedBlock {
     executed_block: ExecutedBlock,
