@@ -131,21 +131,22 @@ where
 
     /// Configures the application creator chain ID to return during the test.
     pub fn with_application_creator_chain_id(mut self, chain_id: ChainId) -> Self {
-        self.application_creator_chain_id = Some(chain_id);
+        *self.application_creator_chain_id.lock().unwrap() = Some(chain_id);
         self
     }
 
     /// Configures the application creator chain ID to return during the test.
     pub fn set_application_creator_chain_id(&mut self, chain_id: ChainId) -> &mut Self {
-        self.application_creator_chain_id = Some(chain_id);
+        *self.application_creator_chain_id.lock().unwrap() = Some(chain_id);
         self
     }
 
     /// Returns the chain ID of the current application creator.
     pub fn application_creator_chain_id(&mut self) -> ChainId {
-        self.application_creator_chain_id.expect(
-            "Application creator chain ID has not been mocked, \
-            please call `MockContractRuntime::set_application_creator_chain_id` first",
+        Self::fetch_mocked_value(
+            &self.application_creator_chain_id,
+            "Application ID has not been mocked, \
+            please call `MockServiceRuntime::set_application_id` first",
         )
     }
 
