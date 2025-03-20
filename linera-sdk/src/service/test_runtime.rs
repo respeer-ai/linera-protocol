@@ -142,7 +142,7 @@ where
     }
 
     /// Returns the chain ID of the current application creator.
-    pub fn application_creator_chain_id(&mut self) -> ChainId {
+    pub fn application_creator_chain_id(&self) -> ChainId {
         Self::fetch_mocked_value(
             &self.application_creator_chain_id,
             "Application ID has not been mocked, \
