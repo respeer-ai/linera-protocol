@@ -82,7 +82,7 @@ where
     }
 
     /// Returns the chain ID of the current application creator.
-    pub fn application_creator_chain_id(&mut self) -> ChainId {
+    pub fn application_creator_chain_id(&self) -> ChainId {
         Self::fetch_value_through_cache(&self.application_creator_chain_id, || {
             ChainId::from(base_wit::get_application_creator_chain_id())
         })
