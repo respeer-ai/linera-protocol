@@ -193,7 +193,7 @@ function generate_nginx_conf() {
     echo "{
         \"service\": {
             \"endpoint\": \"$endpoint\",
-            \"servers\": [\"$LAN_IP\"],
+            \"servers\": [\"$LAN_IP:$port_base\"],
             \"domain\": \"$domain\",
             \"api_endpoint\": \"$endpoint\"
         }
