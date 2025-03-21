@@ -1,9 +1,9 @@
 #!/bin/bash
 
-LAN_IP=`hostname -I | sed s/'\s'//g`
+LAN_IP=$( hostname -I | awk '{print $1}' )
 
 NUM_VALIDATORS=1
-SHARDS_PER_VALIDATOR=1
+SHARDS_PER_VALIDATOR=4
 GIT_COMMIT=master
 COMPILE=1
 
@@ -173,7 +173,7 @@ EFFECT=$(echo "$EFFECT_AND_CHAIN" | sed -n '1 p')
 # Assign newly created chain to unassigned key.
 linera --wallet $WALLET_DIR/wallet_2.json --storage rocksdb:$WALLET_DIR/client_2.db assign --owner "$OWNER" --message-id "$EFFECT"
 
-# Run a faucet on wallet_2
-linera --wallet $WALLET_DIR/wallet_2.json --storage rocksdb:$WALLET_DIR/client_2.db faucet --amount 10
+# Run a faucet on wallet_1 which has enough balance
+linera --wallet $WALLET_DIR/wallet_1.json --storage rocksdb:$WALLET_DIR/client_1.db faucet --amount 10
 
 read
