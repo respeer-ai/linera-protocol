@@ -5,7 +5,6 @@ LAN_IP=$( hostname -I | awk '{print $1}' )
 NUM_VALIDATORS=1
 RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
-GIT_COMMIT=master
 COMPILE=1
 
 options="s:n:c:C:R:"
@@ -14,7 +13,6 @@ while getopts $options opt; do
   case ${opt} in
     n) NUM_VALIDATORS=${OPTARG} ;;
     s) SHARDS_PER_VALIDATOR=${OPTARG} ;;
-    c) GIT_COMMIT=${OPTARG} ;;
     C) COMPILE=${OPTARG} ;;
     R) RUN_VALIDATORS=${OPTARG} ;;
   esac
