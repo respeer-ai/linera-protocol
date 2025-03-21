@@ -1,40 +1,40 @@
-server_config_path = "{{ server_config_path }}"
-host = "{{ validator_host }}"
-port = {{ validator_port }}
-metrics_port = {{ metrics_port }}
-pyroscope_host = "{{ pyroscope_host }}"
-pyroscope_port = {{ pyroscope_port }}
-internal_host = "{{ proxy_host }}"
-internal_port = {{ proxy_port }}
+server_config_path = "{{ validator.config_path }}"
+host = "{{ validator.host }}"
+port = {{ validator.port }}
+metrics_port = {{ validator.metrics_port }}
+pyroscope_host = "{{ validator.pyroscope_host }}"
+pyroscope_port = {{ validator.pyroscope_port }}
+internal_host = "{{ validator.internal_host }}"
+internal_port = {{ validator.internal_port }}
 [external_protocol]
 Grpc = "ClearText"
 [internal_protocol]
 Grpc = "ClearText"
 
 [[shards]]
-host = "{{ shard_1 }}"
-port = {{ validator_port }}
-metrics_port = {{ metrics_port }}
-pyroscope_host = "{{ pyroscope_host }}"
-pyroscope_port = {{ pyroscope_port }}
+host = "{{ shard_1.host }}"
+port = {{ shard_1.port }}
+metrics_port = {{ shard_1.metrics_port }}
+pyroscope_host = "{{ shard_1.pyroscope_host }}"
+pyroscope_port = {{ shard_1.pyroscope_port }}
 
 [[shards]]
-host = "{{ shard_2 }}"
-port = {{ validator_port }}
-metrics_port = {{ metrics_port }}
-pyroscope_host = "{{ pyroscope_host }}"
-pyroscope_port = {{ pyroscope_port }}
+host = "{{ shard_2.host }}"
+port = {{ shard_2.port }}
+metrics_port = {{ shard_2.metrics_port }}
+pyroscope_host = "{{ shard_2.pyroscope_host }}"
+pyroscope_port = {{ shard_2.pyroscope_port }}
 
 [[shards]]
-host = "{{ shard_3 }}"
-port = {{ validator_port }}
-metrics_port = {{ metrics_port }}
-pyroscope_host = "{{ pyroscope_host }}"
-pyroscope_port = {{ pyroscope_port }}
+host = "{{ shard_3.host }}"
+port = {{ shard_3.port }}
+metrics_port = {{ shard_3.metrics_port }}
+pyroscope_host = "{{ shard_3.pyroscope_host }}"
+pyroscope_port = {{ shard_3.pyroscope_port }}
 
 [[shards]]
-host = "{{ shard_4 }}"
-port = {{ validator_port }}
-metrics_port = {{ metrics_port }}
-pyroscope_host = "{{ pyroscope_host }}"
-pyroscope_port = {{ pyroscope_port }}
+host = "{{ shard_4.host }}"
+port = {{ shard_4.port }}
+metrics_port = {{ shard_4.metrics_port }}
+pyroscope_host = "{{ shard_4.pyroscope_host }}"
+pyroscope_port = {{ shard_4.pyroscope_port }}
