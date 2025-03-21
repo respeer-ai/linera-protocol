@@ -1,0 +1,40 @@
+server_config_path = "{{ server_config_path }}"
+host = "{{ validator_host }}"
+port = {{ validator_port }}
+metrics_port = {{ metrics_port }}
+pyroscope_host = "{{ pyroscope_host }}"
+pyroscope_port = {{ pyroscope_port }}
+internal_host = "{{ proxy_host }}"
+internal_port = {{ proxy_port }}
+[external_protocol]
+Grpc = "ClearText"
+[internal_protocol]
+Grpc = "ClearText"
+
+[[shards]]
+host = "{{ shard_1 }}"
+port = {{ validator_port }}
+metrics_port = {{ metrics_port }}
+pyroscope_host = "{{ pyroscope_host }}"
+pyroscope_port = {{ pyroscope_port }}
+
+[[shards]]
+host = "{{ shard_2 }}"
+port = {{ validator_port }}
+metrics_port = {{ metrics_port }}
+pyroscope_host = "{{ pyroscope_host }}"
+pyroscope_port = {{ pyroscope_port }}
+
+[[shards]]
+host = "{{ shard_3 }}"
+port = {{ validator_port }}
+metrics_port = {{ metrics_port }}
+pyroscope_host = "{{ pyroscope_host }}"
+pyroscope_port = {{ pyroscope_port }}
+
+[[shards]]
+host = "{{ shard_4 }}"
+port = {{ validator_port }}
+metrics_port = {{ metrics_port }}
+pyroscope_host = "{{ pyroscope_host }}"
+pyroscope_port = {{ pyroscope_port }}
