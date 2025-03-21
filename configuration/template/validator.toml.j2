@@ -13,7 +13,7 @@ Grpc = "ClearText"
 
 {% for key, value in shards.items() %}
 [[shards]]
-host = "{{ key }}"
+host = "{{ value.host }}"
 port = {{ value.port }}
 metrics_port = {{ value.metrics_port }}
 pyroscope_host = "{{ value.pyroscope_host }}"
