@@ -5,7 +5,7 @@ LAN_IP=$( hostname -I | awk '{print $1}' )
 NUM_VALIDATORS=1
 RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
-GIT_COMMIT=master
+GIT_COMMIT=main
 COMPILE=1
 
 options="s:n:c:C:R:"
@@ -49,6 +49,8 @@ if [ "x$COMPILE" = "x1" ]; then
     rm linera-protocol -rf
     git clone https://github.com/linera-io/linera-protocol.git
     cd linera-protocol
+
+    git checkout $GIT_COMMIT
 
     # Get latest commit to avoid compilation for the same version
     LATEST_COMMIT=`git rev-parse HEAD`
