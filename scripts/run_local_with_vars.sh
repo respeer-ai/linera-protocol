@@ -21,7 +21,8 @@ while getopts $options opt; do
 done
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/validator.toml.j2"
+VALIDATOR_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/validator.toml.j2"
+NGINX_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/nginx.conf.j2"
 
 # All generated files will be put here
 OUTPUT_DIR="${SCRIPT_DIR}/../target/output/local"
@@ -117,7 +118,7 @@ for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
         }
     }" > $VALIDATOR_DIR/$i/validator.json
 
-    jinja -d $VALIDATOR_DIR/$i/validator.json $TEMPLATE_FILE > $VALIDATOR_DIR/$i/validator.toml
+    jinja -d $VALIDATOR_DIR/$i/validator.json $VALIDATOR_TEMPLATE_FILE > $VALIDATOR_DIR/$i/validator.toml
 
     VALIDATOR_FILES+=("$VALIDATOR_DIR/$i/validator.toml")
 done
@@ -183,6 +184,29 @@ EFFECT=$(echo "$EFFECT_AND_CHAIN" | sed -n '1 p')
 
 # Assign newly created chain to unassigned key.
 linera --wallet $WALLET_DIR/wallet_2.json --storage rocksdb:$WALLET_DIR/client_2.db assign --owner "$OWNER" --message-id "$EFFECT"
+
+function generate_nginx_conf() {
+    port_base=8080
+    endpoint=faucet
+    domain=api.faucet.respeer.ai
+
+    echo "{
+        \"service\": {
+            \"endpoint\": \"$endpoint\",
+            \"servers\": [\"$LAN_IP\"],
+            \"domain\": \"$domain\",
+            \"api_endpoint\": \"$endpoint\"
+        }
+    }" > ${CONFIG_DIR}/$endpoint.nginx.json
+
+    jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $NGINX_TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
+    echo "cp ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/"
+}
+
+generate_nginx_conf
+echo -e "\n\nFaucet domain"
+echo -e "	$LAN_IP api.faucet.respeer.ai"
+echo -e "	http://api.faucet.respeer.ai/api/faucet\n\n"
 
 # Run a faucet on wallet_1 which has enough balance
 linera --wallet $WALLET_DIR/wallet_1.json --storage rocksdb:$WALLET_DIR/client_1.db faucet --amount 10
