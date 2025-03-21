@@ -2,12 +2,13 @@
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
-NUM_VALIDATORS=1
+NUM_VALIDATORS=2
+RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
 GIT_COMMIT=master
 COMPILE=1
 
-options="s:n:c:C:"
+options="s:n:c:C:R:"
 
 while getopts $options opt; do
   case ${opt} in
@@ -15,6 +16,7 @@ while getopts $options opt; do
     s) SHARDS_PER_VALIDATOR=${OPTARG} ;;
     c) GIT_COMMIT=${OPTARG} ;;
     C) COMPILE=${OPTARG} ;;
+    R) RUN_VALIDATORS=${OPTARG} ;;
   esac
 done
 
@@ -24,6 +26,10 @@ TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/validator.toml.j2"
 # All generated files will be put here
 OUTPUT_DIR="${SCRIPT_DIR}/../target/output/local"
 mkdir -p $OUTPUT_DIR
+
+# All validator config will be put here
+VALIDATOR_DIR="${OUTPUT_DIR}/validator"
+mkdir -p $VALIDATOR_DIR
 
 # All generated config files will be put here
 CONFIG_DIR="${OUTPUT_DIR}/config"
@@ -63,10 +69,12 @@ trap 'kill $(jobs -p)' EXIT
 ## Generate validator configuration from template
 VALIDATOR_FILES=()
 for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
+    mkdir -p $VALIDATOR_DIR/$i
+
     # Generate validator configure of i
     echo "{
         \"validator\": {
-            \"config_path\": \"$CONFIG_DIR/server_$i.json\",
+            \"config_path\": \"$VALIDATOR_DIR/$i/server.json\",
             \"host\": \"$LAN_IP\",
             \"port\": $((19100 + i * 2)),
             \"metrics_port\": $((20100 + i * 2)),
@@ -103,11 +111,11 @@ for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
             \"pyroscope_host\": \"$LAN_IP\",
             \"pyroscope_port\": $((33140 + i * 2))
         }
-    }" > $CONFIG_DIR/validator_$i.json
+    }" > $VALIDATOR_DIR/$i/validator.json
 
-    jinja -d $CONFIG_DIR/validator_$i.json $TEMPLATE_FILE > $CONFIG_DIR/validator_$i.toml
+    jinja -d $VALIDATOR_DIR/$i/validator.json $TEMPLATE_FILE > $VALIDATOR_DIR/$i/validator.toml
 
-    VALIDATOR_FILES+=("$CONFIG_DIR/validator_$i.toml")
+    VALIDATOR_FILES+=("$VALIDATOR_DIR/$i/validator.toml")
 done
 
 # Generate committee
@@ -147,9 +155,9 @@ fi
 STORAGE="service:tcp:$ENDPOINT:linera"
 
 # Start servers and create initial chains in DB
-for I in $(seq 0 $((NUM_VALIDATORS - 1)))
+for I in $(seq 0 $((RUN_VALIDATORS - 1)))
 do
-    linera-proxy $CONFIG_DIR/server_"$I".json --storage $STORAGE --genesis $CONFIG_DIR/genesis.json &
+    linera-proxy $VALIDATOR_DIR/$I/server.json --storage $STORAGE --genesis $CONFIG_DIR/genesis.json &
 
     for J in $(seq 0 $((SHARDS_PER_VALIDATOR - 1)))
     do
@@ -157,7 +165,7 @@ do
     done
     for J in $(seq 0 $((SHARDS_PER_VALIDATOR - 1)))
     do
-        linera-server run --storage $STORAGE --server $CONFIG_DIR/server_"$I".json --shard "$J" --genesis $CONFIG_DIR/genesis.json &
+        linera-server run --storage $STORAGE --server $VALIDATOR_DIR/$I/server.json --shard "$J" --genesis $CONFIG_DIR/genesis.json &
     done
 done
 
