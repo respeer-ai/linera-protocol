@@ -2,7 +2,7 @@
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
-NUM_VALIDATORS=2
+NUM_VALIDATORS=1
 RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
 GIT_COMMIT=master
@@ -127,7 +127,6 @@ rm $WALLET_DIR/wallet_{1,2}.json $WALLET_DIR/client_{1,2}.db -rf
 # Create configuration files for 10 user chains.
 # * Private chain states are stored in one local wallet `wallet_1.json`.
 # * `genesis.json` will contain the initial balances of chains as well as the initial committee.
-
 linera --wallet $WALLET_DIR/wallet_1.json --storage rocksdb:$WALLET_DIR/client_1.db create-genesis-config 2 --genesis $CONFIG_DIR/genesis.json --initial-funding 100000000 --committee $CONFIG_DIR/committee.json
 
 # Initialize the second wallet.
