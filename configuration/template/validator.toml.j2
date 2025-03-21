@@ -11,30 +11,11 @@ Grpc = "ClearText"
 [internal_protocol]
 Grpc = "ClearText"
 
+{% for key, value in shards.items() %}
 [[shards]]
-host = "{{ shard_1.host }}"
-port = {{ shard_1.port }}
-metrics_port = {{ shard_1.metrics_port }}
-pyroscope_host = "{{ shard_1.pyroscope_host }}"
-pyroscope_port = {{ shard_1.pyroscope_port }}
-
-[[shards]]
-host = "{{ shard_2.host }}"
-port = {{ shard_2.port }}
-metrics_port = {{ shard_2.metrics_port }}
-pyroscope_host = "{{ shard_2.pyroscope_host }}"
-pyroscope_port = {{ shard_2.pyroscope_port }}
-
-[[shards]]
-host = "{{ shard_3.host }}"
-port = {{ shard_3.port }}
-metrics_port = {{ shard_3.metrics_port }}
-pyroscope_host = "{{ shard_3.pyroscope_host }}"
-pyroscope_port = {{ shard_3.pyroscope_port }}
-
-[[shards]]
-host = "{{ shard_4.host }}"
-port = {{ shard_4.port }}
-metrics_port = {{ shard_4.metrics_port }}
-pyroscope_host = "{{ shard_4.pyroscope_host }}"
-pyroscope_port = {{ shard_4.pyroscope_port }}
+host = "{{ key }}"
+port = {{ value.port }}
+metrics_port = {{ value.metrics_port }}
+pyroscope_host = "{{ value.pyroscope_host }}"
+pyroscope_port = {{ value.pyroscope_port }}
+{% endfor %}
