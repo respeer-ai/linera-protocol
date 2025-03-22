@@ -793,7 +793,12 @@ where
         let validators = faucet.current_validators().await?;
 
         tracing::info!("Assigning new chain to public key ...");
-        // TODO: add unassigned key
+        let secret_key = AccountSecretKey::from_public_key(public_key);
+        self.context
+            .lock()
+            .await
+            .add_unassigned_key_pair(secret_key)
+            .await?;
         self.context
             .lock()
             .await

@@ -151,6 +151,10 @@ where
         self.assign_new_chain_to_key(chain_id, message_id, owner, validators)
             .await
     }
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
+        self.add_unassigned_key_pair(key_pair).await
+    }
 }
 
 #[cfg(not(feature = "no-storage"))]
@@ -617,6 +621,14 @@ where
         self.wallet
             .as_mut()
             .set_owner_default_chain(owner, chain_id)?;
+        self.save_wallet().await
+    }
+
+    pub async fn add_unassigned_key_pair(
+        &mut self,
+        key_pair: AccountSecretKey,
+    ) -> Result<(), Error> {
+        self.wallet.as_mut().add_unassigned_key_pair(key_pair);
         self.save_wallet().await
     }
 }
@@ -1104,6 +1116,8 @@ where
     ) -> Result<(), Error> {
         Ok(())
     }
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) {}
 }
 
 #[cfg(feature = "no-storage")]
@@ -1374,4 +1388,16 @@ where
     ) -> Result<(), Error> {
         Ok(())
     }
+
+    pub fn assign_new_chain_to_key(
+        &mut self,
+        _chain_id: ChainId,
+        _message_id: MessageId,
+        _owner: Owner,
+        _validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    pub fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) {}
 }

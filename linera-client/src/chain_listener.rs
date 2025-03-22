@@ -126,6 +126,8 @@ pub trait ClientContext: 'static {
         owner: Owner,
         validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error>;
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts

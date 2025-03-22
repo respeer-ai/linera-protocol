@@ -236,6 +236,10 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
     ) -> Result<(), Error> {
         unimplemented!()
     }
+
+    async fn add_unassigned_key_pair(&mut self, _key_pair: AccountSecretKey) -> Result<(), Error> {
+        unimplemented!()
+    }
 }
 
 #[tokio::main]

@@ -43,7 +43,7 @@ if [ "x$COMPILE" = "x1" ]; then
     # Get latest commit to avoid compilation for the same version
     LATEST_COMMIT=`git rev-parse HEAD`
     LATEST_COMMIT=${LATEST_COMMIT:0:10}
-    INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
+    INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}' | awk '{print $1}'`
 
     if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
         cargo install --path linera-service --features storage-service,disable-native-rpc,enable-wallet-rpc
