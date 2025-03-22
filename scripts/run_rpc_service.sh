@@ -78,7 +78,7 @@ fi
 
 function generate_rpc_nginx_conf() {
     endpoint=rpc
-    domain=api.rpc.respeer.ai
+    domain=rpc.respeer.ai
 
     echo "{
         \"service\": {
