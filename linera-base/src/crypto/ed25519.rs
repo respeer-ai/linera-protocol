@@ -34,7 +34,7 @@ pub struct Ed25519PublicKey(pub [u8; dalek::PUBLIC_KEY_LENGTH]);
 pub struct Ed25519Signature(pub dalek::Signature);
 
 impl Ed25519SecretKey {
-    #[cfg(all(with_getrandom, with_testing))]
+    #[cfg(all(with_getrandom))]
     /// Generates a new key pair using the operating system's RNG.
     ///
     /// If you want control over the RNG, use `generate_from`[Ed25519SecretKey::generate_from].

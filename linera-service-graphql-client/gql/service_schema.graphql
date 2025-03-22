@@ -9,6 +9,11 @@ An owner of an account.
 scalar AccountOwner
 
 """
+A crypto signature.
+"""
+scalar AccountSignature
+
+"""
 A non-negative amount of tokens.
 """
 scalar Amount
@@ -1136,6 +1141,7 @@ type QueryRoot {
 	Returns the maintained chains of given owner
 	"""
 	ownerChains(owner: Owner!): Chains!
+	signaturePattern: AccountSignature!
 }
 
 type QueueView_BlockHeight_e824a938 {

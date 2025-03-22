@@ -46,7 +46,7 @@ if [ "x$COMPILE" = "x1" ]; then
     INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
 
     if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
-        cargo install --path linera-service --features storage-service
+        cargo install --path linera-service --features storage-service,disable-native-rpc,enable-wallet-rpc
         cargo install --path linera-storage-service --features storage-service
     fi
 fi
@@ -103,7 +103,9 @@ echo -e "   http://api.rpc.respeer.ai/rpc\n\n"
 function run_rpc_service() {
     linera --wallet $WALLET_DIR/rpc/wallet.json \
            --storage rocksdb://$WALLET_DIR/rpc/client.db \
-           service --port 30080 &
+           service \
+           --listener-skip-process-inbox \
+           --port 30080 &
 }
 
 run_rpc_service

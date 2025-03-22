@@ -20,7 +20,10 @@ use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
 use futures::{lock::Mutex, Future};
 use linera_base::{
-    crypto::{AccountPublicKey, AccountSignature, BcsSignable, CryptoError, CryptoHash},
+    crypto::{
+        AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
+        TestString,
+    },
     data_types::{
         Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta,
         UserApplicationDescription,
@@ -1097,6 +1100,10 @@ where
             list: chain_ids,
             default: self.default_chains.get(&owner).copied(),
         })
+    }
+
+    async fn signature_pattern(&self) -> AccountSignature {
+        AccountSecretKey::generate().sign(&TestString::new("Test signature"))
     }
 }
 
