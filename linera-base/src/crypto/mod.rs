@@ -83,6 +83,7 @@ pub enum AccountSignature {
 }
 
 doc_scalar!(AccountSignature, "A crypto signature.");
+doc_scalar!(AccountPublicKey, "A crypto public key.");
 
 impl AccountSecretKey {
     /// Returns the public key corresponding to this secret key.
