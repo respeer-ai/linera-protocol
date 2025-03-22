@@ -6,7 +6,7 @@ upstream {{ service.endpoint }} {
 
 server {
     listen 80;
-    server_name {{ service.domain }};
+    server_name api.{{ service.domain }} graphiql.{{ service.domain }};
 
     add_header Access-Control-Allow-Origin  'http://localhost:8080';
     add_header Access-Control-Allow-Methods 'GET, POST, OPTIONS';
@@ -16,7 +16,16 @@ server {
         return 204;
     }
 
-    location /{{ service.api_endpoint }} {
+    location /api/{{ service.api_endpoint }} {
+        proxy_pass http://{{ service.endpoint }}/;
+
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_hide_header 'Access-Control-Allow-Origin';
+    }
+
+    location /api/{{ service.api_endpoint }}/ {
         proxy_pass http://{{ service.endpoint }}/;
 
         proxy_set_header   X-Real-IP         $remote_addr;
@@ -26,6 +35,6 @@ server {
     }
 
     location / {
-        proxy_pass http://{{ service.endpoint }};
+        proxy_pass http://{{ service.endpoint }}/;
     }
 }

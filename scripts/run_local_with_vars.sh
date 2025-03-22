@@ -192,14 +192,14 @@ linera --wallet $WALLET_DIR/wallet_2.json --storage rocksdb:$WALLET_DIR/client_2
 function generate_nginx_conf() {
     port_base=8080
     endpoint=faucet
-    domain=api.faucet.respeer.ai
+    domain=faucet.respeer.ai
 
     echo "{
         \"service\": {
             \"endpoint\": \"$endpoint\",
             \"servers\": [\"$LAN_IP:$port_base\"],
             \"domain\": \"$domain\",
-            \"api_endpoint\": \"api/$endpoint\"
+            \"api_endpoint\": \"$endpoint\"
         }
     }" > ${CONFIG_DIR}/$endpoint.nginx.json
 
