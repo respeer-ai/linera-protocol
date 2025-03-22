@@ -145,7 +145,13 @@ impl Serialize for Ed25519SecretKey {
     {
         // This is only used for JSON configuration.
         assert!(serializer.is_human_readable());
-        serializer.serialize_str(&hex::encode(self.0.to_bytes()))
+
+        // serializer.serialize_str(&hex::encode(self.0.to_bytes()))
+
+        let mut key_buf = [0u8; dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH];
+        key_buf[..dalek::SECRET_KEY_LENGTH].copy_from_slice(&self.0.to_bytes());
+        key_buf[dalek::SECRET_KEY_LENGTH..].copy_from_slice(&self.public().as_bytes());
+        serializer.serialize_str(&hex::encode(key_buf))
     }
 }
 
@@ -158,8 +164,41 @@ impl<'de> Deserialize<'de> for Ed25519SecretKey {
         assert!(deserializer.is_human_readable());
         let s = String::deserialize(deserializer)?;
         let value = hex::decode(s).map_err(serde::de::Error::custom)?;
-        let key =
-            dalek::SigningKey::from_bytes(value[..].try_into().map_err(serde::de::Error::custom)?);
+
+        // let key =
+        //     dalek::SigningKey::from_bytes(value[..].try_into().map_err(serde::de::Error::custom)?);
+
+        if value.len() != dalek::SECRET_KEY_LENGTH
+            && value.len() != dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH
+        {
+            return Err(anyhow::anyhow!("detect invalid key-pair"))
+                .map_err(serde::de::Error::custom)?;
+        }
+
+        let key = if value.len() == dalek::SECRET_KEY_LENGTH {
+            if value[..dalek::SECRET_KEY_LENGTH] == [0u8; dalek::SECRET_KEY_LENGTH] {
+                tracing::warn!("detect empty key-pair");
+            }
+            dalek::SigningKey::from_bytes(
+                value[..dalek::SECRET_KEY_LENGTH]
+                    .try_into()
+                    .map_err(serde::de::Error::custom)?,
+            )
+        } else {
+            let mut secret_key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
+            let mut public_key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
+            secret_key_buf.copy_from_slice(&value[0..dalek::SECRET_KEY_LENGTH]);
+            public_key_buf.copy_from_slice(
+                &value
+                    [dalek::SECRET_KEY_LENGTH..dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH],
+            );
+            dalek::SigningKey {
+                secret_key: secret_key_buf,
+                verifying_key: Ed25519PublicKey(public_key_buf)
+                    .to_verifying_key()
+                    .expect("invalid public key"),
+            }
+        };
         Ok(Ed25519SecretKey(key))
     }
 }
