@@ -1,5 +1,9 @@
 #!/bin/bash
 
+####
+## ./run_local_with_vars.sh -c 7b3ae0b6
+####
+
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
 NUM_VALIDATORS=1
