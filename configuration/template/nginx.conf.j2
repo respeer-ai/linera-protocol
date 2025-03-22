@@ -16,7 +16,7 @@ server {
         return 204;
     }
 
-    location /api/{{ service.api_endpoint }} {
+    location /{{ service.api_endpoint }} {
         proxy_pass http://{{ service.endpoint }}/;
 
         proxy_set_header   X-Real-IP         $remote_addr;

@@ -199,7 +199,7 @@ function generate_nginx_conf() {
             \"endpoint\": \"$endpoint\",
             \"servers\": [\"$LAN_IP:$port_base\"],
             \"domain\": \"$domain\",
-            \"api_endpoint\": \"$endpoint\"
+            \"api_endpoint\": \"api/$endpoint\"
         }
     }" > ${CONFIG_DIR}/$endpoint.nginx.json
 
