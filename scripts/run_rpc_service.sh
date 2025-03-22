@@ -56,7 +56,7 @@ trap 'kill $(jobs -p)' EXIT
 
 RPC_WALLET=$WALLET_DIR/rpc
 
-if [ ! -d ${RPC_WALLET}-0 ]; then
+if [ ! -d ${RPC_WALLET} ]; then
     CREATE_WALLET=1
 fi
 
