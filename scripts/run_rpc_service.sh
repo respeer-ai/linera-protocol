@@ -80,7 +80,6 @@ function generate_rpc_nginx_conf() {
     endpoint=rpc
     domain=api.rpc.respeer.ai
 
-    servers=$(service_servers $port_base)
     echo "{
         \"service\": {
             \"endpoint\": \"$endpoint\",
