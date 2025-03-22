@@ -131,15 +131,15 @@ done
 linera-server generate --validators "${VALIDATOR_FILES[@]}" --committee $CONFIG_DIR/committee.json
 
 # Clean wallet
-rm $WALLET_DIR/wallet_{1,2}.json $WALLET_DIR/client_{1,2}.db -rf
+rm $WALLET_DIR/1 $WALLET_DIR/2 -rf
 
 # Create configuration files for 10 user chains.
 # * Private chain states are stored in one local wallet `wallet_1.json`.
 # * `genesis.json` will contain the initial balances of chains as well as the initial committee.
-linera --wallet $WALLET_DIR/wallet_1.json --storage rocksdb:$WALLET_DIR/client_1.db create-genesis-config 2 --genesis $CONFIG_DIR/genesis.json --initial-funding 100000000 --committee $CONFIG_DIR/committee.json
+linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db create-genesis-config 2 --genesis $CONFIG_DIR/genesis.json --initial-funding 100000000 --committee $CONFIG_DIR/committee.json
 
 # Initialize the second wallet.
-linera --wallet $WALLET_DIR/wallet_2.json --storage rocksdb:$WALLET_DIR/client_2.db wallet init --genesis $CONFIG_DIR/genesis.json
+linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db wallet init --genesis $CONFIG_DIR/genesis.json
 
 # Find free port for service
 while true; do
@@ -180,14 +180,14 @@ done
 sleep 3;
 
 # Create second wallet with unassigned key.
-OWNER=$(linera --wallet $WALLET_DIR/wallet_2.json --storage rocksdb:$WALLET_DIR/client_2.db keygen)
+OWNER=$(linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db keygen)
 
 # Open chain on behalf of wallet 2.
-EFFECT_AND_CHAIN=$(linera --wallet $WALLET_DIR/wallet_1.json --storage rocksdb:$WALLET_DIR/client_1.db open-chain --owner "$OWNER")
+EFFECT_AND_CHAIN=$(linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db open-chain --owner "$OWNER")
 EFFECT=$(echo "$EFFECT_AND_CHAIN" | sed -n '1 p')
 
 # Assign newly created chain to unassigned key.
-linera --wallet $WALLET_DIR/wallet_2.json --storage rocksdb:$WALLET_DIR/client_2.db assign --owner "$OWNER" --message-id "$EFFECT"
+linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db assign --owner "$OWNER" --message-id "$EFFECT"
 
 function generate_nginx_conf() {
     port_base=8080
@@ -213,6 +213,6 @@ echo -e "	$LAN_IP api.faucet.respeer.ai"
 echo -e "	http://api.faucet.respeer.ai/api/faucet\n\n"
 
 # Run a faucet on wallet_1 which has enough balance
-linera --wallet $WALLET_DIR/wallet_1.json --storage rocksdb:$WALLET_DIR/client_1.db faucet --amount 10
+linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db faucet --amount 10
 
 read
