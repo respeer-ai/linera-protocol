@@ -20,7 +20,10 @@ use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
 use futures::{lock::Mutex, Future};
 use linera_base::{
-    crypto::{AccountPublicKey, AccountSignature, BcsSignable, CryptoError, CryptoHash},
+    crypto::{
+        AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
+        TestString,
+    },
     data_types::{
         Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta,
         UserApplicationDescription,
@@ -129,11 +132,13 @@ doc_scalar!(
 );
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WalletInitializer {
     public_key: AccountPublicKey,
     signature: AccountSignature,
     faucet_url: String,
-    message_id: MessageId,
+    // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
+    // message_id: MessageId,
 }
 
 doc_scalar!(
@@ -765,6 +770,8 @@ where
         &self,
         chain_id: ChainId,
         initializer: WalletInitializer,
+        // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
+        message_id: MessageId,
     ) -> Result<ChainId, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
@@ -772,7 +779,6 @@ where
             public_key,
             signature,
             faucet_url,
-            message_id,
         } = initializer;
 
         #[derive(Debug, Serialize, Deserialize)]
@@ -1097,6 +1103,14 @@ where
             list: chain_ids,
             default: self.default_chains.get(&owner).copied(),
         })
+    }
+
+    async fn signature_pattern(&self) -> AccountSignature {
+        AccountSecretKey::generate().sign(&TestString::new("Test signature"))
+    }
+
+    async fn public_key_pattern(&self) -> AccountPublicKey {
+        AccountSecretKey::generate().public()
     }
 }
 

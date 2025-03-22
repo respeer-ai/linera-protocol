@@ -9,6 +9,16 @@ An owner of an account.
 scalar AccountOwner
 
 """
+A crypto public key.
+"""
+scalar AccountPublicKey
+
+"""
+A crypto signature.
+"""
+scalar AccountSignature
+
+"""
 A non-negative amount of tokens.
 """
 scalar Amount
@@ -780,6 +790,11 @@ type MessageBundle {
 }
 
 """
+The index of a message in a chain
+"""
+scalar MessageId
+
+"""
 The kind of outgoing message being sent
 """
 scalar MessageKind
@@ -908,7 +923,7 @@ type MutationRoot {
 	"""
 	ResPeer::CheCko::Initialize offline wallet
 	"""
-	walletInitWithoutSecretKey(chainId: ChainId!, initializer: WalletInitializer!): ChainId!
+	walletInitWithoutSecretKey(chainId: ChainId!, initializer: WalletInitializer!, messageId: MessageId!): ChainId!
 	"""
 	Submit block proposal with signature
 	"""
@@ -1136,6 +1151,8 @@ type QueryRoot {
 	Returns the maintained chains of given owner
 	"""
 	ownerChains(owner: Owner!): Chains!
+	signaturePattern: AccountSignature!
+	publicKeyPattern: AccountPublicKey!
 }
 
 type QueueView_BlockHeight_e824a938 {

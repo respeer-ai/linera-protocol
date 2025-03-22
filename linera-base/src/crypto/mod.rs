@@ -19,7 +19,7 @@ pub use secp256k1::{Secp256k1PublicKey, Secp256k1SecretKey, Secp256k1Signature};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::identifiers::Owner;
+use crate::{doc_scalar, identifiers::Owner};
 
 /// The public key of a validator.
 pub type ValidatorPublicKey = secp256k1::Secp256k1PublicKey;
@@ -82,6 +82,9 @@ pub enum AccountSignature {
     Secp256k1(secp256k1::Secp256k1Signature),
 }
 
+doc_scalar!(AccountSignature, "A crypto signature.");
+doc_scalar!(AccountPublicKey, "A crypto public key.");
+
 impl AccountSecretKey {
     /// Returns the public key corresponding to this secret key.
     pub fn public(&self) -> AccountPublicKey {
@@ -116,7 +119,7 @@ impl AccountSecretKey {
         }
     }
 
-    #[cfg(all(with_testing, with_getrandom))]
+    #[cfg(all(with_getrandom))]
     /// Generates a new key pair using the operating system's RNG.
     pub fn generate() -> Self {
         AccountSecretKey::Ed25519(Ed25519SecretKey::generate())
@@ -367,11 +370,9 @@ where
 }
 
 /// A BCS-signable struct for testing.
-#[cfg(with_testing)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TestString(pub String);
 
-#[cfg(with_testing)]
 impl TestString {
     /// Creates a new `TestString` with the given string.
     pub fn new(s: impl Into<String>) -> Self {
@@ -379,7 +380,6 @@ impl TestString {
     }
 }
 
-#[cfg(with_testing)]
 impl<'de> BcsSignable<'de> for TestString {}
 
 /// Reads the `bytes` as four little-endian unsigned 64-bit integers and returns them.
