@@ -248,6 +248,7 @@ pub struct Target {
 
 /// A set of messages from a single block, for a single destination.
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageBundle {
     /// The block height.
     pub height: BlockHeight,
@@ -285,6 +286,7 @@ pub struct BlockProposal {
 
 /// A message together with kind, authentication and grant information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
@@ -966,6 +968,7 @@ doc_scalar!(
 );
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct CandidateBlockMaterial {
     pub incoming_bundles: Vec<IncomingBundle>,
     pub local_time: Timestamp,
