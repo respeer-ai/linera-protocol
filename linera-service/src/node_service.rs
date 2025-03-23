@@ -134,7 +134,7 @@ doc_scalar!(
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WalletInitializer {
-    public_key: AccountPublicKey,
+    owner: Owner,
     signature: AccountSignature,
     faucet_url: String,
     // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
@@ -776,7 +776,7 @@ where
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
         let WalletInitializer {
-            public_key,
+            owner,
             signature,
             faucet_url,
         } = initializer;
@@ -785,31 +785,33 @@ where
         struct Nonce(MessageId);
         impl BcsSignable<'_> for Nonce {}
 
+        let secret_key = self
+            .context
+            .lock()
+            .await
+            .key_pair_for_owner(&owner)
+            .expect("Public key must be added firstly");
+
         tracing::info!("Verifing signature ...");
         let nonce = Nonce(message_id);
-        signature.verify(&nonce, public_key)?;
+        signature.verify(&nonce, secret_key.public())?;
 
         let faucet = Faucet::new(faucet_url.clone());
         let validators = faucet.current_validators().await?;
 
         tracing::info!("Assigning new chain to public key ...");
-        let secret_key = AccountSecretKey::from_public_key(public_key);
+        // Public key must already be added before claim new chain
         self.context
             .lock()
             .await
-            .add_unassigned_key_pair(secret_key)
-            .await?;
-        self.context
-            .lock()
-            .await
-            .assign_new_chain_to_key(chain_id, message_id, public_key.into(), Some(validators))
+            .assign_new_chain_to_key(chain_id, message_id, owner, Some(validators))
             .await?;
 
         tracing::info!("Setting default chain with public key ...");
         self.context
             .lock()
             .await
-            .set_owner_default_chain(public_key.into(), chain_id)
+            .set_owner_default_chain(owner, chain_id)
             .await?;
         self.context.lock().await.save_wallet().await?;
 
@@ -920,6 +922,31 @@ where
         client.prepare_blob(&vec![blob.clone()]).await?;
 
         Ok(blob.id().hash)
+    }
+
+    /// Add key pair info which only has public key
+    pub async fn wallet_init_public_key(
+        &self,
+        public_key: AccountPublicKey,
+        signature: AccountSignature,
+    ) -> Result<Owner, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        #[derive(Debug, Serialize, Deserialize)]
+        struct Nonce(Vec<u8>);
+        impl BcsSignable<'_> for Nonce {}
+
+        let nonce = Nonce(public_key.as_bytes());
+        let _ = AccountSecretKey::generate().sign(&nonce);
+        signature.verify(&nonce, public_key)?;
+
+        let secret_key = AccountSecretKey::from_public_key(public_key);
+        self.context
+            .lock()
+            .await
+            .add_unassigned_key_pair(secret_key)
+            .await?;
+        Ok(public_key.into())
     }
 }
 

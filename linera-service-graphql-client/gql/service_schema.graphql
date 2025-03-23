@@ -936,6 +936,10 @@ type MutationRoot {
 	It not actually execute operation to publish blob, but just put blob to local node
 	"""
 	prepareBlob(chainId: ChainId!, bytes: [Int!]!): CryptoHash!
+	"""
+	Add key pair info which only has public key
+	"""
+	walletInitPublicKey(publicKey: AccountPublicKey!, signature: AccountSignature!): Owner!
 }
 
 """

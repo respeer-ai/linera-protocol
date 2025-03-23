@@ -155,6 +155,10 @@ where
     async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
         self.add_unassigned_key_pair(key_pair).await
     }
+
+    fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+        self.key_pair_for_owner(owner)
+    }
 }
 
 #[cfg(not(feature = "no-storage"))]
@@ -630,6 +634,10 @@ where
     ) -> Result<(), Error> {
         self.wallet.as_mut().add_unassigned_key_pair(key_pair);
         self.save_wallet().await
+    }
+
+    pub fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+        self.wallet.key_pair_for_owner(owner)
     }
 }
 
@@ -1118,6 +1126,10 @@ where
     }
 
     async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) {}
+
+    fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+        None
+    }
 }
 
 #[cfg(feature = "no-storage")]
@@ -1400,4 +1412,8 @@ where
     }
 
     pub fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) {}
+
+    pub fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+        None
+    }
 }

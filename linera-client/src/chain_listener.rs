@@ -128,6 +128,8 @@ pub trait ClientContext: 'static {
     ) -> Result<(), Error>;
 
     async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
+
+    fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
