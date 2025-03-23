@@ -120,6 +120,7 @@ pub struct ExecutedBlockMaterial {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SignedBlock {
     executed_block: ExecutedBlock,
     round: Round,

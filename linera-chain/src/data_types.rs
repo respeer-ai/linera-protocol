@@ -49,6 +49,7 @@ mod data_types_tests;
 ///   received ahead of time in the inbox of the chain.
 /// * This constraint does not apply to the execution of confirmed blocks.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct ProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -372,6 +373,7 @@ doc_scalar!(
 
 /// A [`ProposedBlock`], together with the outcome from its execution.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecutedBlock {
     pub block: ProposedBlock,
     pub outcome: BlockExecutionOutcome,
@@ -379,6 +381,7 @@ pub struct ExecutedBlock {
 
 /// The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(with_testing, derive(Default))]
 pub struct BlockExecutionOutcome {
     /// The list of outgoing messages for each transaction.
