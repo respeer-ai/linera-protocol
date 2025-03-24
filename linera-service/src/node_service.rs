@@ -32,7 +32,8 @@ use linera_base::{
     doc_scalar, ensure,
     hashed::Hashed,
     identifiers::{
-        AccountOwner, ApplicationId, BlobId, ChainId, MessageId, ModuleId, Owner, UserApplicationId,
+        Account, AccountOwner, ApplicationId, BlobId, ChainId, MessageId, ModuleId, Owner,
+        UserApplicationId,
     },
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
@@ -1154,6 +1155,27 @@ where
             Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
                 .unwrap(),
         )
+    }
+
+    async fn transfer_pattern(&self) -> Operation {
+        let from_owner =
+            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+                .unwrap();
+        let to_owner = AccountOwner::User(
+            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa33")
+                .unwrap(),
+        );
+        Operation::System(SystemOperation::Transfer {
+            owner: Some(from_owner),
+            recipient: Recipient::Account(Account {
+                chain_id: ChainId::from_str(
+                    "8eeff319f14a33ff906799140246c525880861d654dfa1a13d0c019c3d18f1c6",
+                )
+                .unwrap(),
+                owner: Some(to_owner),
+            }),
+            amount: Amount::from_str("0.123").unwrap(),
+        })
     }
 }
 
