@@ -178,4 +178,4 @@ cp provisioning/dashboards $GRAFANA_DIR/provisioning/ -R
 cp dashboards $GRAFANA_DIR/ -R
 cp prometheus.yml $PROMETHEUS_DIR/
 
-docker compose up --wait
+docker compose up -f $VALIDATOR_DIR/docker-compose.yml --wait
