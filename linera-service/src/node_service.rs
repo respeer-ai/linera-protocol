@@ -6,6 +6,7 @@ use std::{
     iter,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
+    str::FromStr,
     sync::Arc,
 };
 
@@ -1145,6 +1146,13 @@ where
 
     async fn public_key_pattern(&self) -> AccountPublicKey {
         AccountSecretKey::generate().public()
+    }
+
+    async fn account_owner_pattern(&self) -> AccountOwner {
+        AccountOwner::User(
+            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+                .unwrap(),
+        )
     }
 }
 
