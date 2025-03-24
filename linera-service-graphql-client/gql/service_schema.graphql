@@ -1157,6 +1157,7 @@ type QueryRoot {
 	ownerChains(owner: Owner!): Chains!
 	signaturePattern: AccountSignature!
 	publicKeyPattern: AccountPublicKey!
+	accountOwnerPattern: AccountOwner!
 }
 
 type QueueView_BlockHeight_e824a938 {
