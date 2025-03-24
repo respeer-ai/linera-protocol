@@ -108,6 +108,7 @@ pub struct BlockMaterial {
 doc_scalar!(BlockMaterial, "Materials of a new block.");
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct Balances {
     chain_balance: Amount,
     owner_balances: HashMap<AccountOwner, Amount>,
