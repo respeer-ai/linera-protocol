@@ -1125,11 +1125,11 @@ where
         Ok(())
     }
 
-    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
+    async fn add_unassigned_key_pair(&mut self, _key_pair: AccountSecretKey) -> Result<(), Error> {
         Ok(())
     }
 
-    fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+    fn key_pair_for_owner(&self, _owner: &Owner) -> Option<AccountSecretKey> {
         None
     }
 }
