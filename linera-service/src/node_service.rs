@@ -4,7 +4,7 @@ use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     iter,
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     num::NonZeroU16,
     str::FromStr,
     sync::Arc,
@@ -57,8 +57,6 @@ use linera_execution::{
 };
 use linera_sdk::linera_base_types::BlobContent;
 use linera_storage::Storage;
-#[cfg(not(feature = "listen-localhost"))]
-use local_ip_address::local_ip;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use thiserror::Error as ThisError;
@@ -1263,16 +1261,11 @@ impl ApplicationOverview {
         port: NonZeroU16,
         chain_id: ChainId,
     ) -> Self {
-        #[cfg(not(feature = "listen-localhost"))]
-        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        #[cfg(feature = "listen-localhost")]
-        let ip_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
         Self {
             id,
             description,
             link: format!(
-                "http://{}:{}/chains/{}/applications/{}",
-                ip_addr,
+                "http://localhost:{}/chains/{}/applications/{}",
                 port.get(),
                 chain_id,
                 id
@@ -1422,11 +1415,7 @@ where
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
 
-        #[cfg(not(feature = "listen-localhost"))]
-        let ip_addr = local_ip().unwrap_or(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
-        #[cfg(feature = "listen-localhost")]
-        let ip_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
-        info!("GraphiQL IDE: http://{}:{}", ip_addr, port);
+        info!("GraphiQL IDE: http://localhost:{}", port);
 
         let chain_listener = ChainListener::new(self.config.clone());
         self.chain_guard = Arc::clone(&chain_listener.listening);
@@ -1436,7 +1425,7 @@ where
             .await;
 
         let serve_fut = axum::serve(
-            tokio::net::TcpListener::bind(SocketAddr::from((ip_addr, port))).await?,
+            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?,
             app,
         );
         serve_fut.await?;

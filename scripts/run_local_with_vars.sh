@@ -190,14 +190,13 @@ EFFECT=$(echo "$EFFECT_AND_CHAIN" | sed -n '1 p')
 linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db assign --owner "$OWNER" --message-id "$EFFECT"
 
 function generate_nginx_conf() {
-    port_base=8080
     endpoint=faucet
     domain=faucet.respeer.ai
 
     echo "{
         \"service\": {
             \"endpoint\": \"$endpoint\",
-            \"servers\": [\"$LAN_IP:$port_base\"],
+            \"servers\": [\"localhost:8080\"],
             \"domain\": \"$domain\",
             \"api_endpoint\": \"$endpoint\"
         }

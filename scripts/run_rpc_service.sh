@@ -83,7 +83,7 @@ function generate_rpc_nginx_conf() {
     echo "{
         \"service\": {
             \"endpoint\": \"$endpoint\",
-            \"servers\": [\"$LAN_IP:30080\"],
+            \"servers\": [\"localhost:30080\"],
             \"domain\": \"$domain\",
             \"api_endpoint\": \"$endpoint\"
         }
