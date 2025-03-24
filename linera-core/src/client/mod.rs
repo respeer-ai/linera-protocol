@@ -3606,6 +3606,7 @@ where
         );
 
         let already_handled_locally = info.manager.already_handled_proposal(round, &block);
+        // TODO: should we use blob ids in ExecutedBlock instead ?
         let blobs = self
             .client
             .local_node
