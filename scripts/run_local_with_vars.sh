@@ -132,6 +132,7 @@ linera-server generate --validators "${VALIDATOR_FILES[@]}" --committee $CONFIG_
 
 # Clean wallet
 rm $WALLET_DIR/1 $WALLET_DIR/2 -rf
+mkdir -p $WALLET_DIR/{1,2}
 
 # Create configuration files for 10 user chains.
 # * Private chain states are stored in one local wallet `wallet_1.json`.
