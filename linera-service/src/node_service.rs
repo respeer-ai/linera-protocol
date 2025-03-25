@@ -127,6 +127,8 @@ pub struct SignedBlock {
     round: Round,
     signature: AccountSignature,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
+    // If block contains PublishDataBlob, it should have blobs, too
+    blob_bytes: Vec<Vec<u8>>,
 }
 
 doc_scalar!(
@@ -855,6 +857,7 @@ where
             round,
             signature,
             validated_block_certificate,
+            blob_bytes,
         } = block;
 
         let hash = client
@@ -864,6 +867,10 @@ where
                 round,
                 signature,
                 validated_block_certificate,
+                blob_bytes
+                    .into_iter()
+                    .map(|bytes| Blob::new_data(bytes))
+                    .collect(),
             )
             .await?
             .value()
@@ -909,22 +916,6 @@ where
             blob_ids,
             validated_block_certificate,
         }))
-    }
-
-    /// It not actually execute operation to publish blob, but just put blob to local node
-    pub async fn prepare_blob(
-        &self,
-        chain_id: ChainId,
-        bytes: Vec<u8>,
-    ) -> Result<CryptoHash, Error> {
-        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
-
-        let blob = Blob::new_data(bytes);
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
-
-        client.prepare_blob(&vec![blob.clone()]).await?;
-
-        Ok(blob.id().hash)
     }
 
     /// Add key pair info which only has public key
