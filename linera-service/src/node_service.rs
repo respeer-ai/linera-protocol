@@ -1702,14 +1702,9 @@ where
         request: GraphQLRequest,
     ) -> Result<GraphQLResponse, NodeServiceError> {
         let mut request = request.into_inner();
-        let variables = request.variables.clone();
 
         let parsed_query = request.parsed_query()?;
-        let operation_type = match variables.get("checko_query_only") {
-            Some(async_graphql::Value::Boolean(true)) => OperationType::Query,
-            _ => operation_type(parsed_query)?,
-        };
-        request.variables.remove("checko_query_only");
+        let operation_type = operation_type(parsed_query)?;
 
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: UserApplicationId = application_id.parse()?;
