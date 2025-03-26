@@ -29,7 +29,7 @@ DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-com
 
 if [ "x$CREATE_WALLET" = "x1" ]; then
   rm $PERSISTENCE_DIR -rf
-  SCYLLA_VOLUME=docker_linera-scylla-data
+  SCYLLA_VOLUME=config_linera-scylla-data
   container=`docker ps -a -q --filter volume=$SCYLLA_VOLUME`
   [ "x$container" != "x" ] && docker rm -f $(docker ps -a -q --filter volume=$SCYLLA_VOLUME)
   volume=`docker volume list | grep $SCYLLA_VOLUME`
@@ -110,35 +110,35 @@ echo "{
         \"host\": \"$LAN_IP\",
         \"port\": 19100,
         \"metrics_port\": 21100,
-        \"pyroscope_host\": \"$LAN_IP\",
+        \"pyroscope_host\": \"docker-pyroscope\",
         \"pyroscope_port\": 4040,
         \"internal_host\": \"proxy\",
         \"internal_port\": 20100
     },
     \"shards\": {
         \"shard_1\": {
-            \"host\": \"docker-shard-1\",
+            \"host\": \"config-shard-1\",
             \"port\": 19100,
             \"metrics_port\": 21100,
             \"pyroscope_host\": \"docker-pyroscope\",
             \"pyroscope_port\": 4040
         },
         \"shard_2\": {
-            \"host\": \"docker-shard-1\",
+            \"host\": \"config-shard-2\",
             \"port\": 19100,
             \"metrics_port\": 21100,
             \"pyroscope_host\": \"docker-pyroscope\",
             \"pyroscope_port\": 4040
         },
         \"shard_3\": {
-            \"host\": \"docker-shard-1\",
+            \"host\": \"config-shard-3\",
             \"port\": 19100,
             \"metrics_port\": 21100,
             \"pyroscope_host\": \"docker-pyroscope\",
             \"pyroscope_port\": 4040
         },
         \"shard_4\": {
-            \"host\": \"docker-shard-1\",
+            \"host\": \"config-shard-4\",
             \"port\": 19100,
             \"metrics_port\": 21100,
             \"pyroscope_host\": \"docker-pyroscope\",

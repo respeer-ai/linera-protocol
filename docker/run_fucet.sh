@@ -97,4 +97,4 @@ jinja -d $OUTPUT_DIR/docker-compose-faucet.json $DOCKER_COMPOSE_TEMPLATE_FILE > 
 
 cd $SCRIPT_DIR
 
-echo docker compose -f $FAUCET_DIR/docker-compose.yml up --wait
+docker compose -f $FAUCET_DIR/docker-compose.yml up --wait
