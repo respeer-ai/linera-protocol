@@ -25,6 +25,8 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 VALIDATOR_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/validator.toml.j2"
 DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-compose-genesis.yml.j2"
 
+[ ! -d $PERSISTENCE_DIR ] && CREATE_WALLET=1
+
 if [ "x$CREATE_WALLET" = "x1" ]; then
   rm $PERSISTENCE_DIR -rf
   SCYLLA_VOLUME=docker_linera-scylla-data
@@ -178,4 +180,4 @@ cp provisioning/dashboards $GRAFANA_DIR/provisioning/ -R
 cp dashboards $GRAFANA_DIR/ -R
 cp prometheus.yml $PROMETHEUS_DIR/
 
-docker compose up -f $VALIDATOR_DIR/docker-compose.yml --wait
+docker compose -f $VALIDATOR_DIR/docker-compose.yml up --wait
