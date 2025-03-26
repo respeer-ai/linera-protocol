@@ -3618,8 +3618,6 @@ where
             );
         }
 
-        tracing::info!("Blob valid ...");
-
         let proposal = Box::new(BlockProposal {
             content: ProposalContent {
                 round,
@@ -3655,8 +3653,6 @@ where
             }
         }
 
-        tracing::info!("Blob 1 ...");
-
         self.state_mut().set_pending_proposal(block, blobs);
 
         let certificate = if round.is_fast() {
@@ -3670,8 +3666,6 @@ where
                 .await?;
             self.finalize_block(&committee, certificate).await?
         };
-
-        tracing::info!("Blob 2 ...");
 
         self.update_validators(Some(&committee)).await?;
 
