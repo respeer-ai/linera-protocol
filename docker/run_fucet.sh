@@ -48,8 +48,6 @@ mkdir -p $FAUCET_DIR
 SOURCE_DIR="${OUTPUT_DIR}/source"
 mkdir -p $SOURCE_DIR
 
-cleanup_started=false
-
 if [ "x$COMPILE" = "x1" ]; then
   # Install official linera for genesis cluster
   cd $SOURCE_DIR
@@ -97,4 +95,5 @@ jinja -d $OUTPUT_DIR/docker-compose-faucet.json $DOCKER_COMPOSE_TEMPLATE_FILE > 
 
 cd $SCRIPT_DIR
 
+docker rm faucet -f
 docker compose -f $FAUCET_DIR/docker-compose.yml up --wait

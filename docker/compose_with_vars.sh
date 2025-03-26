@@ -30,8 +30,7 @@ DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-com
 if [ "x$CREATE_WALLET" = "x1" ]; then
   rm $PERSISTENCE_DIR -rf
   SCYLLA_VOLUME=config_linera-scylla-data
-  container=`docker ps -a -q --filter volume=$SCYLLA_VOLUME`
-  [ "x$container" != "x" ] && docker rm -f $(docker ps -a -q --filter volume=$SCYLLA_VOLUME)
+  docker rm shard-init config-shard-1 config-shard-2 config-shard-3 config-shard-4 proxy scylla -f
   volume=`docker volume list | grep $SCYLLA_VOLUME`
   [ "x$volume" != "x" ] && docker volume rm $SCYLLA_VOLUME
 fi
