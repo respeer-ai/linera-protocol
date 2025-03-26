@@ -1146,6 +1146,19 @@ where
         )
     }
 
+    async fn account_pattern(&self) -> Account {
+        Account {
+            chain_id: ChainId::from_str(
+                "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
+            )
+            .unwrap(),
+            owner: Some(AccountOwner::User(
+                Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+                    .unwrap(),
+            )),
+        }
+    }
+
     async fn transfer_pattern(&self) -> Operation {
         let from_owner =
             Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
