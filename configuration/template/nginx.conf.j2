@@ -10,7 +10,7 @@ map $http_upgrade $connection_upgrade {
 }
 
 server {
-    listen 80;
+    listen {{ service.listen_port | default('80') }};
     server_name api.{{ service.domain }} graphiql.{{ service.domain }};
 
     add_header Access-Control-Allow-Origin  'http://localhost:8080';
