@@ -20,6 +20,7 @@ done
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-compose-faucet.yml.j2"
+NGINX_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/nginx.conf.j2"
 
 # All persistence data will be put here
 mkdir -p $PERSISTENCE_DIR
@@ -90,3 +91,25 @@ cd $SCRIPT_DIR
 
 docker rm faucet -f
 docker compose -f $FAUCET_DIR/docker-compose.yml up --wait
+
+function generate_nginx_conf() {
+    endpoint=faucet
+    domain=faucet.respeer.ai
+
+    echo "{
+        \"service\": {
+            \"endpoint\": \"$endpoint\",
+            \"servers\": [\"localhost:8080\"],
+            \"domain\": \"$domain\",
+            \"api_endpoint\": \"$endpoint\"
+        }
+    }" > ${CONFIG_DIR}/$endpoint.nginx.json
+
+    jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $NGINX_TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
+    echo "cp ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/"
+}
+
+generate_nginx_conf
+echo -e "\n\nFaucet domain"
+echo -e "	$LAN_IP api.faucet.respeer.ai"
+echo -e "	http://api.faucet.respeer.ai/api/faucet\n\n"
