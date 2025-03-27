@@ -29,7 +29,7 @@ VALIDATOR_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/validator.toml.
 NGINX_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/nginx.conf.j2"
 
 # All generated files will be put here
-OUTPUT_DIR="${SCRIPT_DIR}/../target/output/local"
+OUTPUT_DIR="${SCRIPT_DIR}/../output/local"
 mkdir -p $OUTPUT_DIR
 
 # All validator config will be put here
