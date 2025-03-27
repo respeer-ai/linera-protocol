@@ -1,6 +1,8 @@
 services:
   scylla:
     image: scylladb/scylla:6.1.3
+    security_opt:
+      - seccomp:unconfined
     container_name: scylla
     volumes:
       - linera-scylla-data:/var/lib/scylla
@@ -8,9 +10,13 @@ services:
       SCYLLA_AUTO_CONF: 1
     command:
       - "--developer-mode"
-      - "0"
+      - "1"
       - "--overprovisioned"
       - "1"
+      - "--memory"
+      - "4G"
+      - "--smp"
+      - "2"
 
   proxy:
     image: "${LINERA_IMAGE:-linera}"
