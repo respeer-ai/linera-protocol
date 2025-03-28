@@ -13,9 +13,10 @@ SHARDS_PER_VALIDATOR=4
 GIT_COMMIT=main
 CREATE_WALLET=0
 COMPILE=1
+VALIDATOR_SORT=0
 PERSISTENCE_DIR=/data/linera-project/compose/genesis
 
-options="c:C:p:W:n:v:"
+options="c:C:p:W:n:v:N:"
 
 while getopts $options opt; do
   case ${opt} in
@@ -25,6 +26,7 @@ while getopts $options opt; do
     W) CREATE_WALLET=${OPTARG} ;;
     n) NUM_VALIDATORS=${OPTARG} ;;
     v) VALIDATORS=${OPTARG} ;;
+    N) VALIDATOR_SORT=${OPTARG} ;;
   esac
 done
 
@@ -185,7 +187,8 @@ mkdir -p $GRAFANA_DIR/provisioning
 cp provisioning/dashboards $GRAFANA_DIR/provisioning/ -R
 cp dashboards $GRAFANA_DIR/ -R
 cp prometheus.yml $PROMETHEUS_DIR/
+cp $VALIDATOR_DIR/$VALIDATOR_SORT/server.json $VALIDATOR_DIR/
+cp $VALIDATOR_DIR/$VALIDATOR_SORT/validator.toml $VALIDATOR_DIR/
+cp $VALIDATOR_DIR/0/docker-compose.yml $VALIDATOR_DIR/
 
-cp $VALIDATOR_DIR/0/server.json $VALIDATOR_DIR/
-cp $VALIDATOR_DIR/0/validator.toml $VALIDATOR_DIR/
-docker compose -f $VALIDATOR_DIR/0/docker-compose.yml -p validator up --wait
+docker compose -f $VALIDATOR_DIR/docker-compose.yml -p validator up --wait
