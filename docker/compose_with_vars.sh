@@ -1,7 +1,12 @@
 #!/bin/bash
 
+####
+## ./compose_with_vars.sh -c 7b3ae0b6 -n 2 -v "192.168.110.101 192.168.110.102"
+####
+
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
+VALIDATORS=($LAN_IP)
 NUM_VALIDATORS=1
 RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
@@ -10,7 +15,7 @@ CREATE_WALLET=0
 COMPILE=1
 PERSISTENCE_DIR=/data/linera-project/compose/genesis
 
-options="c:C:p:W:"
+options="c:C:p:W:n:v:"
 
 while getopts $options opt; do
   case ${opt} in
@@ -18,9 +23,12 @@ while getopts $options opt; do
     C) COMPILE=${OPTARG} ;;
     p) PERSISTENCE_DIR=${OPTARG} ;;
     W) CREATE_WALLET=${OPTARG} ;;
+    n) NUM_VALIDATORS=${OPTARG} ;;
+    v) VALIDATORS=${OPTARG} ;;
   esac
 done
 
+VALIDATORS=($VALIDATORS)
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 VALIDATOR_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/validator.toml.j2"
 DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-compose-genesis.yml.j2"
@@ -29,10 +37,10 @@ DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-com
 
 if [ "x$CREATE_WALLET" = "x1" ]; then
   rm $PERSISTENCE_DIR -rf
-  SCYLLA_VOLUME=config_linera-scylla-data
-  docker rm shard-init config-shard-1 config-shard-2 config-shard-3 config-shard-4 proxy scylla -f
-  volume=`docker volume list | grep $SCYLLA_VOLUME`
-  [ "x$volume" != "x" ] && docker volume rm $SCYLLA_VOLUME
+  SCYLLA_VOLUME=linera-scylla-data
+  docker rm validator-shard-1 validator-shard-2 validator-shard-3 validator-shard-4 shard-init proxy scylla prometheus grafana watchtower -f
+  volume=`docker volume list | grep $SCYLLA_VOLUME |awk '{ print $2 }'`
+  [ "x$volume" != "x" ] && docker volume rm $volume
 fi
 
 # All persistence data will be put here
@@ -95,51 +103,59 @@ fi
 
 cd $SCRIPT_DIR/..
 
-# Generate validator configure
-echo "{
-    \"validator\": {
-        \"config_path\": \"$VALIDATOR_DIR/server.json\",
-        \"host\": \"$LAN_IP\",
-        \"port\": 19100,
-        \"metrics_port\": 21100,
-        \"pyroscope_host\": \"docker-pyroscope\",
-        \"pyroscope_port\": 4040,
-        \"internal_host\": \"proxy\",
-        \"internal_port\": 20100
-    },
-    \"shards\": {
-        \"shard_1\": {
-            \"host\": \"config-shard-1\",
-            \"port\": 19100,
-            \"metrics_port\": 21100,
-            \"pyroscope_host\": \"docker-pyroscope\",
-            \"pyroscope_port\": 4040
-        },
-        \"shard_2\": {
-            \"host\": \"config-shard-2\",
-            \"port\": 19100,
-            \"metrics_port\": 21100,
-            \"pyroscope_host\": \"docker-pyroscope\",
-            \"pyroscope_port\": 4040
-        },
-        \"shard_3\": {
-            \"host\": \"config-shard-3\",
-            \"port\": 19100,
-            \"metrics_port\": 21100,
-            \"pyroscope_host\": \"docker-pyroscope\",
-            \"pyroscope_port\": 4040
-        },
-        \"shard_4\": {
-            \"host\": \"config-shard-4\",
-            \"port\": 19100,
-            \"metrics_port\": 21100,
-            \"pyroscope_host\": \"docker-pyroscope\",
-            \"pyroscope_port\": 4040
-      }
-    }
-}" > $VALIDATOR_DIR/validator.json
+# Generate validator configuration from template
+VALIDATOR_FILES=()
+for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
+    mkdir -p $VALIDATOR_DIR/$i
 
-jinja -d $VALIDATOR_DIR/validator.json $VALIDATOR_TEMPLATE_FILE > $VALIDATOR_DIR/validator.toml
+    # Generate validator configure of i
+    echo "{
+        \"validator\": {
+            \"config_path\": \"$VALIDATOR_DIR/$i/server.json\",
+            \"host\": \"${VALIDATORS[$i]}\",
+            \"port\": 19100,
+            \"metrics_port\": 21100,
+            \"pyroscope_host\": \"docker-pyroscope\",
+            \"pyroscope_port\": 4040,
+            \"internal_host\": \"proxy\",
+            \"internal_port\": 20100
+        },
+        \"shards\": {
+            \"shard_1\": {
+                \"host\": \"validator-shard-1\",
+                \"port\": 19100,
+                \"metrics_port\": 21100,
+                \"pyroscope_host\": \"docker-pyroscope\",
+                \"pyroscope_port\": 4040
+            },
+            \"shard_2\": {
+                \"host\": \"validator-shard-2\",
+                \"port\": 19100,
+                \"metrics_port\": 21100,
+                \"pyroscope_host\": \"docker-pyroscope\",
+                \"pyroscope_port\": 4040
+            },
+            \"shard_3\": {
+                \"host\": \"validator-shard-3\",
+                \"port\": 19100,
+                \"metrics_port\": 21100,
+                \"pyroscope_host\": \"docker-pyroscope\",
+                \"pyroscope_port\": 4040
+            },
+            \"shard_4\": {
+                \"host\": \"validator-shard-4\",
+                \"port\": 19100,
+                \"metrics_port\": 21100,
+                \"pyroscope_host\": \"docker-pyroscope\",
+                \"pyroscope_port\": 4040
+          }
+        }
+    }" > $VALIDATOR_DIR/$i/validator.json
+
+    jinja -d $VALIDATOR_DIR/$i/validator.json $VALIDATOR_TEMPLATE_FILE > $VALIDATOR_DIR/$i/validator.toml
+
+    VALIDATOR_FILES+=("$VALIDATOR_DIR/$i/validator.toml")
+done
 
 # Generate docker-compose.yml
 echo "{
@@ -150,20 +166,18 @@ echo "{
     }
 }" > $OUTPUT_DIR/docker-compose-validator.json
 
-jinja -d $OUTPUT_DIR/docker-compose-validator.json $DOCKER_COMPOSE_TEMPLATE_FILE > $VALIDATOR_DIR/docker-compose.yml
+jinja -d $OUTPUT_DIR/docker-compose-validator.json $DOCKER_COMPOSE_TEMPLATE_FILE > $VALIDATOR_DIR/0/docker-compose.yml
 
-
-VALIDATOR_FILE=$VALIDATOR_DIR/validator.toml
 
 if [ "x$CREATE_WALLET" = "x1" ]; then
 # Create configuration files.
 # * Private server states are stored in `server.json`.
 # * `committee.json` is the public description of the Linera committee.
-  linera-server generate --validators $VALIDATOR_FILE --committee $CONFIG_DIR/committee.json --testing-prng-seed 1
+    linera-server generate --validators "${VALIDATOR_FILES[@]}" --committee $CONFIG_DIR/committee.json --testing-prng-seed 1
 # Create configuration files for 10 user chains.
 # * Private chain states are stored in one local wallet `wallet.json`.
 # * `genesis.json` will contain the initial balances of chains as well as the initial committee.
-  linera --wallet $WALLET_DIR/wallet.json --storage rocksdb:$WALLET_DIR/client.db create-genesis-config 10 --genesis $CONFIG_DIR/genesis.json --initial-funding 100000000 --committee $CONFIG_DIR/committee.json --testing-prng-seed 2
+    linera --wallet $WALLET_DIR/wallet.json --storage rocksdb:$WALLET_DIR/client.db create-genesis-config 10 --genesis $CONFIG_DIR/genesis.json --initial-funding 100000000 --committee $CONFIG_DIR/committee.json --testing-prng-seed 2
 fi
 
 cd $SCRIPT_DIR
@@ -172,4 +186,6 @@ cp provisioning/dashboards $GRAFANA_DIR/provisioning/ -R
 cp dashboards $GRAFANA_DIR/ -R
 cp prometheus.yml $PROMETHEUS_DIR/
 
-docker compose -f $VALIDATOR_DIR/docker-compose.yml up --wait
+cp $VALIDATOR_DIR/0/server.json $VALIDATOR_DIR/
+cp $VALIDATOR_DIR/0/validator.toml $VALIDATOR_DIR/
+docker compose -f $VALIDATOR_DIR/0/docker-compose.yml -p validator up --wait
