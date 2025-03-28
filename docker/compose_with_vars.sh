@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ####
-## ./compose_with_vars.sh -c 7b3ae0b6 -n 2 -v "192.168.110.101 192.168.110.102"
+## ./compose_with_vars.sh -c 7b3ae0b6 -n 2 -v "192.168.110.101 192.168.110.102" -N 0
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
@@ -38,13 +38,10 @@ DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-com
 [ ! -d $PERSISTENCE_DIR ] && CREATE_WALLET=1
 
 if [ "x$CREATE_WALLET" = "x1" ]; then
-    SCYLLA_VOLUME=linera-scylla-data
-    volume=`docker volume list | grep $SCYLLA_VOLUME |awk '{ print $2 }'`
-    if [ "x$volume" != "x" ]; then
-        docker volume rm $volume
-	container_id=`docker ps -a -q --filter volume=$volume`
-	[ "x$container_id" != "x" ] && docker rm $container_id -f
-    fi
+    containers=`docker ps -a | grep linera-validator | awk '{ print $NF }'`
+    [ "x$containers" != "x" ] && docker rm -f $containers
+    volume=`docker volume list | grep linera-validator |awk '{ print $2 }'`
+    [ "x$volume" != "x" ] && docker volume rm $volume
     rm $PERSISTENCE_DIR -rf
 fi
 
@@ -67,31 +64,38 @@ mkdir -p $WALLET_DIR
 SOURCE_DIR="${OUTPUT_DIR}/source"
 mkdir -p $SOURCE_DIR
 
-cleanup_started=false
-
 if [ "x$COMPILE" = "x1" ]; then
-  # Install official linera for genesis cluster
-  cd $SOURCE_DIR
-  rm linera-protocol -rf
-  git clone https://github.com/linera-io/linera-protocol.git
-  cd linera-protocol
+    # Install official linera for genesis cluster
+    cd $SOURCE_DIR
+    rm linera-protocol -rf
+    git clone https://github.com/linera-io/linera-protocol.git
+    cd linera-protocol
 
-  git checkout $GIT_COMMIT
+    git checkout $GIT_COMMIT
+    # Get latest commit to avoid compilation for the same version
+    LATEST_COMMIT=`git rev-parse HEAD`
+    LATEST_COMMIT=${LATEST_COMMIT:0:10}
+    INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}' | awk '{print $1}'`
 
-  if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-      docker build --build-arg git_commit="$GIT_COMMIT" -f docker/Dockerfile . -t linera || exit 1
-  elif [[ "$OSTYPE" == "darwin"* ]]; then
-      CPU_ARCH=$(sysctl -n machdep.cpu.brand_string)
-      if [[ "$CPU_ARCH" == *"Apple"* ]]; then
-          docker build --build-arg git_commit="$GIT_COMMIT" --build-arg target=aarch64-unknown-linux-gnu -f docker/Dockerfile -t linera . || exit 1
-      else
-          echo "Unsupported Architecture: $CPU_ARCH"
-          exit 1
-      fi
-  else
-      echo "Unsupported OS: $OSTYPE"
-      exit 1
-  fi
+    if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
+        cargo install --path linera-service --features storage-service
+        cargo install --path linera-storage-service --features storage-service
+    fi
+
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        docker build --build-arg git_commit="$GIT_COMMIT" -f docker/Dockerfile . -t linera || exit 1
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        CPU_ARCH=$(sysctl -n machdep.cpu.brand_string)
+        if [[ "$CPU_ARCH" == *"Apple"* ]]; then
+            docker build --build-arg git_commit="$GIT_COMMIT" --build-arg target=aarch64-unknown-linux-gnu -f docker/Dockerfile -t linera . || exit 1
+        else
+            echo "Unsupported Architecture: $CPU_ARCH"
+            exit 1
+        fi
+    else
+        echo "Unsupported OS: $OSTYPE"
+        exit 1
+    fi
 fi
 
 cd $SCRIPT_DIR/..
@@ -126,31 +130,31 @@ for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
         },
         \"shards\": {
             \"shard_1\": {
-                \"host\": \"validator-$i-shard-1\",
+                \"host\": \"linera-validator-$i-shard-1\",
                 \"port\": $((19100 + i * 2)),
                 \"metrics_port\": $((21100 + i * 2)),
-                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_host\": \"linera-validator-$i-docker-pyroscope\",
                 \"pyroscope_port\": $((4040 + i * 2))
           },
             \"shard_2\": {
-                \"host\": \"validator-$i-shard-2\",
+                \"host\": \"linera-validator-$i-shard-2\",
                 \"port\": $((19100 + i * 2)),
                 \"metrics_port\": $((21100 + i * 2)),
-                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_host\": \"linera-validator-$i-docker-pyroscope\",
                 \"pyroscope_port\": $((4040 + i * 2))
             },
             \"shard_3\": {
-                \"host\": \"validator-$i-shard-3\",
+                \"host\": \"linera-validator-$i-shard-3\",
                 \"port\": $((19100 + i * 2)),
                 \"metrics_port\": $((21100 + i * 2)),
-                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_host\": \"linera-validator-$i-docker-pyroscope\",
                 \"pyroscope_port\": $((4040 + i * 2))
             },
             \"shard_4\": {
-                \"host\": \"validator-$i-shard-4\",
+                \"host\": \"linera-validator-$i-shard-4\",
                 \"port\": $((19100 + i * 2)),
                 \"metrics_port\": $((21100 + i * 2)),
-                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_host\": \"linera-validator-$i-docker-pyroscope\",
                 \"pyroscope_port\": $((4040 + i * 2))
             }
         }
@@ -166,17 +170,17 @@ for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
 	    \"validator_persistence_dir\": \"$VALIDATOR_DIR\",
 	    \"prometheus_persistence_dir\": \"$PROMETHEUS_DIR\",
 	    \"grafana_persistence_dir\": \"$GRAFANA_DIR\",
-	    \"validator_name\": \"validator-$i\",
+	    \"validator_name\": \"linera-validator-$i\",
 	    \"validator_port\": $((19100 + $i * 2)),
-	    \"scylla_name\": \"validator-$i-scylla\",
-	    \"scylla_volume\": \"validator-$i-scylla-data\",
-	    \"shard_init_name\": \"validator-$i-shard-init\",
-	    \"prometheus_name\": \"validator-$i-prometheus\",
+	    \"scylla_name\": \"linera-validator-$i-scylla\",
+	    \"scylla_volume\": \"linera-validator-$i-scylla-data\",
+	    \"shard_init_name\": \"linera-validator-$i-shard-init\",
+	    \"prometheus_name\": \"linera-validator-$i-prometheus\",
 	    \"prometheus_port\": $((19090 + $i * 2)),
-	    \"grafana_name\": \"validator-$i-grafana\",
+	    \"grafana_name\": \"linera-validator-$i-grafana\",
 	    \"grafana_port\": $((3000 + $i * 2)),
-	    \"grafana_volume\": \"validator-$i-grafana-data\",
-	    \"watchtower_name\": \"validator-$i-watchtower\"
+	    \"grafana_volume\": \"linera-validator-$i-grafana-data\",
+	    \"watchtower_name\": \"linera-validator-$i-watchtower\"
         }
     }" > $OUTPUT_DIR/docker-compose-validator.json
 
@@ -204,4 +208,4 @@ cp prometheus.yml $VALIDATOR_DIR/prometheus/
 cp $CONFIG_DIR/committee.json $VALIDATOR_DIR/
 cp $CONFIG_DIR/genesis.json $VALIDATOR_DIR/
 
-docker compose -f $VALIDATOR_DIR/docker-compose.yml -p validator-$VALIDATOR_INDEX up --wait
+docker compose -f $VALIDATOR_DIR/docker-compose.yml -p linera-validator-$VALIDATOR_INDEX up --wait
