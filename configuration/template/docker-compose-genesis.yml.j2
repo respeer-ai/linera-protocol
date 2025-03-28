@@ -60,7 +60,7 @@ services:
     volumes:
       - {{ validator.prometheus_persistence_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "{{ validator.prometheus_port }}:9090"
+      - "{{ validator.prometheus_port }}:{{ validator.prometheus_port }}"
 
   grafana:
     image: grafana/grafana:latest
@@ -68,7 +68,7 @@ services:
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     ports:
-      - "{{ validator.grafana_port }}:3000"
+      - "{{ validator.grafana_port }}:{{ validator.grafana_port }}"
     volumes:
       - {{ validator.grafana_volume }}:/var/lib/grafana
       - {{ validator.grafana_persistence_dir }}/provisioning/dashboards:/etc/grafana/provisioning/dashboards
