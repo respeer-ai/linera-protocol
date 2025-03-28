@@ -3,9 +3,9 @@ services:
     image: scylladb/scylla:6.1.3
     security_opt:
       - seccomp:unconfined
-    container_name: scylla
+    container_name: {{ validator.scylla_name }}
     volumes:
-      - linera-scylla-data:/var/lib/scylla
+      - {{ validator.scylla_volume }}:/var/lib/scylla
     environment:
       SCYLLA_AUTO_CONF: 1
     command:
@@ -20,12 +20,12 @@ services:
 
   proxy:
     image: "${LINERA_IMAGE:-linera}"
-    container_name: proxy
+    container_name: {{ validator.validator_name }}
     ports:
-      - "19100:19100"
+      - "{{ validator.validator_port }}:19100"
     command: [ "./compose-proxy-entrypoint.sh" ]
     volumes:
-      - {{ validator.proxy_persistence_dir }}:/config
+      - {{ validator.validator_persistence_dir }}:/config
     labels:
       com.centurylinklabs.watchtower.enable: "true"
     depends_on:
@@ -38,7 +38,7 @@ services:
       replicas: 4
     command: [ "./compose-server-entrypoint.sh" ]
     volumes:
-      - {{ validator.proxy_persistence_dir }}:/config
+      - {{ validator.validator_persistence_dir }}:/config
     labels:
       com.centurylinklabs.watchtower.enable: "true"
     depends_on:
@@ -47,41 +47,41 @@ services:
 
   shard-init:
     image: "${LINERA_IMAGE:-linera}"
-    container_name: shard-init
+    container_name: {{ validator.shard_init_name }}
     command: [ "./compose-server-init.sh" ]
     volumes:
-      - {{ validator.proxy_persistence_dir }}:/config
+      - {{ validator.validator_persistence_dir }}:/config
     depends_on:
       - scylla
 
   prometheus:
     image: prom/prometheus:latest
-    container_name: prometheus
+    container_name: {{ validator.prometheus_name }}
     volumes:
       - {{ validator.prometheus_persistence_dir }}/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "19090:9090"
+      - "{{ validator.prometheus_port }}:9090"
 
   grafana:
     image: grafana/grafana:latest
-    container_name: grafana
+    container_name: {{ validator.grafana_name }}
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     ports:
-      - "3000:3000"
+      - "{{ validator.grafana_port }}:3000"
     volumes:
-      - grafana-storage:/var/lib/grafana
+      - {{ validator.grafana_volume }}:/var/lib/grafana
       - {{ validator.grafana_persistence_dir }}/provisioning/dashboards:/etc/grafana/provisioning/dashboards
       - {{ validator.grafana_persistence_dir }}/dashboards:/var/lib/grafana/dashboards
 
   watchtower:
     image: containrrr/watchtower:latest
-    container_name: watchtower
+    container_name: {{ validator.watchtower_name }}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command: [ "--interval", "30"]
 
 volumes:
-  linera-scylla-data:
+  {{ validator.scylla_volume }}:
     driver: local
-  grafana-storage:
+  {{ validator.grafana_volume }}:

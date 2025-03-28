@@ -13,7 +13,7 @@ SHARDS_PER_VALIDATOR=4
 GIT_COMMIT=main
 CREATE_WALLET=0
 COMPILE=1
-VALIDATOR_SORT=0
+VALIDATOR_INDEX=0
 PERSISTENCE_DIR=/data/linera-project/compose/genesis
 
 options="c:C:p:W:n:v:N:"
@@ -26,7 +26,7 @@ while getopts $options opt; do
     W) CREATE_WALLET=${OPTARG} ;;
     n) NUM_VALIDATORS=${OPTARG} ;;
     v) VALIDATORS=${OPTARG} ;;
-    N) VALIDATOR_SORT=${OPTARG} ;;
+    N) VALIDATOR_INDEX=${OPTARG} ;;
   esac
 done
 
@@ -38,11 +38,14 @@ DOCKER_COMPOSE_TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/docker-com
 [ ! -d $PERSISTENCE_DIR ] && CREATE_WALLET=1
 
 if [ "x$CREATE_WALLET" = "x1" ]; then
-  rm $PERSISTENCE_DIR -rf
-  SCYLLA_VOLUME=linera-scylla-data
-  docker rm validator-shard-1 validator-shard-2 validator-shard-3 validator-shard-4 shard-init proxy scylla prometheus grafana watchtower -f
-  volume=`docker volume list | grep $SCYLLA_VOLUME |awk '{ print $2 }'`
-  [ "x$volume" != "x" ] && docker volume rm $volume
+    SCYLLA_VOLUME=linera-scylla-data
+    volume=`docker volume list | grep $SCYLLA_VOLUME |awk '{ print $2 }'`
+    if [ "x$volume" != "x" ]; then
+        docker volume rm $volume
+	container_id=`docker ps -a -q --filter volume=$volume`
+	[ "x$container_id" != "x" ] && docker rm $container_id -f
+    fi
+    rm $PERSISTENCE_DIR -rf
 fi
 
 # All persistence data will be put here
@@ -52,10 +55,6 @@ mkdir -p $PERSISTENCE_DIR
 OUTPUT_DIR="${SCRIPT_DIR}/../target/output/docker"
 mkdir -p $OUTPUT_DIR
 
-# All validator config will be put here
-VALIDATOR_DIR="${PERSISTENCE_DIR}/config"
-mkdir -p $VALIDATOR_DIR
-
 # All generated config files will be put here
 CONFIG_DIR="${PERSISTENCE_DIR}/config"
 mkdir -p $CONFIG_DIR
@@ -63,14 +62,6 @@ mkdir -p $CONFIG_DIR
 # Wallet directory
 WALLET_DIR="${PERSISTENCE_DIR}/wallet"
 mkdir -p $WALLET_DIR
-
-# Prometheus directory
-PROMETHEUS_DIR="${PERSISTENCE_DIR}/prometheus"
-mkdir -p $PROMETHEUS_DIR
-
-# Grafana directory
-GRAFANA_DIR="${PERSISTENCE_DIR}/grafana"
-mkdir -p $GRAFANA_DIR
 
 # Source code directory
 SOURCE_DIR="${OUTPUT_DIR}/source"
@@ -108,68 +99,90 @@ cd $SCRIPT_DIR/..
 # Generate validator configuration from template
 VALIDATOR_FILES=()
 for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
-    mkdir -p $VALIDATOR_DIR/$i
+    # All validator config will be put here
+    VALIDATOR_DIR="${PERSISTENCE_DIR}/config/$i"
+    mkdir -p $VALIDATOR_DIR
+
+    # Prometheus directory
+    PROMETHEUS_DIR="$VALIDATOR_DIR/prometheus"
+    mkdir -p $PROMETHEUS_DIR
+
+    # Grafana directory
+    GRAFANA_DIR="$VALIDATOR_DIR/grafana"
+    mkdir -p $GRAFANA_DIR
+
 
     # Generate validator configure of i
     echo "{
         \"validator\": {
-            \"config_path\": \"$VALIDATOR_DIR/$i/server.json\",
+            \"config_path\": \"$VALIDATOR_DIR/server.json\",
             \"host\": \"${VALIDATORS[$i]}\",
-            \"port\": 19100,
-            \"metrics_port\": 21100,
-            \"pyroscope_host\": \"docker-pyroscope\",
-            \"pyroscope_port\": 4040,
-            \"internal_host\": \"proxy\",
-            \"internal_port\": 20100
+	    \"port\": $((19100 + i * 2)),
+	    \"metrics_port\": $((20100 + i * 2)),
+            \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+	    \"pyroscope_port\": $((4040 + i * 2)),
+            \"internal_host\": \"proxy-$i\",
+	    \"internal_port\": $((21100 + i * 2))
         },
         \"shards\": {
             \"shard_1\": {
-                \"host\": \"validator-shard-1\",
-                \"port\": 19100,
-                \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
-                \"pyroscope_port\": 4040
-            },
+                \"host\": \"validator-$i-shard-1\",
+                \"port\": $((19100 + i * 2)),
+                \"metrics_port\": $((21100 + i * 2)),
+                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_port\": $((4040 + i * 2))
+          },
             \"shard_2\": {
-                \"host\": \"validator-shard-2\",
-                \"port\": 19100,
-                \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
-                \"pyroscope_port\": 4040
+                \"host\": \"validator-$i-shard-2\",
+                \"port\": $((19100 + i * 2)),
+                \"metrics_port\": $((21100 + i * 2)),
+                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_port\": $((4040 + i * 2))
             },
             \"shard_3\": {
-                \"host\": \"validator-shard-3\",
-                \"port\": 19100,
-                \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
-                \"pyroscope_port\": 4040
+                \"host\": \"validator-$i-shard-3\",
+                \"port\": $((19100 + i * 2)),
+                \"metrics_port\": $((21100 + i * 2)),
+                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_port\": $((4040 + i * 2))
             },
             \"shard_4\": {
-                \"host\": \"validator-shard-4\",
-                \"port\": 19100,
-                \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
-                \"pyroscope_port\": 4040
-          }
+                \"host\": \"validator-$i-shard-4\",
+                \"port\": $((19100 + i * 2)),
+                \"metrics_port\": $((21100 + i * 2)),
+                \"pyroscope_host\": \"validator-$i-docker-pyroscope\",
+                \"pyroscope_port\": $((4040 + i * 2))
+            }
         }
-    }" > $VALIDATOR_DIR/$i/validator.json
+    }" > $VALIDATOR_DIR/validator.json
 
-    jinja -d $VALIDATOR_DIR/$i/validator.json $VALIDATOR_TEMPLATE_FILE > $VALIDATOR_DIR/$i/validator.toml
+    jinja -d $VALIDATOR_DIR/validator.json $VALIDATOR_TEMPLATE_FILE > $VALIDATOR_DIR/validator.toml
 
-    VALIDATOR_FILES+=("$VALIDATOR_DIR/$i/validator.toml")
+    VALIDATOR_FILES+=("$VALIDATOR_DIR/validator.toml")
+
+    # Generate docker-compose.yml
+    echo "{
+        \"validator\": {
+	    \"validator_persistence_dir\": \"$VALIDATOR_DIR\",
+	    \"prometheus_persistence_dir\": \"$PROMETHEUS_DIR\",
+	    \"grafana_persistence_dir\": \"$GRAFANA_DIR\",
+	    \"validator_name\": \"validator-$i\",
+	    \"validator_port\": $((19100 + $i * 2)),
+	    \"scylla_name\": \"validator-$i-scylla\",
+	    \"scylla_volume\": \"validator-$i-scylla-data\",
+	    \"shard_init_name\": \"validator-$i-shard-init\",
+	    \"prometheus_name\": \"validator-$i-prometheus\",
+	    \"prometheus_port\": $((19090 + $i * 2)),
+	    \"grafana_name\": \"validator-$i-grafana\",
+	    \"grafana_port\": $((3000 + $i * 2)),
+	    \"grafana_volume\": \"validator-$i-grafana-data\",
+	    \"watchtower_name\": \"validator-$i-watchtower\"
+        }
+    }" > $OUTPUT_DIR/docker-compose-validator.json
+
+    jinja -d $OUTPUT_DIR/docker-compose-validator.json $DOCKER_COMPOSE_TEMPLATE_FILE > $VALIDATOR_DIR/docker-compose.yml
+
 done
-
-# Generate docker-compose.yml
-echo "{
-    \"validator\": {
-        \"proxy_persistence_dir\": \"$VALIDATOR_DIR\",
-        \"prometheus_persistence_dir\": \"$PROMETHEUS_DIR\",
-        \"grafana_persistence_dir\": \"$GRAFANA_DIR\"
-    }
-}" > $OUTPUT_DIR/docker-compose-validator.json
-
-jinja -d $OUTPUT_DIR/docker-compose-validator.json $DOCKER_COMPOSE_TEMPLATE_FILE > $VALIDATOR_DIR/0/docker-compose.yml
-
 
 if [ "x$CREATE_WALLET" = "x1" ]; then
 # Create configuration files.
@@ -183,12 +196,12 @@ if [ "x$CREATE_WALLET" = "x1" ]; then
 fi
 
 cd $SCRIPT_DIR
-mkdir -p $GRAFANA_DIR/provisioning
-cp provisioning/dashboards $GRAFANA_DIR/provisioning/ -R
-cp dashboards $GRAFANA_DIR/ -R
-cp prometheus.yml $PROMETHEUS_DIR/
-cp $VALIDATOR_DIR/$VALIDATOR_SORT/server.json $VALIDATOR_DIR/
-cp $VALIDATOR_DIR/$VALIDATOR_SORT/validator.toml $VALIDATOR_DIR/
-cp $VALIDATOR_DIR/0/docker-compose.yml $VALIDATOR_DIR/
+VALIDATOR_DIR="${PERSISTENCE_DIR}/config/$VALIDATOR_INDEX"
+mkdir -p $VALIDATOR_DIR/grafana/provisioning
+cp provisioning/dashboards $VALIDATOR_DIR/provisioning/ -R
+cp dashboards $VALIDATOR_DIR/grafana/ -R
+cp prometheus.yml $VALIDATOR_DIR/prometheus/
+cp $CONFIG_DIR/committee.json $VALIDATOR_DIR/
+cp $CONFIG_DIR/genesis.json $VALIDATOR_DIR/
 
-docker compose -f $VALIDATOR_DIR/docker-compose.yml -p validator up --wait
+echo docker compose -f $VALIDATOR_DIR/docker-compose.yml -p validator-$VALIDATOR_INDEX up --wait
