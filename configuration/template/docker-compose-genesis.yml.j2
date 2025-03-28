@@ -22,7 +22,7 @@ services:
     image: "${LINERA_IMAGE:-linera}"
     container_name: {{ validator.validator_name }}
     ports:
-      - "{{ validator.validator_port }}:19100"
+      - "{{ validator.validator_port }}:{{ validator.validator_port }}"
     command: [ "./compose-proxy-entrypoint.sh" ]
     volumes:
       - {{ validator.validator_persistence_dir }}:/config

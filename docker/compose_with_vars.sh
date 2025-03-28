@@ -204,4 +204,4 @@ cp prometheus.yml $VALIDATOR_DIR/prometheus/
 cp $CONFIG_DIR/committee.json $VALIDATOR_DIR/
 cp $CONFIG_DIR/genesis.json $VALIDATOR_DIR/
 
-echo docker compose -f $VALIDATOR_DIR/docker-compose.yml -p validator-$VALIDATOR_INDEX up --wait
+docker compose -f $VALIDATOR_DIR/docker-compose.yml -p validator-$VALIDATOR_INDEX up --wait
