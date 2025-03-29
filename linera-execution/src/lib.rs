@@ -790,7 +790,7 @@ pub enum Operation {
     /// A system operation.
     System(SystemOperation),
     /// A user operation (in serialized form).
-    #[serde(rename = "camelCase")]
+    #[serde(rename_all = "camelCase")]
     User {
         application_id: UserApplicationId,
         #[serde(with = "serde_bytes")]
