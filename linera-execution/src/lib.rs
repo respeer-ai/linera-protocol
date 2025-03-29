@@ -786,11 +786,11 @@ pub trait ContractRuntime: BaseRuntime {
 
 /// An operation to be executed in a block.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub enum Operation {
     /// A system operation.
     System(SystemOperation),
     /// A user operation (in serialized form).
+    #[serde(rename = "camelCase")]
     User {
         application_id: UserApplicationId,
         #[serde(with = "serde_bytes")]
