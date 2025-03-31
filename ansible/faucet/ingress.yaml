@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: testing-linera-respeer-devnet-faucet-ingress
+  namespace: kube-system
+  annotations:
+    k8s.kuboard.cn/displayName: testing-linera-respeer-devnet-faucet
+    k8s.kuboard.cn/workload: testing-linera-respeer-devnet-faucet
+    kubernetes.io/ingress.class: "traefik-internet"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure, web
+    traefik.ingress.kubernetes.io/router.middlewares:
+      kube-system-strip-linera-respeer-faucet-prefix@kubernetescrd,
+      kube-system-http-redirect-https@kubernetescrd,
+      kube-system-common-headers@kubernetescrd
+
+spec:
+  tls:
+    - hosts:
+        - 'testing.linera-respeer-devnet.faucet.respeer.ai'
+        - '*.testing.linera-respeer-devnet.faucet.respeer.ai'
+      secretName: testing-linera-respeer-devnet-faucet-respeer-ai-tls
+  rules:
+    - host: testing.linera-respeer-devnet.faucet.respeer.ai
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: linera-respeer-faucet
+              servicePort: 80
+
+---
+
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: linera-respeer-devnet-faucet-ingress
+  namespace: kube-system
+  annotations:
+    k8s.kuboard.cn/displayName: linera-respeer-devnet-faucet
+    k8s.kuboard.cn/workload: linera-respeer-devnet-faucet
+    kubernetes.io/ingress.class: "traefik-internet"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure, web
+    traefik.ingress.kubernetes.io/router.middlewares:
+      kube-system-strip-linera-respeer-faucet-prefix@kubernetescrd,
+      kube-system-http-redirect-https@kubernetescrd,
+      kube-system-common-headers@kubernetescrd
+
+spec:
+  tls:
+    - hosts:
+        - 'linera-respeer-devnet.faucet.respeer.ai'
+        - '*.linera-respeer-devnet.faucet.respeer.ai'
+      secretName: linera-respeer-devnet-faucet-respeer-ai-tls
+  rules:
+    - host: linera-respeer-devnet.faucet.respeer.ai
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: linera-respeer-faucet
+              servicePort: 80

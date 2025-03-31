@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: testing-linera-respeer-devnet-rpc-ingress
+  namespace: kube-system
+  annotations:
+    k8s.kuboard.cn/displayName: testing-linera-respeer-devnet-rpc
+    k8s.kuboard.cn/workload: testing-linera-respeer-devnet-rpc
+    kubernetes.io/ingress.class: "traefik-internet"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure, web
+    traefik.ingress.kubernetes.io/router.middlewares:
+      kube-system-strip-linera-respeer-rpc-prefix@kubernetescrd,
+      kube-system-http-redirect-https@kubernetescrd,
+      kube-system-common-headers@kubernetescrd
+
+spec:
+  tls:
+    - hosts:
+        - 'testing.linera-respeer-devnet.rpc.respeer.ai'
+        - '*.testing.linera-respeer-devnet.rpc.respeer.ai'
+      secretName: testing-linera-respeer-devnet-rpc-respeer-ai-tls
+  rules:
+    - host: testing.linera-respeer-devnet.rpc.respeer.ai
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: linera-respeer-rpc
+              servicePort: 80
+
+---
+
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: linera-respeer-devnet-rpc-ingress
+  namespace: kube-system
+  annotations:
+    k8s.kuboard.cn/displayName: linera-respeer-devnet-rpc
+    k8s.kuboard.cn/workload: linera-respeer-devnet-rpc
+    kubernetes.io/ingress.class: "traefik-internet"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure, web
+    traefik.ingress.kubernetes.io/router.middlewares:
+      kube-system-strip-linera-respeer-rpc-prefix@kubernetescrd,
+      kube-system-http-redirect-https@kubernetescrd,
+      kube-system-common-headers@kubernetescrd
+
+spec:
+  tls:
+    - hosts:
+        - 'linera-respeer-devnet.rpc.respeer.ai'
+        - '*.linera-respeer-devnet.rpc.respeer.ai'
+      secretName: linera-respeer-devnet-rpc-respeer-ai-tls
+  rules:
+    - host: linera-respeer-devnet.rpc.respeer.ai
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: linera-respeer-rpc
+              servicePort: 80

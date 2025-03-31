@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linera-respeer-faucet
+  namespace: kube-system
+  annotations:
+    "sidecar.jaegertracing.io/inject": "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: linera-respeer-faucet
+  template:
+    metadata:
+      labels:
+        app: linera-respeer-faucet
+    spec:
+      containers:
+        - name: linera-respeer-faucet
+          image: linera-respeer-faucet:latest
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: workdir
+              mountPath: /root/linera-project
+      volumes:
+        - name: workdir
+          persistentVolumeClaim:
+            claimName: linera-respeer-faucet-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: linera-respeer-faucet
+  namespace: kube-system
+spec:
+  ports:
+    - name: faucet
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: linera-respeer-faucet

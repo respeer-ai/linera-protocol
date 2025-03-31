@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: linera-respeer-rpc
+  namespace: kube-system
+  annotations:
+    "sidecar.jaegertracing.io/inject": "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: linera-respeer-rpc
+  template:
+    metadata:
+      labels:
+        app: linera-respeer-rpc
+    spec:
+      containers:
+        - name: linera-respeer-rpc
+          image: linera-respeer-rpc:latest
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: workdir
+              mountPath: /root/linera-project
+      volumes:
+        - name: workdir
+          persistentVolumeClaim:
+            claimName: linera-respeer-rpc-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: linera-respeer-rpc
+  namespace: kube-system
+spec:
+  ports:
+    - name: rpc
+      port: 30080
+      targetPort: 30080
+  selector:
+    app: linera-respeer-rpc
