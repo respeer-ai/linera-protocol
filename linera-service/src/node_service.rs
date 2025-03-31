@@ -127,6 +127,8 @@ pub struct SignedBlock {
     round: Round,
     signature: AccountSignature,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
+    // If block contains PublishDataBlob, it should have blobs, too
+    blob_bytes: Vec<Vec<u8>>,
 }
 
 doc_scalar!(
@@ -855,6 +857,7 @@ where
             round,
             signature,
             validated_block_certificate,
+            blob_bytes,
         } = block;
 
         let hash = client
@@ -864,6 +867,10 @@ where
                 round,
                 signature,
                 validated_block_certificate,
+                blob_bytes
+                    .into_iter()
+                    .map(|bytes| Blob::new_data(bytes))
+                    .collect(),
             )
             .await?
             .value()
@@ -909,22 +916,6 @@ where
             blob_ids,
             validated_block_certificate,
         }))
-    }
-
-    /// It not actually execute operation to publish blob, but just put blob to local node
-    pub async fn prepare_blob(
-        &self,
-        chain_id: ChainId,
-        bytes: Vec<u8>,
-    ) -> Result<CryptoHash, Error> {
-        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
-
-        let blob = Blob::new_data(bytes);
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
-
-        client.prepare_blob(&vec![blob.clone()]).await?;
-
-        Ok(blob.id().hash)
     }
 
     /// Add key pair info which only has public key
@@ -1153,6 +1144,19 @@ where
             Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
                 .unwrap(),
         )
+    }
+
+    async fn account_pattern(&self) -> Account {
+        Account {
+            chain_id: ChainId::from_str(
+                "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
+            )
+            .unwrap(),
+            owner: Some(AccountOwner::User(
+                Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+                    .unwrap(),
+            )),
+        }
     }
 
     async fn transfer_pattern(&self) -> Operation {
@@ -1702,14 +1706,9 @@ where
         request: GraphQLRequest,
     ) -> Result<GraphQLResponse, NodeServiceError> {
         let mut request = request.into_inner();
-        let variables = request.variables.clone();
 
         let parsed_query = request.parsed_query()?;
-        let operation_type = match variables.get("checko_query_only") {
-            Some(async_graphql::Value::Boolean(true)) => OperationType::Query,
-            _ => operation_type(parsed_query)?,
-        };
-        request.variables.remove("checko_query_only");
+        let operation_type = operation_type(parsed_query)?;
 
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: UserApplicationId = application_id.parse()?;

@@ -641,6 +641,9 @@ pub enum ChainClientError {
 
     #[error("Waiting for finalizing block process")]
     WaitFinalizingBlock,
+
+    #[error("Blobs not provided")]
+    BlobsNotProvided,
 }
 
 impl From<Infallible> for ChainClientError {
@@ -2941,11 +2944,6 @@ where
         self.publish_data_blobs(vec![bytes]).await
     }
 
-    /// Adds pending blobs
-    pub async fn prepare_blob(&self, blobs: &[Blob]) -> Result<(), ChainClientError> {
-        Ok(self.client.local_node.store_blobs(&blobs).await?)
-    }
-
     /// Creates an application by instantiating some bytecode.
     #[instrument(
         level = "trace",
@@ -3570,6 +3568,7 @@ where
         round: Round,
         signature: AccountSignature,
         validated_block_certificate: Option<ValidatedBlockCertificate>,
+        blobs: Vec<Blob>,
     ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
         self.prepare_chain().await?;
 
@@ -3607,12 +3606,17 @@ where
 
         let already_handled_locally = info.manager.already_handled_proposal(round, &block);
         // TODO: should we use blob ids in ExecutedBlock instead ?
-        let blobs = self
-            .client
-            .local_node
-            .get_locking_blobs(&block.published_blob_ids(), self.chain_id)
-            .await?
-            .ok_or_else(|| ChainClientError::InternalError("Missing local locking blobs"))?;
+        let blob_ids: Vec<BlobId> = block.published_blob_ids().into_iter().collect();
+        ensure!(
+            blob_ids.len() == blobs.len(),
+            ChainClientError::BlobsNotProvided
+        );
+        for blob in blobs.clone() {
+            ensure!(
+                blob_ids.contains(&blob.id()),
+                ChainClientError::BlobsNotProvided
+            );
+        }
 
         let proposal = Box::new(BlockProposal {
             content: ProposalContent {

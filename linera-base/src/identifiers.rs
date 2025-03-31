@@ -44,6 +44,7 @@ pub enum AccountOwner {
 #[derive(
     Debug, PartialEq, Eq, Hash, Copy, Clone, Serialize, Deserialize, WitLoad, WitStore, WitType,
 )]
+#[serde(rename_all = "camelCase")]
 pub struct Account {
     /// The chain of the account.
     pub chain_id: ChainId,

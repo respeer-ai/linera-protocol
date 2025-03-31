@@ -130,7 +130,7 @@ where
     }
 
     /// Configures the application creator chain ID to return during the test.
-    pub fn with_application_creator_chain_id(mut self, chain_id: ChainId) -> Self {
+    pub fn with_application_creator_chain_id(self, chain_id: ChainId) -> Self {
         *self.application_creator_chain_id.lock().unwrap() = Some(chain_id);
         self
     }
