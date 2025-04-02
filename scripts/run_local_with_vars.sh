@@ -48,6 +48,9 @@ mkdir -p $WALLET_DIR
 SOURCE_DIR="${OUTPUT_DIR}/source"
 mkdir -p $SOURCE_DIR
 
+# Release directory
+TARGET_DIR="${OUTPUT_DIR}/source/linera-protocol/target/release/"
+
 if [ "x$COMPILE" = "x1" ]; then
     # Install official linera for genesis cluster
     cd $SOURCE_DIR
@@ -60,11 +63,10 @@ if [ "x$COMPILE" = "x1" ]; then
     # Get latest commit to avoid compilation for the same version
     LATEST_COMMIT=`git rev-parse HEAD`
     LATEST_COMMIT=${LATEST_COMMIT:0:10}
-    INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
+    INSTALLED_COMMIT=`$TARGET_DIR/linera --version | grep tree | awk -F '/' '{print $7}'`
 
     if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
-        cargo install --path linera-service --features storage-service
-        cargo install --path linera-storage-service --features storage-service
+	cargo build --release --features storage-service
     fi
 fi
 
@@ -128,7 +130,7 @@ for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
 done
 
 # Generate committee
-linera-server generate --validators "${VALIDATOR_FILES[@]}" --committee $CONFIG_DIR/committee.json
+$TARGET_DIR/linera-server generate --validators "${VALIDATOR_FILES[@]}" --committee $CONFIG_DIR/committee.json
 
 # Clean wallet
 rm $WALLET_DIR/1 $WALLET_DIR/2 -rf
@@ -137,10 +139,10 @@ mkdir -p $WALLET_DIR/{1,2}
 # Create configuration files for 10 user chains.
 # * Private chain states are stored in one local wallet `wallet_1.json`.
 # * `genesis.json` will contain the initial balances of chains as well as the initial committee.
-linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db create-genesis-config 2 --genesis $CONFIG_DIR/genesis.json --initial-funding 100000000 --committee $CONFIG_DIR/committee.json
+$TARGET_DIR/linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db create-genesis-config 2 --genesis $CONFIG_DIR/genesis.json --initial-funding 100000000 --committee $CONFIG_DIR/committee.json
 
 # Initialize the second wallet.
-linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db wallet init --genesis $CONFIG_DIR/genesis.json
+$TARGET_DIR/linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db wallet init --genesis $CONFIG_DIR/genesis.json
 
 # Find free port for service
 while true; do
@@ -153,7 +155,7 @@ done
 ENDPOINT="127.0.0.1:$PORT"
 
 # Run Storage Service Server
-linera-storage-server memory --endpoint "$ENDPOINT" &
+$TARGET_DIR/linera-storage-server memory --endpoint "$ENDPOINT" &
 SERVER_PID=$!
 sleep 2  # Wait a moment to ensure the server starts properly
 if ! kill -0 $SERVER_PID 2>/dev/null; then
@@ -166,29 +168,29 @@ STORAGE="service:tcp:$ENDPOINT:linera"
 # Start servers and create initial chains in DB
 for I in $(seq 0 $((RUN_VALIDATORS - 1)))
 do
-    linera-proxy $VALIDATOR_DIR/$I/server.json --storage $STORAGE --genesis $CONFIG_DIR/genesis.json &
+    $TARGET_DIR/linera-proxy $VALIDATOR_DIR/$I/server.json --storage $STORAGE --genesis $CONFIG_DIR/genesis.json &
 
     for J in $(seq 0 $((SHARDS_PER_VALIDATOR - 1)))
     do
-        linera-server initialize --storage $STORAGE --genesis $CONFIG_DIR/genesis.json
+        $TARGET_DIR/linera-server initialize --storage $STORAGE --genesis $CONFIG_DIR/genesis.json
     done
     for J in $(seq 0 $((SHARDS_PER_VALIDATOR - 1)))
     do
-        linera-server run --storage $STORAGE --server $VALIDATOR_DIR/$I/server.json --shard "$J" --genesis $CONFIG_DIR/genesis.json &
+        $TARGET_DIR/linera-server run --storage $STORAGE --server $VALIDATOR_DIR/$I/server.json --shard "$J" --genesis $CONFIG_DIR/genesis.json &
     done
 done
 
 sleep 3;
 
 # Create second wallet with unassigned key.
-OWNER=$(linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db keygen)
+OWNER=$($TARGET_DIR/linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db keygen)
 
 # Open chain on behalf of wallet 2.
-EFFECT_AND_CHAIN=$(linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db open-chain --owner "$OWNER")
+EFFECT_AND_CHAIN=$($TARGET_DIR/linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db open-chain --owner "$OWNER")
 EFFECT=$(echo "$EFFECT_AND_CHAIN" | sed -n '1 p')
 
 # Assign newly created chain to unassigned key.
-linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db assign --owner "$OWNER" --message-id "$EFFECT"
+$TARGET_DIR/linera --wallet $WALLET_DIR/2/wallet.json --storage rocksdb:$WALLET_DIR/2/client.db assign --owner "$OWNER" --message-id "$EFFECT"
 
 function generate_nginx_conf() {
     endpoint=faucet
@@ -213,6 +215,6 @@ echo -e "	$LAN_IP api.faucet.respeer.ai"
 echo -e "	http://api.faucet.respeer.ai/api/faucet\n\n"
 
 # Run a faucet on wallet_1 which has enough balance
-linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db faucet --amount 10
+$TARGET_DIR/linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db faucet --amount 10
 
 read
