@@ -289,7 +289,7 @@ where
             .await;
 
         axum::serve(
-            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).await?,
+            tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?,
             app,
         )
         .await?;
