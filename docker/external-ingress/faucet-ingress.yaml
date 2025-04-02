@@ -1,0 +1,33 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: faucet-external-service
+  namespace: kube-system
+spec:
+  type: ExternalName
+  ports:
+    - name: http
+      port: 40083
+      targetPort: 40083
+  externalName: testing.linera-respeer-devnet.nginx.respeer.ai
+
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: faucet-service-traefik-app-ingress-route
+  namespace: kube-system
+
+spec:
+  tls:
+    secretName: testing-linera-respeer-devnet-faucet-respeer-ai-tls
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: Host(`testing.linera-respeer-devnet.faucet.respeer.ai`)
+      kind: Rule
+      services:
+        - name: faucet-external-service
+          port: 40083
+          passHostHeader: true
