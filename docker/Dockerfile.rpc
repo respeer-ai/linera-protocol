@@ -63,7 +63,7 @@ RUN cargo build --release \
     --bin linera \
     --bin linera-proxy \
     --bin linera-server \
-    --features scylladb,metrics
+    --features storage-service,disable-native-rpc,enable-wallet-rpc
 
 RUN mv \
     target/"$target"/release/linera \
@@ -93,7 +93,12 @@ LABEL build_date=$build_date
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    openssl
+    openssl \
+    systemd \
+    procps \
+    nginx \
+    vim
+
 RUN update-ca-certificates
 
 ARG target
@@ -105,11 +110,9 @@ COPY --from=binaries \
     ./
 
 COPY --chmod=755 \
-    docker/server-entrypoint.sh \
-    docker/server-init.sh \
-    docker/proxy-init.sh \
-    docker/compose-server-entrypoint.sh \
-    docker/compose-proxy-entrypoint.sh \
-    docker/compose-server-init.sh \
-    docker/faucet-entrypoint.sh \
+    docker/rpc-entrypoint.sh \
     ./
+
+COPY \
+    docker/docker.rpc.nginx.conf \
+    /etc/nginx/sites-enabled/
