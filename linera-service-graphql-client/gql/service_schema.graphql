@@ -321,6 +321,11 @@ type ChainManager {
 	currentRound: Round!
 }
 
+input ChainOwners {
+	chainId: ChainId!
+	owners: [AccountOwner!]!
+}
+
 """
 Represents the owner(s) of a chain
 """
@@ -1146,7 +1151,7 @@ type QueryRoot {
 	"""
 	Returns the balances of given owners
 	"""
-	balances(chainOwners: JSONObject!): JSONObject!
+	balances(chainOwners: [ChainOwners!]!): JSONObject!
 	"""
 	Returns the maintained chains of given owner
 	"""
