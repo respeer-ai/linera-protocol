@@ -14,8 +14,8 @@ use async_graphql::{
     futures_util::Stream,
     parser::types::{DocumentOperations, ExecutableDocument, OperationType},
     resolver_utils::ContainerType,
-    Error, MergedObject, OutputType, Request, ScalarType, Schema, ServerError, SimpleObject,
-    Subscription,
+    Error, InputObject, MergedObject, OutputType, Request, ScalarType, Schema, ServerError,
+    SimpleObject, Subscription,
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
@@ -105,6 +105,13 @@ pub struct BlockMaterial {
 }
 
 doc_scalar!(BlockMaterial, "Materials of a new block.");
+
+#[derive(Debug, Clone, Serialize, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ChainOwners {
+    chain_id: ChainId,
+    owners: Vec<AccountOwner>,
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
 #[serde(rename_all = "camelCase")]
@@ -1080,26 +1087,21 @@ where
     /// Returns the balances of given owners
     async fn balances(
         &self,
-        chain_owners: HashMap<ChainId, Vec<AccountOwner>>,
+        chain_owners: Vec<ChainOwners>,
     ) -> Result<HashMap<ChainId, Balances>, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
         let mut chain_balances = HashMap::new();
-        for (chain_id, owners) in &chain_owners {
-            let Ok(client) = self
-                .context
-                .lock()
-                .await
-                .make_chain_client(chain_id.clone())
-            else {
+        for chain in chain_owners {
+            let Ok(client) = self.context.lock().await.make_chain_client(chain.chain_id) else {
                 continue;
             };
             let mut owner_balances = HashMap::new();
-            for &owner in owners {
+            for owner in chain.owners {
                 owner_balances.insert(owner, client.query_owner_balance(owner).await?);
             }
             chain_balances.insert(
-                *chain_id,
+                chain.chain_id,
                 Balances {
                     chain_balance: client.query_balance().await?,
                     owner_balances,
