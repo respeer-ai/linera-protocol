@@ -27,11 +27,14 @@ mkdir -p $WALLET_DIR
 FAUCET_DIR=$WALLET_DIR/faucet
 mkdir -p $FAUCET_DIR
 
-RPC_DIR=$WALLET/rpc
+RPC_DIR=$WALLET_DIR/rpc
 mkdir -p $RPC_DIR
 
 SOURCE_DIR=$OUTPUT_DIR/source
 mkdir -p $SOURCE_DIR
+
+CONFIG_DIR=$OUTPUT_DIR/config
+mkdir -p $CONFIG_DIR
 
 # Cleanup before building
 docker stop prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet
@@ -60,6 +63,7 @@ cp -v $SCRIPT_DIR/../configuration $OUTPUT_DIR -rf
 
 CONF_DIR=$OUTPUT_DIR/configuration/compose
 ROOT_DIR=$SCRIPT_DIR/..
+TEMPLATE_FILE=$OUTPUT_DIR/configuration/template/nginx.conf.j2
 
 # Build official version for genesis and faucet
 cd $SOURCE_DIR
@@ -140,13 +144,15 @@ function generate_nginx_conf() {
   }" > ${CONFIG_DIR}/$endpoint.nginx.json
 
   jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
-  echo "cp ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/"
+  cp -v ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/
 }
 
 # Generate service nginx conf
 generate_nginx_conf 19100 validator validator.genesis.respeer.ai
 generate_nginx_conf 8080 faucet faucet.respeer.ai
 generate_nginx_conf 30080 rpc rpc.respeer.ai
+
+sudo nginx -s reload
 
 echo -e "\n\nService domain"
 echo -e "   $LAN_IP api.validator.genesis.respeer.ai"
@@ -156,3 +162,5 @@ echo -e "   $LAN_IP graphiql.faucet.respeer.ai"
 echo -e "   $LAN_IP graphiql.rpc.respeer.ai"
 echo -e "   http://graphiql.faucet.respeer.ai"
 echo -e "   http://graphiql.rpc.respeer.ai"
+echo -e "   http://api.faucet.respeer.ai/api/faucet"
+echo -e "   http://api.rpc.respeer.ai/api/rpc"
