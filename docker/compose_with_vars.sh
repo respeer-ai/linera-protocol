@@ -69,7 +69,9 @@ cp -v $SCRIPT_DIR/../configuration $OUTPUT_DIR -rf
 
 CONF_DIR=$OUTPUT_DIR/configuration/compose
 ROOT_DIR=$SCRIPT_DIR/..
-TEMPLATE_FILE=$OUTPUT_DIR/configuration/template/nginx.conf.j2
+
+NGINX_TEMPLATE_FILE=$OUTPUT_DIR/configuration/template/nginx.conf.j2
+VALIDATOR_TEMPLATE_FILE=$OUTPUT_DIR/configuration/template/validator.toml.j2
 
 # Build official version for genesis and faucet
 cd $SOURCE_DIR
@@ -105,10 +107,61 @@ docker build --build-arg git_commit="$GIT_COMMIT" -f docker/Dockerfile . -t line
 # We should generate config to docker dir
 cd "$DOCKER_DIR"
 
+## Generate validator configuration from template
+function generate_validators() {
+    # Generate validator configure of i
+    echo "{
+        \"validator\": {
+            \"config_path\": \"$DOCKER_DIR/server.json\",
+            \"host\": \"$LAN_IP\",
+            \"port\": $((19100 + i * 2)),
+            \"metrics_port\": $((20100 + i * 2)),
+            \"pyroscope_host\": \"$LAN_IP\",
+            \"pyroscope_port\": $((4040 + i * 2)),
+            \"internal_host\": \"$LAN_IP\",
+            \"internal_port\": $((21100 + i * 2))
+        },
+        \"shards\": {
+            \"shard_1\": {
+                \"host\": \"$LAN_IP\",
+                \"port\": $((22100 + i * 2)),
+                \"metrics_port\": $((23100 + i * 2)),
+                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_port\": $((24140 + i * 2))
+          },
+            \"shard_2\": {
+                \"host\": \"$LAN_IP\",
+                \"port\": $((25100 + i * 2)),
+                \"metrics_port\": $((26100 + i * 2)),
+                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_port\": $((27140 + i * 2))
+            },
+            \"shard_3\": {
+                \"host\": \"$LAN_IP\",
+                \"port\": $((28100 + i * 2)),
+                \"metrics_port\": $((29100 + i * 2)),
+                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_port\": $((30140 + i * 2))
+            },
+            \"shard_4\": {
+                \"host\": \"$LAN_IP\",
+                \"port\": $((31100 + i * 2)),
+                \"metrics_port\": $((32100 + i * 2)),
+                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_port\": $((33140 + i * 2))
+            }
+        }
+    }" > $CONFIG_DIR/validator.json
+
+    jinja -d $CONFIG_DIR/validator.json $VALIDATOR_TEMPLATE_FILE > $CONFIG_DIR/validator.toml
+}
+
+generate_validators
+
 # Create configuration files.
 # * Private server states are stored in `server.json`.
 # * `committee.json` is the public description of the Linera committee.
-linera-server generate --validators "$CONF_DIR/validator.toml" --committee $DOCKER_DIR/committee.json --testing-prng-seed 1
+linera-server generate --validators "$CONFIG_DIR/validator.toml" --committee $DOCKER_DIR/committee.json --testing-prng-seed 1
 
 # Create configuration files for 10 user chains.
 # * Private chain states are stored in one local wallet `wallet.json`.
@@ -164,7 +217,7 @@ function generate_nginx_conf() {
     }
   }" > ${CONFIG_DIR}/$endpoint.nginx.json
 
-  jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
+  jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $NGINX_TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
   cp -v ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/
 }
 
