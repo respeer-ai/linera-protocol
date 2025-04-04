@@ -90,6 +90,7 @@ INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
 if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
   cargo build --release
   mv $PWD/target/release/linera $OFFICIAL_BIN_DIR
+  mv $PWD/target/release/linera-server $OFFICIAL_BIN_DIR
 fi
 
 cp -v \
