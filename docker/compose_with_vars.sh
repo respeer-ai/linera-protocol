@@ -37,8 +37,8 @@ CONFIG_DIR=$OUTPUT_DIR/config
 mkdir -p $CONFIG_DIR
 
 # Cleanup before building
-docker stop prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet
-docker rm prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet
+docker stop prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
+docker rm prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
 docker rmi linera-respeer linera-official
 
 cp -v \
@@ -124,7 +124,7 @@ export PATH=$ROOT_DIR/target/release:$PATH
 
 linera --wallet $RPC_DIR/wallet.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet http://$LAN_IP:8080
 
-cd $SCRIPT_DIR
+cd $DOCKER_DIR
 # Compose up rpc
 LINERA_IMAGE=linera-respeer docker compose -f docker-compose-rpc.yml up --wait
 
@@ -133,11 +133,10 @@ function generate_nginx_conf() {
   endpoint=$2
   domain=$3
   
-  servers=$(service_servers $port_base)
   echo "{
       \"service\": {
       \"endpoint\": \"$endpoint\",
-      \"servers\": [$servers],
+      \"servers\": [\"$LAN_IP:$port_base\"],
       \"domain\": \"$domain\",
       \"api_endpoint\": \"$endpoint\"
     }
