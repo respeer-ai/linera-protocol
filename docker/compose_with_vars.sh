@@ -115,41 +115,41 @@ function generate_validators() {
         \"validator\": {
             \"config_path\": \"$DOCKER_DIR/server.json\",
             \"host\": \"$LAN_IP\",
-            \"port\": $((19100 + i * 2)),
-            \"metrics_port\": $((20100 + i * 2)),
+            \"port\": 19100,
+            \"metrics_port\": 20100,
             \"pyroscope_host\": \"$LAN_IP\",
-            \"pyroscope_port\": $((4040 + i * 2)),
+            \"pyroscope_port\": 4040,
             \"internal_host\": \"$LAN_IP\",
-            \"internal_port\": $((21100 + i * 2))
+            \"internal_port\": 21100
         },
         \"shards\": {
             \"shard_1\": {
                 \"host\": \"$LAN_IP\",
-                \"port\": $((22100 + i * 2)),
-                \"metrics_port\": $((23100 + i * 2)),
+                \"port\": 19100,
+                \"metrics_port\": 21100,
                 \"pyroscope_host\": \"$LAN_IP\",
-                \"pyroscope_port\": $((24140 + i * 2))
+                \"pyroscope_port\": 4040
           },
             \"shard_2\": {
                 \"host\": \"$LAN_IP\",
-                \"port\": $((25100 + i * 2)),
-                \"metrics_port\": $((26100 + i * 2)),
+                \"port\": 19100,
+                \"metrics_port\": 21100,
                 \"pyroscope_host\": \"$LAN_IP\",
-                \"pyroscope_port\": $((27140 + i * 2))
+                \"pyroscope_port\": 4040
             },
             \"shard_3\": {
                 \"host\": \"$LAN_IP\",
-                \"port\": $((28100 + i * 2)),
-                \"metrics_port\": $((29100 + i * 2)),
+                \"port\": 19100,
+                \"metrics_port\": 21100,
                 \"pyroscope_host\": \"$LAN_IP\",
-                \"pyroscope_port\": $((30140 + i * 2))
+                \"pyroscope_port\": 4040
             },
             \"shard_4\": {
                 \"host\": \"$LAN_IP\",
-                \"port\": $((31100 + i * 2)),
-                \"metrics_port\": $((32100 + i * 2)),
+                \"port\": 19100,
+                \"metrics_port\": 21100,
                 \"pyroscope_host\": \"$LAN_IP\",
-                \"pyroscope_port\": $((33140 + i * 2))
+                \"pyroscope_port\": 4040
             }
         }
     }" > $CONFIG_DIR/validator.json
@@ -173,8 +173,6 @@ linera --wallet $FAUCET_DIR/wallet.json --storage rocksdb:$FAUCET_DIR/client.db 
 cd $DOCKER_DIR
 
 LINERA_IMAGE=linera-official docker compose -f docker-compose.yml up --wait
-
-sed -i "s/127.0.0.1/$LAN_IP/g" $FAUCET_DIR/wallet.json
 
 # Compose up faucet
 LINERA_IMAGE=linera-official docker compose -f docker-compose-faucet.yml up --wait
