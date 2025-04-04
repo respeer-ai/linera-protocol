@@ -46,6 +46,7 @@ mkdir -p $RESPEER_BIN_DIR
 docker stop prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
 docker rm prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
 docker rmi linera-respeer linera-official
+docker volume rm docker_linera-scylla-data docker_linera-shared
 
 cp -v \
   dashboards \
@@ -103,7 +104,7 @@ cp -v \
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
-docker build --build-arg git_commit="$GIT_COMMIT" -f docker/Dockerfile . -t linera-official || exit 1
+docker build --no-cache --build-arg git_commit="$GIT_COMMIT" -f docker/Dockerfile . -t linera-official || exit 1
 
 # We should generate config to docker dir
 cd "$DOCKER_DIR"
@@ -116,39 +117,39 @@ function generate_validators() {
             \"config_path\": \"$DOCKER_DIR/server.json\",
             \"host\": \"$LAN_IP\",
             \"port\": 19100,
-            \"metrics_port\": 20100,
+            \"metrics_port\": 21100,
             \"pyroscope_host\": \"$LAN_IP\",
             \"pyroscope_port\": 4040,
-            \"internal_host\": \"$LAN_IP\",
-            \"internal_port\": 21100
+            \"internal_host\": \"proxy\",
+            \"internal_port\": 20100
         },
         \"shards\": {
             \"shard_1\": {
-                \"host\": \"$LAN_IP\",
+                \"host\": \"docker-shard-1\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
           },
             \"shard_2\": {
-                \"host\": \"$LAN_IP\",
+                \"host\": \"docker-shard-2\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
             },
             \"shard_3\": {
-                \"host\": \"$LAN_IP\",
+                \"host\": \"docker-shard-3\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
             },
             \"shard_4\": {
-                \"host\": \"$LAN_IP\",
+                \"host\": \"docker-shard-4\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"$LAN_IP\",
+                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
             }
         }
@@ -182,7 +183,7 @@ cd "$ROOT_DIR"
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
-docker build --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+docker build --no-cache --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
 
 export PATH=$RESPEER_BIN_DIR:$PATH
 
