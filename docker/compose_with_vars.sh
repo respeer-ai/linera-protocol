@@ -36,6 +36,12 @@ mkdir -p $SOURCE_DIR
 CONFIG_DIR=$OUTPUT_DIR/config
 mkdir -p $CONFIG_DIR
 
+OFFICIAL_BIN_DIR=$OUTPUT_DIR/official/bin
+mkdir -p $OFFICIAL_BIN_DIR
+
+RESPEER_BIN_DIR=$OUTPUT_DIR/respeer/bin
+mkdir -p $RESPEER_BIN_DIR
+
 # Cleanup before building
 docker stop prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
 docker rm prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
@@ -72,9 +78,17 @@ git clone https://github.com/linera-io/linera-protocol.git
 cd linera-protocol
 git checkout $GIT_COMMIT
 
+export PATH=$OFFICIAL_BIN_DIR:$PATH
+
+LATEST_COMMIT=`git rev-parse HEAD`
+LATEST_COMMIT=${LATEST_COMMIT:0:10}
+INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
+
 # Compile official for local linera toolchain
-cargo build --release
-export PATH=$SOURCE_DIR/linera-protocol/target/release:$PATH
+if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
+  cargo build --release
+  mv $PWD/target/release/linera $OFFICIAL_BIN_DIR
+fi
 
 cp -v \
   $ROOT_DIR/docker/faucet-entrypoint.sh \
@@ -118,9 +132,17 @@ GIT_COMMIT=$(git rev-parse --short HEAD)
 
 docker build --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
 
-# TODO: respeer folk will be error when build all target
-cargo build --release
-export PATH=$ROOT_DIR/target/release:$PATH
+export PATH=$RESPEER_BIN_DIR:$PATH
+
+LATEST_COMMIT=`git rev-parse HEAD`
+LATEST_COMMIT=${LATEST_COMMIT:0:10}
+INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
+
+# Compile official for local linera toolchain
+if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
+  cargo build --release
+  mv $PWD/target/release/linera $RESPEER_BIN_DIR
+fi
 
 linera --wallet $RPC_DIR/wallet.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet http://$LAN_IP:8080
 

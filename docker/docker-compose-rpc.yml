@@ -1,5 +1,5 @@
 services:
-  faucet:
+  rpc:
     image: "${LINERA_IMAGE:-linera}"
     container_name: rpc
     ports:
