@@ -115,4 +115,5 @@ COPY --chmod=755 \
     docker/compose-server-init.sh \
     docker/faucet-entrypoint.sh \
     docker/rpc-entrypoint.sh \
+    docker/wallet-entrypoint.sh \
     ./

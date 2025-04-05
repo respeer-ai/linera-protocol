@@ -64,6 +64,7 @@ cp -v \
   faucet-entrypoint.sh \
   docker-compose-faucet.yml \
   rpc-entrypoint.sh \
+  wallet-entrypoint.sh \
   docker-compose-rpc.yml \
   $DOCKER_DIR -rf
 cp -v $SCRIPT_DIR/../configuration $OUTPUT_DIR -rf
@@ -99,6 +100,7 @@ cp -v \
   $ROOT_DIR/docker/docker-compose-faucet.yml \
   $ROOT_DIR/docker/rpc-entrypoint.sh \
   $ROOT_DIR/docker/docker-compose-rpc.yml \
+  $ROOT_DIR/docker/wallet-entrypoint.sh \
   $ROOT_DIR/docker/Dockerfile \
   ./docker -rf
 
