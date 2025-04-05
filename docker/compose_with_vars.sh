@@ -118,7 +118,7 @@ function generate_validators() {
             \"host\": \"$LAN_IP\",
             \"port\": 19100,
             \"metrics_port\": 21100,
-            \"pyroscope_host\": \"$LAN_IP\",
+            \"pyroscope_host\": \"docker-pyroscope\",
             \"pyroscope_port\": 4040,
             \"internal_host\": \"proxy\",
             \"internal_port\": 20100
