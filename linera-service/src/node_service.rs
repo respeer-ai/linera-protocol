@@ -1,25 +1,58 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
-
-use std::{borrow::Cow, iter, net::SocketAddr, num::NonZeroU16, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    iter,
+    net::SocketAddr,
+    num::NonZeroU16,
+    str::FromStr,
+    sync::Arc,
+};
 
 use async_graphql::{
+<<<<<<< HEAD
     futures_util::Stream, resolver_utils::ContainerType, Error, MergedObject, OutputType,
     ScalarType, Schema, SimpleObject, Subscription,
+=======
+    futures_util::Stream,
+    parser::types::{DocumentOperations, ExecutableDocument, OperationType},
+    resolver_utils::ContainerType,
+    Error, InputObject, MergedObject, OutputType, Request, ScalarType, Schema, ServerError,
+    SimpleObject, Subscription,
+>>>>>>> respeer-maas-7b3ae0b6-2025_03_15
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
 use futures::{lock::Mutex, Future};
 use linera_base::{
+<<<<<<< HEAD
     crypto::{CryptoError, CryptoHash},
     data_types::{Amount, ApplicationDescription, ApplicationPermissions, Bytecode, TimeDelta},
     identifiers::{AccountOwner, ApplicationId, ChainId, ModuleId},
+=======
+    crypto::{
+        AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
+        TestString,
+    },
+    data_types::{
+        Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta,
+        UserApplicationDescription,
+    },
+    doc_scalar, ensure,
+    hashed::Hashed,
+    identifiers::{
+        Account, AccountOwner, ApplicationId, BlobId, ChainId, MessageId, ModuleId, Owner,
+        UserApplicationId,
+    },
+>>>>>>> respeer-maas-7b3ae0b6-2025_03_15
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
     BcsHexParseError,
 };
 use linera_chain::{
-    types::{ConfirmedBlock, GenericCertificate},
+    data_types::{CandidateBlockMaterial, ExecutedBlock, IncomingBundle},
+    types::{ConfirmedBlock, GenericCertificate, ValidatedBlockCertificate},
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
@@ -36,13 +69,13 @@ use linera_execution::{
 use linera_sdk::linera_base_types::BlobContent;
 use linera_storage::Storage;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value as JsonValue};
 use thiserror::Error as ThisError;
 use tokio::sync::OwnedRwLockReadGuard;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::util;
+use crate::{cli_wrappers::Faucet, util};
 
 #[derive(SimpleObject, Serialize, Deserialize, Clone)]
 pub struct Chains {
@@ -55,6 +88,7 @@ pub struct QueryRoot<C> {
     context: Arc<Mutex<C>>,
     port: NonZeroU16,
     default_chain: Option<ChainId>,
+    default_chains: HashMap<Owner, ChainId>,
 }
 
 /// Our root GraphQL subscription type.
@@ -63,9 +97,77 @@ pub struct SubscriptionRoot<C> {
 }
 
 /// Our root GraphQL mutation type.
-pub struct MutationRoot<C> {
+pub struct MutationRoot<C>
+where
+    C: ClientContext,
+{
     context: Arc<Mutex<C>>,
+
+    storage: C::Storage,
+    config: ChainListenerConfig,
+    chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockMaterial {
+    operations: Vec<Operation>,
+    candidate: CandidateBlockMaterial,
+}
+
+doc_scalar!(BlockMaterial, "Materials of a new block.");
+
+#[derive(Debug, Clone, Serialize, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
+pub struct ChainOwners {
+    chain_id: ChainId,
+    owners: Vec<AccountOwner>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct Balances {
+    chain_balance: Amount,
+    owner_balances: HashMap<AccountOwner, Amount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
+pub struct ExecutedBlockMaterial {
+    executed_block: ExecutedBlock,
+    blob_ids: Vec<BlobId>,
+    validated_block_certificate: Option<ValidatedBlockCertificate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignedBlock {
+    executed_block: ExecutedBlock,
+    round: Round,
+    signature: AccountSignature,
+    validated_block_certificate: Option<ValidatedBlockCertificate>,
+    // If block contains PublishDataBlob, it should have blobs, too
+    blob_bytes: Vec<Vec<u8>>,
+}
+
+doc_scalar!(
+    SignedBlock,
+    "A signed block which will be submitted to blockchain with its signature."
+);
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WalletInitializer {
+    owner: Owner,
+    signature: AccountSignature,
+    faucet_url: String,
+    // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
+    // message_id: MessageId,
+}
+
+doc_scalar!(
+    WalletInitializer,
+    "Input parameters of wallet initialization."
+);
 
 #[derive(Debug, ThisError)]
 enum NodeServiceError {
@@ -129,6 +231,8 @@ where
         system_operation: SystemOperation,
         chain_id: ChainId,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let certificate = self
             .apply_client_command(&chain_id, move |client| {
                 let operation = Operation::system(system_operation.clone());
@@ -174,6 +278,19 @@ where
             util::wait_for_next_round(&mut stream, timeout).await;
         }
     }
+
+    async fn chain_initialized(
+        &self,
+        chain_id: ChainId,
+        message_id: MessageId,
+    ) -> Result<(), Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        client.track_chain(chain_id);
+        client.track_chain(message_id.chain_id);
+        client.retry_pending_outgoing_messages().await?;
+        client.prepare_chain().await?;
+        Ok(())
+    }
 }
 
 #[async_graphql::Object(cache_control(no_cache))]
@@ -183,6 +300,8 @@ where
 {
     /// Processes the inbox and returns the lists of certificate hashes that were created, if any.
     async fn process_inbox(&self, chain_id: ChainId) -> Result<Vec<CryptoHash>, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let mut hashes = Vec::new();
         loop {
             let client = self.context.lock().await.make_chain_client(chain_id)?;
@@ -204,6 +323,8 @@ where
 
     /// Retries the pending block that was unsuccessfully proposed earlier.
     async fn retry_pending_block(&self, chain_id: ChainId) -> Result<Option<CryptoHash>, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let client = self.context.lock().await.make_chain_client(chain_id)?;
         let outcome = client.process_pending_block().await?;
         self.context.lock().await.update_wallet(&client).await?;
@@ -226,6 +347,8 @@ where
         recipient: Recipient,
         amount: Amount,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| async move {
             let result = client
                 .transfer(owner, amount, recipient)
@@ -248,6 +371,8 @@ where
         recipient: Recipient,
         amount: Amount,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| async move {
             let result = client
                 .claim(owner, target_id, recipient, amount)
@@ -285,6 +410,8 @@ where
         owner: AccountOwner,
         balance: Option<Amount>,
     ) -> Result<ChainId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let ownership = ChainOwnership::single(owner);
         let balance = balance.unwrap_or(Amount::ZERO);
         let message_id = self
@@ -334,6 +461,8 @@ where
         )]
         fallback_duration_ms: u64,
     ) -> Result<ChainId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let owners = if let Some(weights) = weights {
             if weights.len() != owners.len() {
                 return Err(Error::new(format!(
@@ -377,6 +506,8 @@ where
 
     /// Closes the chain. Returns `None` if it was already closed.
     async fn close_chain(&self, chain_id: ChainId) -> Result<Option<CryptoHash>, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let maybe_cert = self
             .apply_client_command(&chain_id, |client| async move {
                 let result = client.close_chain().await.map_err(Error::from);
@@ -387,11 +518,17 @@ where
     }
 
     /// Changes the authentication key of the chain.
+<<<<<<< HEAD
     async fn change_owner(
         &self,
         chain_id: ChainId,
         new_owner: AccountOwner,
     ) -> Result<CryptoHash, Error> {
+=======
+    async fn change_owner(&self, chain_id: ChainId, new_owner: Owner) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
+>>>>>>> respeer-maas-7b3ae0b6-2025_03_15
         let operation = SystemOperation::ChangeOwnership {
             super_owners: vec![new_owner],
             owners: Vec::new(),
@@ -431,6 +568,8 @@ where
         )]
         fallback_duration_ms: u64,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::ChangeOwnership {
             super_owners: Vec::new(),
             owners: new_owners.into_iter().zip(new_weights).collect(),
@@ -458,6 +597,8 @@ where
         call_service_as_oracle: Option<Vec<ApplicationId>>,
         make_http_requests: Option<Vec<ApplicationId>>,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::ChangeApplicationPermissions(ApplicationPermissions {
             execute_operations,
             mandatory_applications,
@@ -477,6 +618,8 @@ where
         chain_id: ChainId,
         committee: Committee,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         Ok(self
             .apply_client_command(&chain_id, move |client| {
                 let committee = committee.clone();
@@ -492,10 +635,49 @@ where
             .hash())
     }
 
+<<<<<<< HEAD
+=======
+    /// Subscribes to a system channel.
+    async fn subscribe(
+        &self,
+        subscriber_chain_id: ChainId,
+        publisher_chain_id: ChainId,
+        channel: SystemChannel,
+    ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
+        let operation = SystemOperation::Subscribe {
+            chain_id: publisher_chain_id,
+            channel,
+        };
+        self.execute_system_operation(operation, subscriber_chain_id)
+            .await
+    }
+
+    /// Unsubscribes from a system channel.
+    async fn unsubscribe(
+        &self,
+        subscriber_chain_id: ChainId,
+        publisher_chain_id: ChainId,
+        channel: SystemChannel,
+    ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
+        let operation = SystemOperation::Unsubscribe {
+            chain_id: publisher_chain_id,
+            channel,
+        };
+        self.execute_system_operation(operation, subscriber_chain_id)
+            .await
+    }
+
+>>>>>>> respeer-maas-7b3ae0b6-2025_03_15
     /// (admin chain only) Removes a committee. Once this message is accepted by a chain,
     /// blocks from the retired epoch will not be accepted until they are followed (hence
     /// re-certified) by a block certified by a recent committee.
     async fn remove_committee(&self, chain_id: ChainId, epoch: Epoch) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         let operation = SystemOperation::Admin(AdminOperation::RemoveCommittee { epoch });
         self.execute_system_operation(operation, chain_id).await
     }
@@ -508,6 +690,8 @@ where
         service: Bytecode,
         vm_runtime: VmRuntime,
     ) -> Result<ModuleId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| {
             let contract = contract.clone();
             let service = service.clone();
@@ -529,6 +713,8 @@ where
         chain_id: ChainId,
         bytes: Vec<u8>,
     ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, |client| {
             let bytes = bytes.clone();
             async move {
@@ -549,6 +735,8 @@ where
         instantiation_argument: String,
         required_application_ids: Vec<ApplicationId>,
     ) -> Result<ApplicationId, Error> {
+        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
+
         self.apply_client_command(&chain_id, move |client| {
             let parameters = parameters.as_bytes().to_vec();
             let instantiation_argument = instantiation_argument.as_bytes().to_vec();
@@ -568,6 +756,179 @@ where
             }
         })
         .await
+    }
+
+    /// ResPeer::CheCko::Initialize offline wallet
+    async fn wallet_init_without_secret_key(
+        &self,
+        chain_id: ChainId,
+        initializer: WalletInitializer,
+        // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
+        message_id: MessageId,
+    ) -> Result<ChainId, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        let WalletInitializer {
+            owner,
+            signature,
+            faucet_url,
+        } = initializer;
+
+        #[derive(Debug, Serialize, Deserialize)]
+        struct Nonce(MessageId);
+        impl BcsSignable<'_> for Nonce {}
+
+        let secret_key = self
+            .context
+            .lock()
+            .await
+            .key_pair_for_owner(&owner)
+            .expect("Public key must be added firstly");
+
+        tracing::info!("Verifing signature ...");
+        let nonce = Nonce(message_id);
+        signature.verify(&nonce, secret_key.public())?;
+
+        let faucet = Faucet::new(faucet_url.clone());
+        let validators = faucet.current_validators().await?;
+
+        tracing::info!("Assigning new chain to public key ...");
+        // Public key must already be added before claim new chain
+        self.context
+            .lock()
+            .await
+            .assign_new_chain_to_key(chain_id, message_id, owner, Some(validators))
+            .await?;
+
+        tracing::info!("Setting default chain with public key ...");
+        self.context
+            .lock()
+            .await
+            .set_owner_default_chain(owner, chain_id)
+            .await?;
+        self.context.lock().await.save_wallet().await?;
+
+        tracing::info!("Running chain {}", chain_id);
+        ChainListener::run_with_chain_id_retry(
+            chain_id,
+            self.context.clone(),
+            self.storage.clone(),
+            self.config.clone(),
+            Arc::clone(&self.chain_guard),
+            5,
+        );
+
+        tokio::task::yield_now().await;
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+
+        tracing::info!("Finalizing initialization ...");
+        self.chain_initialized(chain_id, message_id).await?;
+
+        tracing::info!("Initialized chain {}", chain_id);
+
+        Ok(chain_id)
+    }
+
+    /// Submit block proposal with signature
+    async fn submit_block_and_signature(
+        &self,
+        chain_id: ChainId,
+        height: BlockHeight,
+        block: SignedBlock,
+    ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+
+        let SignedBlock {
+            executed_block,
+            round,
+            signature,
+            validated_block_certificate,
+            blob_bytes,
+        } = block;
+
+        let hash = client
+            .submit_external_signed_block_proposal_and_signature(
+                height,
+                executed_block,
+                round,
+                signature,
+                validated_block_certificate,
+                blob_bytes
+                    .into_iter()
+                    .map(|bytes| Blob::new_data(bytes))
+                    .collect(),
+            )
+            .await?
+            .value()
+            .hash();
+        self.context.lock().await.update_wallet(&client).await?;
+        Ok(hash)
+    }
+
+    /// Calculate block execution state hash
+    async fn simulate_execute_block(
+        &self,
+        chain_id: ChainId,
+        block_material: BlockMaterial,
+    ) -> Result<Option<ExecutedBlockMaterial>, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        let BlockMaterial {
+            operations,
+            candidate,
+        } = block_material;
+        let CandidateBlockMaterial {
+            incoming_bundles,
+            local_time,
+            ..
+        } = candidate;
+
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+
+        let bundles: Vec<_> = incoming_bundles
+            .iter()
+            .map(|bundle| bundle.clone())
+            .collect();
+
+        let Some((executed_block, blob_ids, validated_block_certificate)) = client
+            .simulate_execute_block(operations, bundles, local_time)
+            .await?
+        else {
+            // Finalizing last block, waiting for a moment
+            return Ok(None);
+        };
+        Ok(Some(ExecutedBlockMaterial {
+            executed_block,
+            blob_ids,
+            validated_block_certificate,
+        }))
+    }
+
+    /// Add key pair info which only has public key
+    pub async fn wallet_init_public_key(
+        &self,
+        public_key: AccountPublicKey,
+        signature: AccountSignature,
+    ) -> Result<Owner, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        #[derive(Debug, Serialize, Deserialize)]
+        struct Nonce(Vec<u8>);
+        impl BcsSignable<'_> for Nonce {}
+
+        let nonce = Nonce(public_key.as_bytes());
+        let _ = AccountSecretKey::generate().sign(&nonce);
+        signature.verify(&nonce, public_key)?;
+
+        let secret_key = AccountSecretKey::from_public_key(public_key);
+        self.context
+            .lock()
+            .await
+            .add_unassigned_key_pair(secret_key)
+            .await?;
+        Ok(public_key.into())
     }
 }
 
@@ -656,6 +1017,148 @@ where
     /// Returns the version information on this node service.
     async fn version(&self) -> linera_version::VersionInfo {
         linera_version::VersionInfo::default()
+    }
+
+    /// Returns the pending message of the chain
+    async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        Ok(client.pending_message_bundles().await?)
+    }
+
+    /// Returns block material of the chain
+    async fn block_material(
+        &self,
+        chain_id: ChainId,
+        max_pending_messages: usize,
+    ) -> Result<CandidateBlockMaterial, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+
+        let incoming_bundles = client.pending_message_bundles().await?;
+        let local_time = client.next_timestamp(&incoming_bundles, client.state().timestamp());
+        let round = client.block_round().await?;
+
+        let incoming_bundles = if incoming_bundles.len() > max_pending_messages {
+            incoming_bundles[..max_pending_messages].to_vec()
+        } else {
+            incoming_bundles
+        };
+
+        Ok(CandidateBlockMaterial {
+            incoming_bundles,
+            local_time,
+            round,
+        })
+    }
+
+    /// Returns the balance of given owner
+    async fn balance(
+        &self,
+        chain_id: ChainId,
+        owner: Option<AccountOwner>,
+    ) -> Result<Amount, Error> {
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        Ok(match owner {
+            Some(owner) => client.query_owner_balance(owner).await?,
+            _ => client.query_balance().await?,
+        })
+    }
+
+    /// Returns the balances of given owners
+    async fn balances(
+        &self,
+        chain_owners: Vec<ChainOwners>,
+    ) -> Result<HashMap<ChainId, Balances>, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        let mut chain_balances = HashMap::new();
+        for chain in chain_owners {
+            let Ok(client) = self.context.lock().await.make_chain_client(chain.chain_id) else {
+                continue;
+            };
+            let mut owner_balances = HashMap::new();
+            for owner in chain.owners {
+                owner_balances.insert(owner, client.query_owner_balance(owner).await?);
+            }
+            chain_balances.insert(
+                chain.chain_id,
+                Balances {
+                    chain_balance: client.query_balance().await?,
+                    owner_balances,
+                },
+            );
+        }
+        Ok(chain_balances)
+    }
+
+    /// Returns the maintained chains of given owner
+    async fn owner_chains(&self, owner: AccountOwner) -> Result<Chains, Error> {
+        let all_chain_ids = self.context.lock().await.wallet().chain_ids();
+        let mut chain_ids = Vec::new();
+
+        for chain_id in all_chain_ids.iter() {
+            let client = self
+                .context
+                .lock()
+                .await
+                .make_chain_client(chain_id.clone())?;
+            if Owner::from(client.public_key().await?) == owner {
+                chain_ids.push(chain_id.clone());
+            }
+        }
+
+        Ok(Chains {
+            list: chain_ids,
+            default: self.context.lock().await.owner_default_chain(&owner),
+        })
+    }
+
+    async fn signature_pattern(&self) -> AccountSignature {
+        AccountSecretKey::generate().sign(&TestString::new("Test signature"))
+    }
+
+    async fn public_key_pattern(&self) -> AccountPublicKey {
+        AccountSecretKey::generate().public()
+    }
+
+    async fn account_owner_pattern(&self) -> AccountOwner {
+        AccountOwner::User(
+            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+                .unwrap(),
+        )
+    }
+
+    async fn account_pattern(&self) -> Account {
+        Account {
+            chain_id: ChainId::from_str(
+                "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
+            )
+            .unwrap(),
+            owner: Some(AccountOwner::User(
+                Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+                    .unwrap(),
+            )),
+        }
+    }
+
+    async fn transfer_pattern(&self) -> Operation {
+        let from_owner =
+            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+                .unwrap();
+        let to_owner = AccountOwner::User(
+            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa33")
+                .unwrap(),
+        );
+        Operation::System(SystemOperation::Transfer {
+            owner: Some(from_owner),
+            recipient: Recipient::Account(Account {
+                chain_id: ChainId::from_str(
+                    "8eeff319f14a33ff906799140246c525880861d654dfa1a13d0c019c3d18f1c6",
+                )
+                .unwrap(),
+                owner: Some(to_owner),
+            }),
+            amount: Amount::from_str("0.123").unwrap(),
+        })
     }
 }
 
@@ -767,6 +1270,9 @@ where
     default_chain: Option<ChainId>,
     storage: C::Storage,
     context: Arc<Mutex<C>>,
+    default_chains: HashMap<Owner, ChainId>,
+
+    chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
 
 impl<C> Clone for NodeService<C>
@@ -780,6 +1286,9 @@ where
             default_chain: self.default_chain,
             storage: self.storage.clone(),
             context: Arc::clone(&self.context),
+            default_chains: self.default_chains.clone(),
+
+            chain_guard: Arc::clone(&self.chain_guard),
         }
     }
 }
@@ -795,13 +1304,17 @@ where
         default_chain: Option<ChainId>,
         storage: C::Storage,
         context: C,
+        default_chains: HashMap<Owner, ChainId>,
     ) -> Self {
         Self {
-            config,
+            config: config.clone(),
             port,
             default_chain,
+            default_chains,
             storage,
             context: Arc::new(Mutex::new(context)),
+
+            chain_guard: Default::default(),
         }
     }
 
@@ -814,9 +1327,14 @@ where
                 context: Arc::clone(&self.context),
                 port,
                 default_chain: self.default_chain,
+                default_chains: self.default_chains.clone(),
             },
             MutationRoot {
                 context: Arc::clone(&self.context),
+
+                storage: self.storage.clone(),
+                config: self.config.clone(),
+                chain_guard: Arc::clone(&self.chain_guard),
             },
             SubscriptionRoot {
                 context: Arc::clone(&self.context),
@@ -827,6 +1345,7 @@ where
 
     /// Runs the node service.
     #[instrument(name = "node_service", level = "info", skip(self), fields(port = ?self.port))]
+<<<<<<< HEAD
     pub async fn run(self) -> Result<(), anyhow::Error> {
         let requested_port = self.port.map(NonZeroU16::get).unwrap_or_default();
         let listener =
@@ -843,8 +1362,17 @@ where
             let schema = schema.clone();
             move |request| Self::index_handler(schema, request)
         });
+=======
+    pub async fn run(&mut self) -> Result<(), anyhow::Error> {
+        let port = self.port.get();
+        let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
+>>>>>>> respeer-maas-7b3ae0b6-2025_03_15
         let application_handler =
             axum::routing::get(util::graphiql).post(Self::application_handler);
+        let blob_handler = axum::routing::get(Self::blob_handler);
+        let blob_image_handler = axum::routing::get(Self::blob_image_handler);
+        let blob_html_handler = axum::routing::get(Self::blob_html_handler);
+        let blob_video_handler = axum::routing::get(Self::blob_video_handler);
 
         let app = Router::new()
             .route("/", index_handler)
@@ -852,15 +1380,48 @@ where
                 "/chains/:chain_id/applications/:application_id",
                 application_handler,
             )
+            .route(
+                "/chains/:chain_id/applications/:application_id/contents/:blob_hash",
+                blob_handler,
+            )
+            .route(
+                "/chains/:chain_id/applications/:application_id/images/:blob_hash",
+                blob_image_handler,
+            )
+            .route(
+                "/chains/:chain_id/applications/:application_id/htmls/:blob_hash",
+                blob_html_handler,
+            )
+            .route(
+                "/chains/:chain_id/applications/:application_id/videos/:blob_hash",
+                blob_video_handler,
+            )
             .route("/ready", axum::routing::get(|| async { "ready!" }))
             .route_service("/ws", GraphQLSubscription::new(self.schema(port)))
             .layer(Extension(self.clone()))
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
 
+<<<<<<< HEAD
         ChainListener::new(self.config)
             .run(Arc::clone(&self.context), self.storage.clone())
             .await;
+=======
+        info!("GraphiQL IDE: http://localhost:{}", port);
+
+        let chain_listener = ChainListener::new(self.config.clone());
+        self.chain_guard = Arc::clone(&chain_listener.listening);
+
+        chain_listener
+            .run(Arc::clone(&self.context), self.storage.clone())
+            .await;
+
+        let serve_fut = axum::serve(
+            tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?,
+            app,
+        );
+        serve_fut.await?;
+>>>>>>> respeer-maas-7b3ae0b6-2025_03_15
 
         axum::serve(listener, app).await?;
 
@@ -950,6 +1511,150 @@ where
         request: GraphQLRequest,
     ) -> GraphQLResponse {
         schema.execute(request.into_inner()).await.into()
+    }
+
+    async fn blob_handler(
+        Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
+        service: Extension<Self>,
+    ) -> Result<impl IntoResponse, NodeServiceError> {
+        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
+        let application_id: UserApplicationId = application_id.parse()?;
+        let request = Request::new(format!(
+            "query {} fetch(blobHash: \"{blob_hash}\") {}",
+            "{", "}"
+        ));
+
+        let _response = service
+            .0
+            .user_application_query(application_id, &request, chain_id)
+            .await?;
+
+        let data_value: JsonValue =
+            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+        let mut resp: Vec<u8> = Vec::new();
+        if let Some(fetch) = data_value.get("fetch") {
+            if let Some(fetch_array) = fetch.as_array() {
+                let bytes: Vec<u8> = fetch_array
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect();
+                resp = bytes.clone();
+            } else {
+                println!("fetch is not a array");
+            }
+        } else {
+            println!("without data field");
+        }
+
+        Ok(resp)
+    }
+
+    async fn blob_image_handler(
+        Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
+        service: Extension<Self>,
+    ) -> Result<impl IntoResponse, NodeServiceError> {
+        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
+        let application_id: UserApplicationId = application_id.parse()?;
+        let request = Request::new(format!(
+            "query {} fetch(blobHash: \"{blob_hash}\") {}",
+            "{", "}"
+        ));
+
+        let _response = service
+            .0
+            .user_application_query(application_id, &request, chain_id)
+            .await?;
+
+        let data_value: JsonValue =
+            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+        let mut resp: Vec<u8> = Vec::new();
+        if let Some(fetch) = data_value.get("fetch") {
+            if let Some(fetch_array) = fetch.as_array() {
+                let bytes: Vec<u8> = fetch_array
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect();
+                resp = bytes.clone();
+            } else {
+                println!("fetch is not a array");
+            }
+        } else {
+            println!("without data field");
+        }
+
+        Ok((StatusCode::OK, [("content-type", "image/*")], resp))
+    }
+
+    async fn blob_html_handler(
+        Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
+        service: Extension<Self>,
+    ) -> Result<impl IntoResponse, NodeServiceError> {
+        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
+        let application_id: UserApplicationId = application_id.parse()?;
+        let request = Request::new(format!(
+            "query {} fetch(blobHash: \"{blob_hash}\") {}",
+            "{", "}"
+        ));
+
+        let _response = service
+            .0
+            .user_application_query(application_id, &request, chain_id)
+            .await?;
+
+        let data_value: JsonValue =
+            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+        let mut resp: Vec<u8> = Vec::new();
+        if let Some(fetch) = data_value.get("fetch") {
+            if let Some(fetch_array) = fetch.as_array() {
+                let bytes: Vec<u8> = fetch_array
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect();
+                resp = bytes.clone();
+            } else {
+                println!("fetch is not a array");
+            }
+        } else {
+            println!("without data field");
+        }
+
+        Ok(response::Html(resp))
+    }
+
+    async fn blob_video_handler(
+        Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
+        service: Extension<Self>,
+    ) -> Result<impl IntoResponse, NodeServiceError> {
+        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
+        let application_id: UserApplicationId = application_id.parse()?;
+        let request = Request::new(format!(
+            "query {} fetch(blobHash: \"{blob_hash}\") {}",
+            "{", "}"
+        ));
+
+        let _response = service
+            .0
+            .user_application_query(application_id, &request, chain_id)
+            .await?;
+
+        let data_value: JsonValue =
+            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+        let mut resp: Vec<u8> = Vec::new();
+        if let Some(fetch) = data_value.get("fetch") {
+            if let Some(fetch_array) = fetch.as_array() {
+                let bytes: Vec<u8> = fetch_array
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect();
+                resp = bytes.clone();
+            } else {
+                println!("fetch is not a array");
+            }
+        } else {
+            println!("without data field");
+        }
+
+        Ok((StatusCode::OK, [("content-type", "video/*")], resp))
     }
 
     /// Executes a GraphQL query against an application.

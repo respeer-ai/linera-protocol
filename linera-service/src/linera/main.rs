@@ -836,7 +836,16 @@ impl Runnable for Job {
 
             Service { config, port } => {
                 let default_chain = context.wallet().default_chain();
-                let service = NodeService::new(config, port, default_chain, storage, context).await;
+                let default_chains = context.wallet().default_chains();
+                let mut service = NodeService::new(
+                    config,
+                    port,
+                    default_chain,
+                    storage,
+                    context,
+                    default_chains,
+                )
+                .await;
                 service.run().await?;
             }
 
@@ -1196,6 +1205,38 @@ impl Runnable for Job {
                     "New chain requested and added in {} ms",
                     start_time.elapsed().as_millis()
                 );
+            }
+
+            Wallet(WalletCommand::Rebuild) => {
+                let genesis_config = context.wallet().genesis_config();
+                let validators = genesis_config.validators();
+                let chain_ids = context.wallet().chain_ids();
+
+                for chain_id in &chain_ids {
+                    match context.wallet().get(*chain_id) {
+                        Some(chain) => {
+                            println!("Rebuild chain {}", chain_id);
+                            if chain.creation_message_id.is_none() {
+                                continue;
+                            }
+                            if chain.key_pair.is_none() {
+                                continue;
+                            }
+                            context
+                                .assign_new_chain_to_key(
+                                    chain.chain_id,
+                                    chain.creation_message_id.unwrap(),
+                                    chain.key_pair.as_ref().unwrap().public().into(),
+                                    Some(validators.clone()),
+                                )
+                                .await?;
+                            let chain_client = context.make_chain_client(*chain_id)?;
+                            info!("Synchronizing chain {}", chain_id);
+                            chain_client.synchronize_from_validators().await?;
+                        }
+                        _ => {}
+                    }
+                }
             }
 
             CreateGenesisConfig { .. }
@@ -1881,6 +1922,12 @@ Make sure to use a Linera client compatible with this network.
                     "Wallet initialized in {} ms",
                     start_time.elapsed().as_millis()
                 );
+                Ok(0)
+            }
+
+            WalletCommand::Rebuild => {
+                options.initialize_storage().boxed().await?;
+                options.run_with_storage(Job(options.clone())).await??;
                 Ok(0)
             }
         },

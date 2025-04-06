@@ -10,7 +10,7 @@ use linera_base::{
     crypto::{AccountSecretKey, CryptoHash, CryptoRng},
     data_types::{BlockHeight, Timestamp},
     ensure,
-    identifiers::{AccountOwner, ChainDescription, ChainId},
+    identifiers::{AccountOwner, ChainDescription, ChainId, MessageId},
 };
 use linera_core::{
     client::{ChainClient, PendingProposal},
@@ -27,6 +27,7 @@ pub struct Wallet {
     pub chains: BTreeMap<ChainId, UserChain>,
     pub unassigned_key_pairs: HashMap<AccountOwner, AccountSecretKey>,
     pub default: Option<ChainId>,
+    pub defaults: HashMap<AccountOwner, ChainId>,
     pub genesis_config: GenesisConfig,
     pub testing_prng_seed: Option<u64>,
 }
@@ -51,6 +52,7 @@ impl Wallet {
             chains: BTreeMap::new(),
             unassigned_key_pairs: HashMap::new(),
             default: None,
+            defaults: HashMap::new(),
             genesis_config,
             testing_prng_seed,
         }
@@ -89,8 +91,20 @@ impl Wallet {
         self.default
     }
 
+    pub fn default_chains(&self) -> HashMap<AccountOwner, ChainId> {
+        self.defaults.clone()
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.defaults.get(&owner).copied()
+    }
+
     pub fn chain_ids(&self) -> Vec<ChainId> {
         self.chains.keys().copied().collect()
+    }
+
+    pub fn chains(&self) -> Vec<&UserChain> {
+        self.chains.iter().map(|(_chain_id, chain)| chain).collect()
     }
 
     /// Returns the list of all chain IDs for which we have a secret key.
@@ -138,6 +152,7 @@ impl Wallet {
         owner: AccountOwner,
         chain_id: ChainId,
         timestamp: Timestamp,
+        creation_message_id: MessageId,
     ) -> Result<(), Error> {
         let key_pair = self
             .unassigned_key_pairs
@@ -150,6 +165,7 @@ impl Wallet {
             timestamp,
             next_block_height: BlockHeight(0),
             pending_proposal: None,
+            creation_message_id: Some(creation_message_id),
         };
         self.insert(user_chain);
         Ok(())
@@ -164,6 +180,19 @@ impl Wallet {
         Ok(())
     }
 
+    pub fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        ensure!(
+            self.chains.contains_key(&chain_id),
+            error::Inner::NonexistentChain(chain_id)
+        );
+        self.defaults.insert(owner, chain_id);
+        Ok(())
+    }
+
     pub async fn update_from_state<P, S>(&mut self, chain_client: &ChainClient<P, S>)
     where
         P: ValidatorNodeProvider + Sync + 'static,
@@ -171,6 +200,12 @@ impl Wallet {
     {
         let key_pair = chain_client.key_pair().await.map(|k| k.copy()).ok();
         let state = chain_client.state();
+
+        let creation_message_id = match self.get(chain_client.chain_id()) {
+            Some(chain) => chain.creation_message_id,
+            _ => None,
+        };
+
         self.chains.insert(
             chain_client.chain_id(),
             UserChain {
@@ -180,6 +215,7 @@ impl Wallet {
                 next_block_height: state.next_block_height(),
                 timestamp: state.timestamp(),
                 pending_proposal: state.pending_proposal().clone(),
+                creation_message_id,
             },
         );
     }
@@ -211,6 +247,7 @@ pub struct UserChain {
     pub timestamp: Timestamp,
     pub next_block_height: BlockHeight,
     pub pending_proposal: Option<PendingProposal>,
+    pub creation_message_id: Option<MessageId>,
 }
 
 impl Clone for UserChain {
@@ -222,6 +259,7 @@ impl Clone for UserChain {
             timestamp: self.timestamp,
             next_block_height: self.next_block_height,
             pending_proposal: self.pending_proposal.clone(),
+            creation_message_id: self.creation_message_id.clone(),
         }
     }
 }
@@ -240,6 +278,7 @@ impl UserChain {
             timestamp,
             next_block_height: BlockHeight::ZERO,
             pending_proposal: None,
+            creation_message_id: None,
         }
     }
 
@@ -253,6 +292,7 @@ impl UserChain {
             timestamp,
             next_block_height: BlockHeight::ZERO,
             pending_proposal: None,
+            creation_message_id: None,
         }
     }
 }

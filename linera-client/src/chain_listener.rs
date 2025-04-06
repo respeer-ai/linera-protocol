@@ -10,9 +10,9 @@ use std::{
 use async_trait::async_trait;
 use futures::{future, lock::Mutex, stream, StreamExt};
 use linera_base::{
-    crypto::AccountSecretKey,
+    crypto::{AccountSecretKey, ValidatorPublicKey},
     data_types::Timestamp,
-    identifiers::{ChainId, Destination},
+    identifiers::{ChainId, Destination, MessageId, Owner},
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
@@ -20,10 +20,18 @@ use linera_core::{
     worker::{Notification, Reason},
 };
 use linera_execution::{Message, OutgoingMessage, SystemMessage};
+use linera_rpc::node_provider::NodeProvider;
 use linera_storage::{Clock as _, Storage};
 use tracing::{debug, error, info, instrument, warn, Instrument as _};
+#[cfg(feature = "no-storage")]
+use {
+    crate::fake_wallet::FakeWallet,
+    linera_base::{crypto::CryptoHash, data_types::BlockHeight},
+};
 
-use crate::{wallet::Wallet, Error};
+#[cfg(not(feature = "no-storage"))]
+use crate::wallet::Wallet;
+use crate::Error;
 
 #[derive(Debug, Default, Clone, clap::Args)]
 pub struct ChainListenerConfig {
@@ -61,7 +69,11 @@ pub trait ClientContext: 'static {
     type ValidatorNodeProvider: ValidatorNodeProvider + Sync;
     type Storage: Storage + Clone + Send + Sync + 'static;
 
+    #[cfg(not(feature = "no-storage"))]
     fn wallet(&self) -> &Wallet;
+
+    #[cfg(feature = "no-storage")]
+    fn wallet(&self) -> &FakeWallet;
 
     fn make_chain_client(&self, chain_id: ChainId) -> Result<ContextChainClient<Self>, Error>;
 
@@ -81,13 +93,51 @@ pub trait ClientContext: 'static {
         }
         Ok(clients)
     }
+
+    #[cfg(feature = "no-storage")]
+    fn make_chain_client_ext(
+        &self,
+        chain_id: ChainId,
+        key_pair: AccountSecretKey,
+        admin_id: ChainId,
+        block_hash: Option<CryptoHash>,
+        timestamp: Timestamp,
+        next_block_height: BlockHeight,
+    ) -> Result<ContextChainClient<Self>, Error>;
+
+    fn destroy_chain_client(&self, chain_id: ChainId);
+
+    async fn save_wallet(&mut self) -> Result<(), Error>;
+
+    fn make_node_provider(&self) -> NodeProvider;
+
+    async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error>;
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: Owner,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        message_id: MessageId,
+        owner: Owner,
+        validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error>;
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
+
+    fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
 /// appropriately.
+#[derive(Clone)]
 pub struct ChainListener {
-    config: ChainListenerConfig,
-    listening: Arc<Mutex<HashSet<ChainId>>>,
+    pub config: ChainListenerConfig,
+    pub listening: Arc<Mutex<HashSet<ChainId>>>,
 }
 
 impl ChainListener {
@@ -137,6 +187,43 @@ impl ChainListener {
                     Self::run_client_stream(chain_id, context, storage, config, listening).await
                 {
                     error!("Stream for chain {} failed: {}", chain_id, err);
+                }
+            }
+            .in_current_span(),
+        );
+    }
+
+    #[instrument(level = "trace", skip_all, fields(?chain_id))]
+    pub fn run_with_chain_id_retry<C>(
+        chain_id: ChainId,
+        context: Arc<Mutex<C>>,
+        storage: C::Storage,
+        config: ChainListenerConfig,
+        listening: Arc<Mutex<HashSet<ChainId>>>,
+        retries: usize,
+    ) where
+        C: ClientContext,
+    {
+        let _handle = linera_base::task::spawn(
+            async move {
+                for i in 1..retries {
+                    if let Err(err) = Self::run_client_stream(
+                        chain_id,
+                        context.clone(),
+                        storage.clone(),
+                        config.clone(),
+                        listening.clone(),
+                    )
+                    .await
+                    {
+                        error!("Stream for chain {} failed [{}]: {}", chain_id, i, err);
+                        let mut guard = listening.lock().await;
+                        if guard.contains(&chain_id) {
+                            guard.remove(&chain_id);
+                        }
+                        context.clone().lock().await.destroy_chain_client(chain_id);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+                    }
                 }
             }
             .in_current_span(),

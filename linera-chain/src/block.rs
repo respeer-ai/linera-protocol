@@ -296,6 +296,7 @@ impl<'de> Deserialize<'de> for Block {
 /// Contains all the metadata to follow the chain of blocks or verifying
 /// inclusion (event, message, oracle response, etc.) in the block's body.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockHeader {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -338,6 +339,7 @@ pub struct BlockHeader {
 
 /// The body of a block containing all the data included in the block.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockBody {
     /// A selection of incoming messages to be executed first. Successive messages of the same
     /// sender and height are grouped together for conciseness.
@@ -664,7 +666,7 @@ pub struct PreviousMessageBlocksMap<'a> {
 impl<'de> BcsHashable<'de> for PreviousMessageBlocksMap<'de> {}
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename = "BlockHeader")]
+#[serde(rename = "BlockHeader", rename_all = "camelCase")]
 struct SerializedHeader {
     chain_id: ChainId,
     epoch: Epoch,

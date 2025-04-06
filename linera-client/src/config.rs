@@ -7,9 +7,11 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+#[cfg(not(feature = "no-storage"))]
+use linera_base::crypto::CryptoRng;
 use linera_base::{
     crypto::{
-        AccountPublicKey, AccountSecretKey, BcsSignable, CryptoHash, CryptoRng, Ed25519SecretKey,
+        AccountPublicKey, AccountSecretKey, BcsSignable, CryptoHash, Ed25519SecretKey,
         ValidatorPublicKey, ValidatorSecretKey,
     },
     data_types::{Amount, Timestamp},
@@ -33,16 +35,17 @@ pub enum Error {
     Persistence(Box<dyn std::error::Error + Send + Sync>),
 }
 
-use crate::{
-    persistent, util,
-    wallet::{UserChain, Wallet},
-};
+#[cfg(feature = "no-storage")]
+use crate::fake_wallet::FakeWallet;
+#[cfg(not(feature = "no-storage"))]
+use crate::wallet::Wallet;
+use crate::{persistent, util, wallet::UserChain};
 
 util::impl_from_dynamic!(Error:Persistence, persistent::memory::Error);
 #[cfg(with_indexed_db)]
 util::impl_from_dynamic!(Error:Persistence, persistent::indexed_db::Error);
 #[cfg(feature = "fs")]
-util::impl_from_dynamic!(Error:Persistence, persistent::file::Error);
+util::impl_from_dynamic!(Error: Persistence, persistent::file::Error);
 
 /// The public configuration of a validator.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -98,9 +101,11 @@ impl CommitteeConfig {
 /// [`Persist`].
 pub struct WalletState<W> {
     wallet: W,
+    #[cfg(not(feature = "no-storage"))]
     prng: Box<dyn CryptoRng>,
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<W: Persist<Target = Wallet>> WalletState<W> {
     pub async fn add_chains<Chains: IntoIterator<Item = UserChain>>(
         &mut self,
@@ -110,6 +115,16 @@ impl<W: Persist<Target = Wallet>> WalletState<W> {
         W::persist(&mut self.wallet)
             .await
             .map_err(|e| Error::Persistence(Box::new(e)))
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl<W: Persist<Target = FakeWallet>> WalletState<W> {
+    pub async fn add_chains<Chains: IntoIterator<Item = UserChain>>(
+        &mut self,
+        _chains: Chains,
+    ) -> Result<(), Error> {
+        Ok(())
     }
 }
 
@@ -126,6 +141,7 @@ impl<W: DerefMut> DerefMut for WalletState<W> {
     }
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<W: Persist<Target = Wallet>> Persist for WalletState<W> {
     type Error = W::Error;
 
@@ -146,6 +162,23 @@ impl<W: Persist<Target = Wallet>> Persist for WalletState<W> {
     }
 }
 
+#[cfg(feature = "no-storage")]
+impl<W: Persist<Target = FakeWallet>> Persist for WalletState<W> {
+    type Error = W::Error;
+
+    fn as_mut(&mut self) -> &mut FakeWallet {
+        self.wallet.as_mut()
+    }
+
+    async fn persist(&mut self) -> Result<(), W::Error> {
+        Ok(())
+    }
+
+    fn into_value(self) -> FakeWallet {
+        self.wallet.into_value()
+    }
+}
+
 #[cfg(feature = "fs")]
 impl WalletState<persistent::File<Wallet>> {
     pub fn create_from_file(path: &std::path::Path, wallet: Wallet) -> Result<Self, Error> {
@@ -159,7 +192,7 @@ impl WalletState<persistent::File<Wallet>> {
     }
 }
 
-#[cfg(with_indexed_db)]
+#[cfg(all(with_indexed_db, not(feature = "no-storage")))]
 impl WalletState<persistent::IndexedDb<Wallet>> {
     pub async fn create_from_indexed_db(key: &str, wallet: Wallet) -> Result<Self, Error> {
         Ok(Self::new(
@@ -172,6 +205,7 @@ impl WalletState<persistent::IndexedDb<Wallet>> {
     }
 }
 
+#[cfg(not(feature = "no-storage"))]
 impl<W: Deref<Target = Wallet>> WalletState<W> {
     pub fn new(wallet: W) -> Self {
         Self {
@@ -182,6 +216,15 @@ impl<W: Deref<Target = Wallet>> WalletState<W> {
 
     pub fn generate_key_pair(&mut self) -> AccountSecretKey {
         AccountSecretKey::Ed25519(Ed25519SecretKey::generate_from(&mut self.prng))
+    }
+}
+
+#[cfg(feature = "no-storage")]
+impl WalletState<persistent::Memory<FakeWallet>> {
+    pub fn new(wallet: FakeWallet) -> Self {
+        Self {
+            wallet: persistent::Memory::new(wallet),
+        }
     }
 }
 
@@ -242,5 +285,16 @@ impl GenesisConfig {
 
     pub fn hash(&self) -> CryptoHash {
         CryptoHash::new(self)
+    }
+
+    pub fn validators(&self) -> Vec<(ValidatorPublicKey, String)> {
+        let committee = self.committee.clone();
+        let policy = self.policy.clone();
+        committee
+            .into_committee(policy)
+            .validators()
+            .iter()
+            .map(|(name, validator)| (*name, validator.network_address.clone()))
+            .collect()
     }
 }
