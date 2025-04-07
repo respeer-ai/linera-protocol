@@ -92,7 +92,7 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct BlockMaterial {
     operations: Vec<Operation>,
-    blobs: Vec<Blob>,
+    blob_bytes: Vec<Vec<u8>>,
     candidate: CandidateBlockMaterial,
 }
 
@@ -116,7 +116,7 @@ pub struct Balances {
 pub struct SimulatedBlockMaterial {
     block: Block,
     outcome: Option<BlockExecutionOutcome>,
-    blobs: Vec<Blob>,
+    blob_bytes: Vec<Vec<u8>>,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
 
@@ -818,7 +818,7 @@ where
 
         let BlockMaterial {
             operations,
-            blobs,
+            blob_bytes,
             candidate,
         } = block_material;
         let CandidateBlockMaterial {
@@ -833,6 +833,7 @@ where
             .iter()
             .map(|bundle| bundle.clone())
             .collect();
+        let blobs = blob_bytes.into_iter().map(Blob::new_data).collect();
 
         let Some((block, outcome, blobs, validated_block_certificate)) = client
             .simulate_execute_block(operations, bundles, blobs, local_time)
@@ -841,10 +842,14 @@ where
             // Finalizing last block, waiting for a moment
             return Ok(None);
         };
+        let blob_bytes = blobs
+            .into_iter()
+            .map(|blob| blob.bytes().to_vec())
+            .collect();
         Ok(Some(SimulatedBlockMaterial {
             block,
             outcome,
-            blobs,
+            blob_bytes,
             validated_block_certificate,
         }))
     }
