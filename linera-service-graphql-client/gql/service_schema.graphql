@@ -1094,7 +1094,8 @@ type QueryRoot {
 	signaturePattern: AccountSignature!
 	publicKeyPattern: AccountPublicKey!
 	accountOwnerPattern: AccountOwner!
-	accountPattern: Account!
+	chainAccountPattern: Account!
+	ownerAccountPattern: Account!
 	transferPattern: Operation!
 }
 

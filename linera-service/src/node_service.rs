@@ -1076,7 +1076,17 @@ where
             .unwrap()
     }
 
-    async fn account_pattern(&self) -> Account {
+    async fn chain_account_pattern(&self) -> Account {
+        Account {
+            chain_id: ChainId::from_str(
+                "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
+            )
+            .unwrap(),
+            owner: AccountOwner::CHAIN,
+        }
+    }
+
+    async fn owner_account_pattern(&self) -> Account {
         Account {
             chain_id: ChainId::from_str(
                 "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
