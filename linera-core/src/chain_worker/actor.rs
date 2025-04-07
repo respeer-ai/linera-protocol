@@ -167,8 +167,9 @@ where
     StageBlockExecutionWithLocalTime {
         block: ProposedBlock,
         round: Option<u32>,
+        published_blobs: Vec<Blob>,
         local_time: Timestamp,
-        callback: oneshot::Sender<Result<(ExecutedBlock, ChainInfoResponse), WorkerError>>,
+        callback: oneshot::Sender<Result<(Block, ChainInfoResponse), WorkerError>>,
     },
 }
 
@@ -443,12 +444,18 @@ where
             ChainWorkerRequest::StageBlockExecutionWithLocalTime {
                 block,
                 round,
+                published_blobs,
                 local_time,
                 callback,
             } => callback
                 .send(
                     self.worker
-                        .stage_block_execution_with_local_time(block, round, local_time)
+                        .stage_block_execution_with_local_time(
+                            block,
+                            round,
+                            &published_blobs,
+                            local_time,
+                        )
                         .await,
                 )
                 .is_ok(),

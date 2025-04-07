@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use linera_base::{
     crypto::{AccountSecretKey, CryptoHash},
     data_types::{BlobContent, Timestamp},
-    identifiers::{BlobId, ChainId, MessageId, Owner},
+    identifiers::{AccountOwner, BlobId, ChainId, MessageId},
 };
 use linera_chain::{
     data_types::BlockProposal,
@@ -221,9 +221,13 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
 
     async fn set_owner_default_chain(
         &mut self,
-        _owner: Owner,
+        _owner: AccountOwner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
         unimplemented!()
     }
 
@@ -231,7 +235,7 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
         &mut self,
         _chain_id: ChainId,
         _message_id: MessageId,
-        _owner: Owner,
+        _owner: AccountOwner,
         _validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error> {
         unimplemented!()
@@ -241,7 +245,7 @@ impl<P: ValidatorNodeProvider + Send, S: Storage + Clone + Send + Sync + 'static
         unimplemented!()
     }
 
-    fn key_pair_for_owner(&self, _owner: &Owner) -> Option<AccountSecretKey> {
+    fn key_pair_for_owner(&self, _owner: &AccountOwner) -> Option<AccountSecretKey> {
         unimplemented!()
     }
 }

@@ -339,6 +339,7 @@ where
         &mut self,
         block: ProposedBlock,
         round: Option<u32>,
+        published_blobs: &[Blob],
         local_time: Timestamp,
     ) -> Result<(Block, ChainInfoResponse), WorkerError> {
         let signer = block.authenticated_signer;

@@ -12,7 +12,7 @@ use futures::{future, lock::Mutex, stream, StreamExt};
 use linera_base::{
     crypto::{AccountSecretKey, ValidatorPublicKey},
     data_types::Timestamp,
-    identifiers::{ChainId, Destination, MessageId, Owner},
+    identifiers::{AccountOwner, ChainId, Destination, MessageId},
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
@@ -115,21 +115,23 @@ pub trait ClientContext: 'static {
 
     async fn set_owner_default_chain(
         &mut self,
-        owner: Owner,
+        owner: AccountOwner,
         chain_id: ChainId,
     ) -> Result<(), Error>;
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId>;
 
     async fn assign_new_chain_to_key(
         &mut self,
         chain_id: ChainId,
         message_id: MessageId,
-        owner: Owner,
+        owner: AccountOwner,
         validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error>;
 
     async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
 
-    fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey>;
+    fn key_pair_for_owner(&self, owner: &AccountOwner) -> Option<AccountSecretKey>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts

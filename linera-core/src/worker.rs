@@ -13,7 +13,8 @@ use futures::future::Either;
 use linera_base::{
     crypto::{CryptoError, CryptoHash, ValidatorPublicKey, ValidatorSecretKey},
     data_types::{
-        ApplicationDescription, ArithmeticError, Blob, BlockHeight, DecompressionError, Round, Timestamp,
+        ApplicationDescription, ArithmeticError, Blob, BlockHeight, DecompressionError, Round,
+        Timestamp,
     },
     doc_scalar,
     hashed::Hashed,
@@ -1132,13 +1133,15 @@ where
         &self,
         block: ProposedBlock,
         round: Option<u32>,
+        published_blobs: Vec<Blob>,
         local_time: Timestamp,
-    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
         self.query_chain_worker_with_local_time(
             block.chain_id,
             move |callback| ChainWorkerRequest::StageBlockExecutionWithLocalTime {
                 block,
                 round,
+                published_blobs,
                 local_time,
                 callback,
             },

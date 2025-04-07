@@ -135,7 +135,7 @@ where
 
     async fn set_owner_default_chain(
         &mut self,
-        owner: Owner,
+        owner: AccountOwner,
         chain_id: ChainId,
     ) -> Result<(), Error> {
         self.set_owner_default_chain(owner, chain_id).await
@@ -145,7 +145,7 @@ where
         &mut self,
         chain_id: ChainId,
         message_id: MessageId,
-        owner: Owner,
+        owner: AccountOwner,
         validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error> {
         self.assign_new_chain_to_key(chain_id, message_id, owner, validators)
@@ -156,8 +156,12 @@ where
         self.add_unassigned_key_pair(key_pair).await
     }
 
-    fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+    fn key_pair_for_owner(&self, owner: &AccountOwner) -> Option<AccountSecretKey> {
         self.key_pair_for_owner(owner)
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.owner_default_chain(owner)
     }
 }
 
@@ -515,12 +519,7 @@ where
 
         self.wallet_mut()
             .mutate(|w| {
-                w.assign_new_chain_to_owner(
-                    owner,
-                    chain_id,
-                    block.header.timestamp,
-                    message_id,
-                )
+                w.assign_new_chain_to_owner(owner, chain_id, block.header.timestamp, message_id)
             })
             .await
             .map_err(|e| error::Inner::Persistence(Box::new(e)))?
@@ -599,15 +598,13 @@ where
     }
 
     /// Retrieve the default chains.
-    pub fn default_chains(&self) -> std::collections::HashMap<Owner, ChainId> {
+    pub fn default_chains(&self) -> std::collections::HashMap<AccountOwner, ChainId> {
         self.wallet.default_chains()
     }
 
     /// Retrieve default chain of public key
-    pub fn owner_default_chain(&self, owner: Owner) -> ChainId {
-        self.wallet
-            .owner_default_chain(owner)
-            .expect("No chain specified in wallet with no default chain")
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.wallet.owner_default_chain(owner)
     }
 
     pub async fn set_default_chain(&mut self, chain_id: ChainId) -> Result<(), Error> {
@@ -617,7 +614,7 @@ where
 
     pub async fn set_owner_default_chain(
         &mut self,
-        owner: Owner,
+        owner: AccountOwner,
         chain_id: ChainId,
     ) -> Result<(), Error> {
         self.wallet
@@ -634,7 +631,7 @@ where
         self.save_wallet().await
     }
 
-    pub fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+    pub fn key_pair_for_owner(&self, owner: &AccountOwner) -> Option<AccountSecretKey> {
         self.wallet.key_pair_for_owner(owner)
     }
 }
@@ -1108,7 +1105,7 @@ where
 
     async fn set_owner_default_chain(
         &mut self,
-        _owner: Owner,
+        _owner: AccountOwner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
         Ok(())
@@ -1118,7 +1115,7 @@ where
         &mut self,
         _chain_id: ChainId,
         _message_id: MessageId,
-        _owner: Owner,
+        _owner: AccountOwner,
         _validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error> {
         Ok(())
@@ -1128,7 +1125,7 @@ where
         Ok(())
     }
 
-    fn key_pair_for_owner(&self, _owner: &Owner) -> Option<AccountSecretKey> {
+    fn key_pair_for_owner(&self, _owner: &AccountOwner) -> Option<AccountSecretKey> {
         None
     }
 }
@@ -1396,7 +1393,7 @@ where
 
     pub fn set_owner_default_chain(
         &mut self,
-        _owner: Owner,
+        _owner: AccountOwner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
         Ok(())
@@ -1406,7 +1403,7 @@ where
         &mut self,
         _chain_id: ChainId,
         _message_id: MessageId,
-        _owner: Owner,
+        _owner: AccountOwner,
         _validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error> {
         Ok(())
@@ -1414,7 +1411,7 @@ where
 
     pub fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) {}
 
-    pub fn key_pair_for_owner(&self, owner: &Owner) -> Option<AccountSecretKey> {
+    pub fn key_pair_for_owner(&self, owner: &AccountOwner) -> Option<AccountSecretKey> {
         None
     }
 }

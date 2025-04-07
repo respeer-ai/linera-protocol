@@ -573,11 +573,12 @@ where
         &mut self,
         block: ProposedBlock,
         round: Option<u32>,
+        published_blobs: &[Blob],
         local_time: Timestamp,
-    ) -> Result<(ExecutedBlock, ChainInfoResponse), WorkerError> {
+    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
         ChainWorkerStateWithTemporaryChanges::new(self)
             .await
-            .stage_block_execution_with_local_time(block, round, local_time)
+            .stage_block_execution_with_local_time(block, round, published_blobs, local_time)
             .await
     }
 }

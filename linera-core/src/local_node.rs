@@ -253,12 +253,13 @@ where
         &self,
         block: ProposedBlock,
         round: Option<u32>,
+        published_blobs: Vec<Blob>,
         local_time: Timestamp,
-    ) -> Result<(ExecutedBlock, ChainInfoResponse), LocalNodeError> {
+    ) -> Result<(Block, ChainInfoResponse), LocalNodeError> {
         let (executed_block, info) = self
             .node
             .state
-            .stage_block_execution_with_local_time(block, round, local_time)
+            .stage_block_execution_with_local_time(block, round, published_blobs, local_time)
             .await?;
         Ok((executed_block, info))
     }

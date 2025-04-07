@@ -11,10 +11,8 @@ use std::{
 };
 
 use async_graphql::{
-    futures_util::Stream,
-    resolver_utils::ContainerType,
-    Error, InputObject, MergedObject, OutputType, Request, ScalarType, Schema,
-    SimpleObject, Subscription,
+    futures_util::Stream, resolver_utils::ContainerType, Error, InputObject, MergedObject,
+    OutputType, ScalarType, Schema, SimpleObject, Subscription,
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
@@ -22,25 +20,20 @@ use futures::{lock::Mutex, Future};
 use linera_base::{
     crypto::{
         AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
-        TestString,
     },
     data_types::{
-        Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta,
-        ApplicationDescription,
+        Amount, ApplicationDescription, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round,
+        TimeDelta,
     },
     doc_scalar, ensure,
-    hashed::Hashed,
-    identifiers::{
-        Account, AccountOwner, ApplicationId, BlobId, ChainId, MessageId, ModuleId, Owner,
-        UserApplicationId,
-    },
+    identifiers::{Account, AccountOwner, ApplicationId, ChainId, MessageId, ModuleId},
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{CandidateBlockMaterial, ExecutedBlock, IncomingBundle},
-    types::{ConfirmedBlock, GenericCertificate, ValidatedBlockCertificate},
+    data_types::{CandidateBlockMaterial, IncomingBundle},
+    types::{Block, ConfirmedBlock, GenericCertificate, ValidatedBlockCertificate},
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
@@ -99,6 +92,7 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct BlockMaterial {
     operations: Vec<Operation>,
+    blobs: Vec<Blob>,
     candidate: CandidateBlockMaterial,
 }
 
@@ -119,16 +113,16 @@ pub struct Balances {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
-pub struct ExecutedBlockMaterial {
-    executed_block: ExecutedBlock,
-    blob_ids: Vec<BlobId>,
+pub struct SimulatedBlockMaterial {
+    block: Block,
+    blobs: Vec<Blob>,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignedBlock {
-    executed_block: ExecutedBlock,
+    block: Block,
     round: Round,
     signature: AccountSignature,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
@@ -144,7 +138,7 @@ doc_scalar!(
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WalletInitializer {
-    owner: Owner,
+    owner: AccountOwner,
     signature: AccountSignature,
     faucet_url: String,
     // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
@@ -786,7 +780,7 @@ where
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
         let SignedBlock {
-            executed_block,
+            block,
             round,
             signature,
             validated_block_certificate,
@@ -796,7 +790,7 @@ where
         let hash = client
             .submit_external_signed_block_proposal_and_signature(
                 height,
-                executed_block,
+                block,
                 round,
                 signature,
                 validated_block_certificate,
@@ -807,6 +801,7 @@ where
             )
             .await?
             .value()
+            .inner()
             .hash();
         self.context.lock().await.update_wallet(&client).await?;
         Ok(hash)
@@ -817,11 +812,12 @@ where
         &self,
         chain_id: ChainId,
         block_material: BlockMaterial,
-    ) -> Result<Option<ExecutedBlockMaterial>, Error> {
+    ) -> Result<Option<SimulatedBlockMaterial>, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
         let BlockMaterial {
             operations,
+            blobs,
             candidate,
         } = block_material;
         let CandidateBlockMaterial {
@@ -837,16 +833,16 @@ where
             .map(|bundle| bundle.clone())
             .collect();
 
-        let Some((executed_block, blob_ids, validated_block_certificate)) = client
-            .simulate_execute_block(operations, bundles, local_time)
+        let Some((block, blobs, validated_block_certificate)) = client
+            .simulate_execute_block(operations, bundles, blobs, local_time)
             .await?
         else {
             // Finalizing last block, waiting for a moment
             return Ok(None);
         };
-        Ok(Some(ExecutedBlockMaterial {
-            executed_block,
-            blob_ids,
+        Ok(Some(SimulatedBlockMaterial {
+            block,
+            blobs,
             validated_block_certificate,
         }))
     }
@@ -856,7 +852,7 @@ where
         &self,
         public_key: AccountPublicKey,
         signature: AccountSignature,
-    ) -> Result<Owner, Error> {
+    ) -> Result<AccountOwner, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
         #[derive(Debug, Serialize, Deserialize)]
@@ -1046,19 +1042,22 @@ where
                 .lock()
                 .await
                 .make_chain_client(chain_id.clone())?;
-            if Owner::from(client.public_key().await?) == owner {
+            if AccountOwner::from(client.public_key().await?) == owner {
                 chain_ids.push(chain_id.clone());
             }
         }
 
         Ok(Chains {
             list: chain_ids,
-            default: self.context.lock().await.owner_default_chain(&owner),
+            default: self.context.lock().await.owner_default_chain(owner),
         })
     }
 
     async fn signature_pattern(&self) -> AccountSignature {
-        AccountSecretKey::generate().sign(&TestString::new("Test signature"))
+        #[derive(Debug, Serialize, Deserialize)]
+        struct Nonce(String);
+        impl BcsSignable<'_> for Nonce {}
+        AccountSecretKey::generate().sign(&Nonce("Test signature".to_string()))
     }
 
     async fn public_key_pattern(&self) -> AccountPublicKey {
@@ -1066,10 +1065,8 @@ where
     }
 
     async fn account_owner_pattern(&self) -> AccountOwner {
-        AccountOwner::User(
-            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
-                .unwrap(),
-        )
+        AccountOwner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+            .unwrap()
     }
 
     async fn account_pattern(&self) -> Account {
@@ -1078,29 +1075,30 @@ where
                 "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
             )
             .unwrap(),
-            owner: Some(AccountOwner::User(
-                Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
-                    .unwrap(),
-            )),
+            owner: AccountOwner::from_str(
+                "02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
+            )
+            .unwrap(),
         }
     }
 
     async fn transfer_pattern(&self) -> Operation {
-        let from_owner =
-            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
-                .unwrap();
-        let to_owner = AccountOwner::User(
-            Owner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa33")
-                .unwrap(),
-        );
-        Operation::System(SystemOperation::Transfer {
-            owner: Some(from_owner),
+        let from_owner = AccountOwner::from_str(
+            "02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
+        )
+        .unwrap();
+        let to_owner = AccountOwner::from_str(
+            "02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa33",
+        )
+        .unwrap();
+        Operation::system(SystemOperation::Transfer {
+            owner: from_owner,
             recipient: Recipient::Account(Account {
                 chain_id: ChainId::from_str(
                     "8eeff319f14a33ff906799140246c525880861d654dfa1a13d0c019c3d18f1c6",
                 )
                 .unwrap(),
-                owner: Some(to_owner),
+                owner: to_owner,
             }),
             amount: Amount::from_str("0.123").unwrap(),
         })
@@ -1285,11 +1283,10 @@ where
 
     /// Runs the node service.
     #[instrument(name = "node_service", level = "info", skip(self), fields(port = ?self.port))]
-    pub async fn run(self) -> Result<(), anyhow::Error> {
+    pub async fn run(mut self) -> Result<(), anyhow::Error> {
         let requested_port = self.port.map(NonZeroU16::get).unwrap_or_default();
         let listener =
-            tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], requested_port)))
-                .await?;
+            tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], requested_port))).await?;
         let port = NonZeroU16::try_from(listener.local_addr()?.port())
             .expect("Sockets should never bind to port zero");
 
@@ -1335,7 +1332,6 @@ where
             .layer(Extension(self.clone()))
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
-
 
         let chain_listener = ChainListener::new(self.config.clone());
         self.chain_guard = Arc::clone(&chain_listener.listening);
@@ -1439,19 +1435,16 @@ where
         service: Extension<Self>,
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: UserApplicationId = application_id.parse()?;
-        let request = Request::new(format!(
-            "query {} fetch(blobHash: \"{blob_hash}\") {}",
-            "{", "}"
-        ));
+        let application_id: ApplicationId = application_id.parse()?;
+        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
 
-        let _response = service
+        let response = service
             .0
-            .user_application_query(application_id, &request, chain_id)
+            .handle_service_request(application_id, request.into_bytes(), chain_id)
             .await?;
-
         let data_value: JsonValue =
-            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
+
         let mut resp: Vec<u8> = Vec::new();
         if let Some(fetch) = data_value.get("fetch") {
             if let Some(fetch_array) = fetch.as_array() {
@@ -1475,19 +1468,16 @@ where
         service: Extension<Self>,
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: UserApplicationId = application_id.parse()?;
-        let request = Request::new(format!(
-            "query {} fetch(blobHash: \"{blob_hash}\") {}",
-            "{", "}"
-        ));
+        let application_id: ApplicationId = application_id.parse()?;
+        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
 
-        let _response = service
+        let response = service
             .0
-            .user_application_query(application_id, &request, chain_id)
+            .handle_service_request(application_id, request.into_bytes(), chain_id)
             .await?;
-
         let data_value: JsonValue =
-            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
+
         let mut resp: Vec<u8> = Vec::new();
         if let Some(fetch) = data_value.get("fetch") {
             if let Some(fetch_array) = fetch.as_array() {
@@ -1511,19 +1501,16 @@ where
         service: Extension<Self>,
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: UserApplicationId = application_id.parse()?;
-        let request = Request::new(format!(
-            "query {} fetch(blobHash: \"{blob_hash}\") {}",
-            "{", "}"
-        ));
+        let application_id: ApplicationId = application_id.parse()?;
+        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
 
-        let _response = service
+        let response = service
             .0
-            .user_application_query(application_id, &request, chain_id)
+            .handle_service_request(application_id, request.into_bytes(), chain_id)
             .await?;
-
         let data_value: JsonValue =
-            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
+
         let mut resp: Vec<u8> = Vec::new();
         if let Some(fetch) = data_value.get("fetch") {
             if let Some(fetch_array) = fetch.as_array() {
@@ -1547,19 +1534,16 @@ where
         service: Extension<Self>,
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: UserApplicationId = application_id.parse()?;
-        let request = Request::new(format!(
-            "query {} fetch(blobHash: \"{blob_hash}\") {}",
-            "{", "}"
-        ));
+        let application_id: ApplicationId = application_id.parse()?;
+        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
 
-        let _response = service
+        let response = service
             .0
-            .user_application_query(application_id, &request, chain_id)
+            .handle_service_request(application_id, request.into_bytes(), chain_id)
             .await?;
-
         let data_value: JsonValue =
-            serde_json::to_value(&_response.data).unwrap_or_else(|_| JsonValue::Null);
+            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
+
         let mut resp: Vec<u8> = Vec::new();
         if let Some(fetch) = data_value.get("fetch") {
             if let Some(fetch_array) = fetch.as_array() {
