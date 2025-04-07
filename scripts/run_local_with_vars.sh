@@ -213,6 +213,7 @@ echo -e "	$LAN_IP api.faucet.respeer.ai"
 echo -e "	http://api.faucet.respeer.ai/api/faucet\n\n"
 
 # Run a faucet on wallet_1 which has enough balance
+linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db wallet show
 linera --wallet $WALLET_DIR/1/wallet.json --storage rocksdb:$WALLET_DIR/1/client.db faucet --amount 10
 
 read

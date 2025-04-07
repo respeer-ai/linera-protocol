@@ -1111,6 +1111,10 @@ where
         Ok(())
     }
 
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
+        None
+    }
+
     async fn assign_new_chain_to_key(
         &mut self,
         _chain_id: ChainId,
