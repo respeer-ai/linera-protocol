@@ -1072,7 +1072,7 @@ where
     }
 
     async fn account_owner_pattern(&self) -> AccountOwner {
-        AccountOwner::from_str("02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
+        AccountOwner::from_str("0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
             .unwrap()
     }
 
@@ -1083,7 +1083,7 @@ where
             )
             .unwrap(),
             owner: AccountOwner::from_str(
-                "02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
+                "0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
             )
             .unwrap(),
         }
@@ -1091,11 +1091,11 @@ where
 
     async fn transfer_pattern(&self) -> Operation {
         let from_owner = AccountOwner::from_str(
-            "02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
+            "0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
         )
         .unwrap();
         let to_owner = AccountOwner::from_str(
-            "02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa33",
+            "0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa33",
         )
         .unwrap();
         Operation::system(SystemOperation::Transfer {
