@@ -836,16 +836,7 @@ impl Runnable for Job {
 
             Service { config, port } => {
                 let default_chain = context.wallet().default_chain();
-                let default_chains = context.wallet().default_chains();
-                let mut service = NodeService::new(
-                    config,
-                    port,
-                    default_chain,
-                    storage,
-                    context,
-                    default_chains,
-                )
-                .await;
+                let service = NodeService::new(config, port, default_chain, storage, context).await;
                 service.run().await?;
             }
 
