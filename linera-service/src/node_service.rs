@@ -11,33 +11,22 @@ use std::{
 };
 
 use async_graphql::{
-<<<<<<< HEAD
-    futures_util::Stream, resolver_utils::ContainerType, Error, MergedObject, OutputType,
-    ScalarType, Schema, SimpleObject, Subscription,
-=======
     futures_util::Stream,
-    parser::types::{DocumentOperations, ExecutableDocument, OperationType},
     resolver_utils::ContainerType,
-    Error, InputObject, MergedObject, OutputType, Request, ScalarType, Schema, ServerError,
+    Error, InputObject, MergedObject, OutputType, Request, ScalarType, Schema,
     SimpleObject, Subscription,
->>>>>>> respeer-maas-7b3ae0b6-2025_03_15
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
 use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
 use futures::{lock::Mutex, Future};
 use linera_base::{
-<<<<<<< HEAD
-    crypto::{CryptoError, CryptoHash},
-    data_types::{Amount, ApplicationDescription, ApplicationPermissions, Bytecode, TimeDelta},
-    identifiers::{AccountOwner, ApplicationId, ChainId, ModuleId},
-=======
     crypto::{
         AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
         TestString,
     },
     data_types::{
         Amount, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round, TimeDelta,
-        UserApplicationDescription,
+        ApplicationDescription,
     },
     doc_scalar, ensure,
     hashed::Hashed,
@@ -45,7 +34,6 @@ use linera_base::{
         Account, AccountOwner, ApplicationId, BlobId, ChainId, MessageId, ModuleId, Owner,
         UserApplicationId,
     },
->>>>>>> respeer-maas-7b3ae0b6-2025_03_15
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
     BcsHexParseError,
@@ -88,7 +76,6 @@ pub struct QueryRoot<C> {
     context: Arc<Mutex<C>>,
     port: NonZeroU16,
     default_chain: Option<ChainId>,
-    default_chains: HashMap<Owner, ChainId>,
 }
 
 /// Our root GraphQL subscription type.
@@ -518,17 +505,12 @@ where
     }
 
     /// Changes the authentication key of the chain.
-<<<<<<< HEAD
     async fn change_owner(
         &self,
         chain_id: ChainId,
         new_owner: AccountOwner,
     ) -> Result<CryptoHash, Error> {
-=======
-    async fn change_owner(&self, chain_id: ChainId, new_owner: Owner) -> Result<CryptoHash, Error> {
         ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
-
->>>>>>> respeer-maas-7b3ae0b6-2025_03_15
         let operation = SystemOperation::ChangeOwnership {
             super_owners: vec![new_owner],
             owners: Vec::new(),
@@ -635,43 +617,6 @@ where
             .hash())
     }
 
-<<<<<<< HEAD
-=======
-    /// Subscribes to a system channel.
-    async fn subscribe(
-        &self,
-        subscriber_chain_id: ChainId,
-        publisher_chain_id: ChainId,
-        channel: SystemChannel,
-    ) -> Result<CryptoHash, Error> {
-        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
-
-        let operation = SystemOperation::Subscribe {
-            chain_id: publisher_chain_id,
-            channel,
-        };
-        self.execute_system_operation(operation, subscriber_chain_id)
-            .await
-    }
-
-    /// Unsubscribes from a system channel.
-    async fn unsubscribe(
-        &self,
-        subscriber_chain_id: ChainId,
-        publisher_chain_id: ChainId,
-        channel: SystemChannel,
-    ) -> Result<CryptoHash, Error> {
-        ensure!(cfg!(not(feature = "disable-native-rpc")), "Not supported");
-
-        let operation = SystemOperation::Unsubscribe {
-            chain_id: publisher_chain_id,
-            channel,
-        };
-        self.execute_system_operation(operation, subscriber_chain_id)
-            .await
-    }
-
->>>>>>> respeer-maas-7b3ae0b6-2025_03_15
     /// (admin chain only) Removes a committee. Once this message is accepted by a chain,
     /// blocks from the retired epoch will not be accepted until they are followed (hence
     /// re-certified) by a block certified by a recent committee.
@@ -1270,7 +1215,6 @@ where
     default_chain: Option<ChainId>,
     storage: C::Storage,
     context: Arc<Mutex<C>>,
-    default_chains: HashMap<Owner, ChainId>,
 
     chain_guard: Arc<Mutex<HashSet<ChainId>>>,
 }
@@ -1286,7 +1230,6 @@ where
             default_chain: self.default_chain,
             storage: self.storage.clone(),
             context: Arc::clone(&self.context),
-            default_chains: self.default_chains.clone(),
 
             chain_guard: Arc::clone(&self.chain_guard),
         }
@@ -1304,13 +1247,11 @@ where
         default_chain: Option<ChainId>,
         storage: C::Storage,
         context: C,
-        default_chains: HashMap<Owner, ChainId>,
     ) -> Self {
         Self {
             config: config.clone(),
             port,
             default_chain,
-            default_chains,
             storage,
             context: Arc::new(Mutex::new(context)),
 
@@ -1327,7 +1268,6 @@ where
                 context: Arc::clone(&self.context),
                 port,
                 default_chain: self.default_chain,
-                default_chains: self.default_chains.clone(),
             },
             MutationRoot {
                 context: Arc::clone(&self.context),
@@ -1345,11 +1285,10 @@ where
 
     /// Runs the node service.
     #[instrument(name = "node_service", level = "info", skip(self), fields(port = ?self.port))]
-<<<<<<< HEAD
     pub async fn run(self) -> Result<(), anyhow::Error> {
         let requested_port = self.port.map(NonZeroU16::get).unwrap_or_default();
         let listener =
-            tokio::net::TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], requested_port)))
+            tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], requested_port)))
                 .await?;
         let port = NonZeroU16::try_from(listener.local_addr()?.port())
             .expect("Sockets should never bind to port zero");
@@ -1362,11 +1301,6 @@ where
             let schema = schema.clone();
             move |request| Self::index_handler(schema, request)
         });
-=======
-    pub async fn run(&mut self) -> Result<(), anyhow::Error> {
-        let port = self.port.get();
-        let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
->>>>>>> respeer-maas-7b3ae0b6-2025_03_15
         let application_handler =
             axum::routing::get(util::graphiql).post(Self::application_handler);
         let blob_handler = axum::routing::get(Self::blob_handler);
@@ -1402,12 +1336,6 @@ where
             // TODO(#551): Provide application authentication.
             .layer(CorsLayer::permissive());
 
-<<<<<<< HEAD
-        ChainListener::new(self.config)
-            .run(Arc::clone(&self.context), self.storage.clone())
-            .await;
-=======
-        info!("GraphiQL IDE: http://localhost:{}", port);
 
         let chain_listener = ChainListener::new(self.config.clone());
         self.chain_guard = Arc::clone(&chain_listener.listening);
@@ -1415,13 +1343,6 @@ where
         chain_listener
             .run(Arc::clone(&self.context), self.storage.clone())
             .await;
-
-        let serve_fut = axum::serve(
-            tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?,
-            app,
-        );
-        serve_fut.await?;
->>>>>>> respeer-maas-7b3ae0b6-2025_03_15
 
         axum::serve(listener, app).await?;
 

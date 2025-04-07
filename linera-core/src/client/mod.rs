@@ -3602,7 +3602,7 @@ where
     pub async fn submit_external_signed_block_proposal_and_signature(
         &self,
         height: BlockHeight,
-        executed_block: ExecutedBlock,
+        block: Block,
         round: Round,
         signature: AccountSignature,
         validated_block_certificate: Option<ValidatedBlockCertificate>,
@@ -3624,19 +3624,19 @@ where
             return Err(ChainClientError::WaitFinalizingBlock);
         }
 
-        let (executed_block, outcome, lite_cert) = match validated_block_certificate {
+        let (block, outcome, lite_cert) = match validated_block_certificate {
             Some(cert) => {
-                let executed_block: ExecutedBlock = cert.clone().into_inner().into_inner().into();
+                let block = cert.clone().into_inner().into_inner();
+                let (_, outcome) = block.into_proposal();
                 (
-                    executed_block.clone(),
-                    Some(executed_block.outcome),
+                    block,
+                    Some(outcome),
                     Some(cert.lite_certificate().cloned()),
                 )
             }
-            _ => (executed_block, None, None),
+            _ => (block, None, None),
         };
 
-        let block = executed_block.block.clone();
         ensure!(
             block.height == height,
             ChainClientError::MismatchBlockHeight(block.height, height)
@@ -3656,10 +3656,12 @@ where
             );
         }
 
+        let (proposed_block, _) = block.into_proposal();
+
         let proposal = Box::new(BlockProposal {
             content: ProposalContent {
                 round,
-                block: block.clone(),
+                block: proposed_block,
                 outcome,
             },
             public_key: self.public_key().await?,
@@ -3694,11 +3696,11 @@ where
         self.state_mut().set_pending_proposal(block, blobs);
 
         let certificate = if round.is_fast() {
-            let hashed_value = Hashed::new(ConfirmedBlock::new(executed_block));
+            let hashed_value = ConfirmedBlock::new(block);
             self.submit_block_proposal(&committee, proposal, hashed_value)
                 .await?
         } else {
-            let hashed_value = Hashed::new(ValidatedBlock::new(executed_block));
+            let hashed_value = ValidatedBlock::new(block));
             let certificate = self
                 .submit_block_proposal(&committee, proposal, hashed_value)
                 .await?;
@@ -3718,8 +3720,9 @@ where
         &self,
         mut block: ProposedBlock,
         round: Option<u32>,
+        published_blobs: Vec<Blob>,
         local_time: Timestamp,
-    ) -> Result<(ExecutedBlock, ChainInfoResponse), ChainClientError> {
+    ) -> Result<(Block, ChainInfoResponse), ChainClientError> {
         loop {
             let result = self
                 .stage_block_execution_with_local_time(block.clone(), round, local_time)
@@ -3763,13 +3766,14 @@ where
         &self,
         block: ProposedBlock,
         round: Option<u32>,
+        published_blobs: Vec<Blob>,
         local_time: Timestamp,
-    ) -> Result<(ExecutedBlock, ChainInfoResponse), ChainClientError> {
+    ) -> Result<(Block, ChainInfoResponse), ChainClientError> {
         loop {
             let result = self
                 .client
                 .local_node
-                .stage_block_execution_with_local_time(block.clone(), round, local_time)
+                .stage_block_execution_with_local_time(block.clone(), round, published_blobs, local_time)
                 .await;
             if let Err(LocalNodeError::BlobsNotFound(blob_ids)) = &result {
                 self.receive_certificates_for_blobs(blob_ids.clone())
@@ -3801,12 +3805,12 @@ where
     /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
     /// called, it will be proposed to the validators.
     #[tracing::instrument(level = "trace", skip(incoming_bundles, operations))]
-    async fn new_executed_block(
+    async fn new_block(
         &self,
         incoming_bundles: Vec<IncomingBundle>,
         operations: Vec<Operation>,
         local_time: Timestamp,
-    ) -> Result<(ExecutedBlock, Vec<BlobId>), ChainClientError> {
+    ) -> Result<Block, ChainClientError> {
         let timestamp = self.next_timestamp_ext(&incoming_bundles, local_time);
         if timestamp != local_time {
             return Err(ChainClientError::MismatchBlockTimestamp(
@@ -3838,27 +3842,18 @@ where
         // Using the round number during execution counts as an oracle.
         // Accessing the round number in single-leader rounds where we are not the leader
         // is not currently supported.
-        let published_blob_ids = block
-            .published_blob_ids()
-            .into_iter()
-            .collect::<Vec<BlobId>>();
         let round = match Self::round_for_new_proposal(&info, &identity, &block, true)? {
             Either::Left(round) => round.multi_leader(),
             Either::Right(_) => None,
         };
 
-        let (executed_block, _) = self
+        let (block, _) = self
             .stage_block_execution_with_local_time_and_discard_failing_messages(
                 block, round, local_time,
             )
             .await?;
 
-        let block = &executed_block.block;
-        let committee = self.local_committee().await?;
-        let max_size = committee.policy().maximum_block_proposal_size;
-        block.check_proposal_size(max_size)?;
-
-        Ok((executed_block, published_blob_ids))
+        block
     }
 
     #[tracing::instrument(level = "trace")]
@@ -3886,11 +3881,12 @@ where
         &self,
         operations: Vec<Operation>,
         incoming_bundles: Vec<IncomingBundle>,
+        blobs: Vec<Blob>,
         local_time: Timestamp,
     ) -> Result<
         Option<(
-            ExecutedBlock,
-            Vec<BlobId>,
+            Block,
+            Vec<Blob>,
             Option<ValidatedBlockCertificate>,
         )>,
         ChainClientError,
@@ -3909,39 +3905,42 @@ where
             return Ok(None);
         }
 
+        let local_node = &self.client.local_node;
         if let Some(locking) = &info.manager.requested_locking {
-            let (executed_block, blob_ids, maybe_validated_cert) = match &**locking {
-                LockingBlock::Regular(certificate) => (
-                    certificate.block().clone().into(),
-                    certificate
-                        .block()
-                        .required_blob_ids()
-                        .into_iter()
-                        .collect::<Vec<BlobId>>(),
-                    Some(certificate),
-                ),
-                LockingBlock::Fast(proposal) => {
-                    let block = proposal.content.block.clone();
-                    let blob_ids: Vec<BlobId> = block.published_blob_ids().into_iter().collect();
+            let (block, blob_ids, maybe_validated_cert) = match &**locking {
+                LockingBlock::Regular(certificate) => {
+                    let blob_ids = certificate.block().requred_blob_ids();
+                    let blobs = local_node.get_locking_blobs(&blob_ids, self.chain_id).await?.ok_or_else(|| ChainClientError::InternalError("Missing local locking blobs"))?;
                     (
-                        self.stage_block_execution(block, None).await?.0,
-                        blob_ids,
+                        certificate.block().clone(),
+                        blobs,
+                        Some(certificate),
+                    )
+                }
+                LockingBlock::Fast(proposal) => {
+                    let proposed_block = proposal.content.block.clone();
+                    let blob_ids: Vec<BlobId> = proposed_block.published_blob_ids().into_iter().collect();
+                    let blobs = local_node.get_locking_blobs(&blob_ids, self.chain_id).await?.ok_or_else(|| ChainClientError::InternalError("Missing local locking blobs"))?;
+                    let block = self.stage_block_execution(proposed_block, None).await?.0;
+                    (
+                        block,
+                        blobs,
                         None,
                     )
                 }
             };
             return Ok(Some((
-                executed_block,
-                blob_ids,
+                block,
+                blobs,
                 maybe_validated_cert.cloned(),
             )));
         }
 
-        let (executed_block, blob_ids) = self
-            .new_executed_block(incoming_bundles, operations, local_time)
+        let block = self
+            .new_block(incoming_bundles, operations, local_time)
             .await?;
 
-        return Ok(Some((executed_block, blob_ids, None)));
+        return Ok(Some((block, blobs, None)));
     }
 }
 
