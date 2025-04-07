@@ -32,7 +32,7 @@ use linera_base::{
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{CandidateBlockMaterial, IncomingBundle},
+    data_types::{BlockExecutionOutcome, CandidateBlockMaterial, IncomingBundle},
     types::{Block, ConfirmedBlock, GenericCertificate, ValidatedBlockCertificate},
     ChainStateView,
 };
@@ -115,6 +115,7 @@ pub struct Balances {
 #[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct SimulatedBlockMaterial {
     block: Block,
+    outcome: Option<BlockExecutionOutcome>,
     blobs: Vec<Blob>,
     validated_block_certificate: Option<ValidatedBlockCertificate>,
 }
@@ -833,7 +834,7 @@ where
             .map(|bundle| bundle.clone())
             .collect();
 
-        let Some((block, blobs, validated_block_certificate)) = client
+        let Some((block, outcome, blobs, validated_block_certificate)) = client
             .simulate_execute_block(operations, bundles, blobs, local_time)
             .await?
         else {
@@ -842,6 +843,7 @@ where
         };
         Ok(Some(SimulatedBlockMaterial {
             block,
+            outcome,
             blobs,
             validated_block_certificate,
         }))

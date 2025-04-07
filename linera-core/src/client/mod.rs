@@ -44,8 +44,8 @@ use linera_base::{
 use linera_base::{data_types::Bytecode, vm::VmRuntime};
 use linera_chain::{
     data_types::{
-        BlockProposal, ChainAndHeight, IncomingBundle, LiteVote, MessageAction, ProposalContent,
-        ProposedBlock,
+        BlockExecutionOutcome, BlockProposal, ChainAndHeight, IncomingBundle, LiteVote,
+        MessageAction, ProposalContent, ProposedBlock,
     },
     manager::LockingBlock,
     types::{
@@ -3893,8 +3893,15 @@ where
         incoming_bundles: Vec<IncomingBundle>,
         blobs: Vec<Blob>,
         local_time: Timestamp,
-    ) -> Result<Option<(Block, Vec<Blob>, Option<ValidatedBlockCertificate>)>, ChainClientError>
-    {
+    ) -> Result<
+        Option<(
+            Block,
+            Option<BlockExecutionOutcome>,
+            Vec<Blob>,
+            Option<ValidatedBlockCertificate>,
+        )>,
+        ChainClientError,
+    > {
         let mutex = self.state().client_mutex();
         let _guard = mutex.lock_owned().await;
 
@@ -3911,7 +3918,7 @@ where
 
         let local_node = &self.client.local_node;
         if let Some(locking) = &info.manager.requested_locking {
-            let (block, blobs, maybe_validated_cert) = match &**locking {
+            let (block, maybe_outcome, blobs, maybe_validated_cert) = match &**locking {
                 LockingBlock::Regular(certificate) => {
                     let blob_ids = certificate.block().required_blob_ids();
                     let blobs = local_node
@@ -3920,7 +3927,9 @@ where
                         .ok_or_else(|| {
                             ChainClientError::InternalError("Missing local locking blobs")
                         })?;
-                    (certificate.block().clone(), blobs, Some(certificate))
+                    let block = certificate.block().clone();
+                    let (_, outcome) = block.clone().into_proposal();
+                    (block.clone(), Some(outcome), blobs, Some(certificate))
                 }
                 LockingBlock::Fast(proposal) => {
                     let proposed_block = proposal.content.block.clone();
@@ -3936,17 +3945,22 @@ where
                         .stage_block_execution(proposed_block, None, blobs.clone())
                         .await?
                         .0;
-                    (block, blobs, None)
+                    (block, None, blobs, None)
                 }
             };
-            return Ok(Some((block, blobs, maybe_validated_cert.cloned())));
+            return Ok(Some((
+                block,
+                maybe_outcome,
+                blobs,
+                maybe_validated_cert.cloned(),
+            )));
         }
 
         let block = self
             .new_block(incoming_bundles, operations, blobs.clone(), local_time)
             .await?;
 
-        return Ok(Some((block, blobs, None)));
+        return Ok(Some((block, None, blobs, None)));
     }
 }
 
