@@ -9,7 +9,7 @@ LAN_IP=$( hostname -I | awk '{print $1}' )
 NUM_VALIDATORS=1
 RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
-GIT_COMMIT=7fe154eac96
+GIT_COMMIT=ba638d3c99
 COMPILE=1
 
 options="s:n:c:C:R:"
