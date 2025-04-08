@@ -1453,7 +1453,10 @@ where
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
-        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
+        let request = format!(
+            "{\"query\": \" query {} fetch(blobHash: {blob_hash}) {}\"",
+            "{", "}"
+        );
 
         let response = service
             .0
@@ -1486,7 +1489,10 @@ where
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
-        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
+        let request = format!(
+            "{\"query\": \" query {} fetch(blobHash: \"{blob_hash}\") \"",
+            "{", "}"
+        );
 
         let response = service
             .0
@@ -1519,7 +1525,10 @@ where
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
-        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
+        let request = format!(
+            "{\"query\": \" query {} fetch(blobHash: {blob_hash}) {}\"",
+            "{", "}"
+        );
 
         let response = service
             .0
@@ -1552,7 +1561,10 @@ where
     ) -> Result<impl IntoResponse, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
-        let request = format!("query {} fetch(blobHash: \"{blob_hash}\") {}", "{", "}");
+        let request = format!(
+            "{\"query\": \" query {} fetch(blobHash: {blob_hash}) {}\"",
+            "{", "}"
+        );
 
         let response = service
             .0
