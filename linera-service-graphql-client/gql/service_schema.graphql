@@ -924,6 +924,10 @@ type MutationRoot {
 	"""
 	submitBlockAndSignature(chainId: ChainId!, height: BlockHeight!, block: SignedBlock!): CryptoHash!
 	"""
+	Submit block proposal with signature
+	"""
+	submitBlockAndSignatureBcs(chainId: ChainId!, height: BlockHeight!, block: SignedBlockBcs!): CryptoHash!
+	"""
 	Calculate block execution state hash
 	"""
 	simulateExecuteBlock(chainId: ChainId!, blockMaterial: BlockMaterial!): SimulatedBlockMaterial
@@ -1276,6 +1280,11 @@ scalar Round
 A signed block which will be submitted to blockchain with its signature.
 """
 scalar SignedBlock
+
+"""
+A signed block which will be submitted to blockchain with its signature.
+"""
+scalar SignedBlockBcs
 
 type SimulatedBlockMaterial {
 	block: Block!

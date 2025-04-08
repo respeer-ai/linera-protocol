@@ -20,6 +20,7 @@ use axum::{
 };
 use futures::{lock::Mutex, Future};
 use linera_base::{
+    bcs_scalar,
     crypto::{
         AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
     },
@@ -135,6 +136,22 @@ pub struct SignedBlock {
 
 doc_scalar!(
     SignedBlock,
+    "A signed block which will be submitted to blockchain with its signature."
+);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignedBlockBcs {
+    block: Block,
+    round: Round,
+    signature: AccountSignature,
+    validated_block_certificate: Option<ValidatedBlockCertificate>,
+    // If block contains PublishDataBlob, it should have blobs, too
+    blob_bytes: Vec<Vec<u8>>,
+}
+
+bcs_scalar!(
+    SignedBlockBcs,
     "A signed block which will be submitted to blockchain with its signature."
 );
 
@@ -783,6 +800,45 @@ where
         let client = self.context.lock().await.make_chain_client(chain_id)?;
 
         let SignedBlock {
+            block,
+            round,
+            signature,
+            validated_block_certificate,
+            blob_bytes,
+        } = block;
+
+        let hash = client
+            .submit_external_signed_block_proposal_and_signature(
+                height,
+                block,
+                round,
+                signature,
+                validated_block_certificate,
+                blob_bytes
+                    .into_iter()
+                    .map(|bytes| Blob::new_data(bytes))
+                    .collect(),
+            )
+            .await?
+            .value()
+            .inner()
+            .hash();
+        self.context.lock().await.update_wallet(&client).await?;
+        Ok(hash)
+    }
+
+    /// Submit block proposal with signature
+    async fn submit_block_and_signature_bcs(
+        &self,
+        chain_id: ChainId,
+        height: BlockHeight,
+        block: SignedBlockBcs,
+    ) -> Result<CryptoHash, Error> {
+        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
+
+        let client = self.context.lock().await.make_chain_client(chain_id)?;
+
+        let SignedBlockBcs {
             block,
             round,
             signature,
