@@ -5,18 +5,15 @@
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
-FAUCET_URL=https://faucet.testnet-archimedes.linera.io
+FAUCET_URL=http://api.faucet.respeer.ai/api/faucet
 COMPILE=1
-GIT_COMMIT=main
 CREATE_WALLET=1
-CHAIN_OWNER_COUNT=4
 
 options="f:c:C:W:"
 
 while getopts $options opt; do
   case ${opt} in
     f) FAUCET_URL=${OPTARG} ;;
-    c) GIT_COMMIT=${OPTARG} ;;
     C) COMPILE=${OPTARG} ;;
     W) CREATE_WALLET=${OPTARG} ;;
   esac
