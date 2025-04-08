@@ -15,7 +15,9 @@ use async_graphql::{
     OutputType, ScalarType, Schema, SimpleObject, Subscription,
 };
 use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
-use axum::{extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router};
+use axum::{
+    body, extract::Path, http::StatusCode, response, response::IntoResponse, Extension, Router,
+};
 use futures::{lock::Mutex, Future};
 use linera_base::{
     crypto::{
@@ -1447,144 +1449,73 @@ where
         schema.execute(request.into_inner()).await.into()
     }
 
-    async fn blob_handler(
-        Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
+    async fn fetch_blob(
+        chain_id: String,
+        application_id: String,
+        blob_hash: String,
         service: Extension<Self>,
-    ) -> Result<impl IntoResponse, NodeServiceError> {
+    ) -> Result<Vec<u8>, NodeServiceError> {
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
-        let request = format!(
-            "{{ \"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\" }}",
-        );
+        let request =
+            format!("{{ \"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\" }}",);
 
-        let response = service
+        let _response = service
             .0
             .handle_service_request(application_id, request.into_bytes(), chain_id)
             .await?;
-        let data_value: JsonValue =
-            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
+        let _response: JsonValue = serde_json::from_slice(&_response).unwrap();
+        let _response: Vec<u8> =
+            serde_json::from_value(_response.get("data").unwrap().get("fetch").unwrap().clone())
+                .unwrap();
+        Ok(_response)
+    }
 
-        let mut resp: Vec<u8> = Vec::new();
-        if let Some(fetch) = data_value.get("fetch") {
-            if let Some(fetch_array) = fetch.as_array() {
-                let bytes: Vec<u8> = fetch_array
-                    .iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect();
-                resp = bytes.clone();
-            } else {
-                println!("fetch is not a array");
-            }
-        } else {
-            println!("without data field");
-        }
+    async fn blob_handler(
+        Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
+        service: Extension<Self>,
+    ) -> Result<response::Response, NodeServiceError> {
+        let _response = Self::fetch_blob(chain_id, application_id, blob_hash, service).await?;
 
-        Ok(resp)
+        Ok(response::Response::builder()
+            .status(StatusCode::OK)
+            .body(body::Body::from(_response))
+            .unwrap())
     }
 
     async fn blob_image_handler(
         Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
         service: Extension<Self>,
-    ) -> Result<impl IntoResponse, NodeServiceError> {
-        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: ApplicationId = application_id.parse()?;
-        let request = format!(
-            "{{ \"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\" }}",
-        );
+    ) -> Result<response::Response, NodeServiceError> {
+        let _response = Self::fetch_blob(chain_id, application_id, blob_hash, service).await?;
 
-        let response = service
-            .0
-            .handle_service_request(application_id, request.into_bytes(), chain_id)
-            .await?;
-        let data_value: JsonValue =
-            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
-
-        let mut resp: Vec<u8> = Vec::new();
-        if let Some(fetch) = data_value.get("fetch") {
-            if let Some(fetch_array) = fetch.as_array() {
-                let bytes: Vec<u8> = fetch_array
-                    .iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect();
-                resp = bytes.clone();
-            } else {
-                println!("fetch is not a array");
-            }
-        } else {
-            println!("without data field");
-        }
-
-        Ok((StatusCode::OK, [("content-type", "image/*")], resp))
+        Ok(response::Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "image/*")
+            .body(body::Body::from(_response))
+            .unwrap())
     }
 
     async fn blob_html_handler(
         Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
         service: Extension<Self>,
     ) -> Result<impl IntoResponse, NodeServiceError> {
-        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: ApplicationId = application_id.parse()?;
-        let request = format!(
-            "{{ \"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\" }}",
-        );
+        let _response = Self::fetch_blob(chain_id, application_id, blob_hash, service).await?;
 
-        let response = service
-            .0
-            .handle_service_request(application_id, request.into_bytes(), chain_id)
-            .await?;
-        let data_value: JsonValue =
-            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
-
-        let mut resp: Vec<u8> = Vec::new();
-        if let Some(fetch) = data_value.get("fetch") {
-            if let Some(fetch_array) = fetch.as_array() {
-                let bytes: Vec<u8> = fetch_array
-                    .iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect();
-                resp = bytes.clone();
-            } else {
-                println!("fetch is not a array");
-            }
-        } else {
-            println!("without data field");
-        }
-
-        Ok(response::Html(resp))
+        Ok(response::Html(_response))
     }
 
     async fn blob_video_handler(
         Path((chain_id, application_id, blob_hash)): Path<(String, String, String)>,
         service: Extension<Self>,
-    ) -> Result<impl IntoResponse, NodeServiceError> {
-        let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
-        let application_id: ApplicationId = application_id.parse()?;
-        let request = format!(
-            "{{ \"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\" }}",
-        );
+    ) -> Result<response::Response, NodeServiceError> {
+        let _response = Self::fetch_blob(chain_id, application_id, blob_hash, service).await?;
 
-        let response = service
-            .0
-            .handle_service_request(application_id, request.into_bytes(), chain_id)
-            .await?;
-        let data_value: JsonValue =
-            serde_json::to_value(&response).unwrap_or_else(|_| JsonValue::Null);
-
-        let mut resp: Vec<u8> = Vec::new();
-        if let Some(fetch) = data_value.get("fetch") {
-            if let Some(fetch_array) = fetch.as_array() {
-                let bytes: Vec<u8> = fetch_array
-                    .iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect();
-                resp = bytes.clone();
-            } else {
-                println!("fetch is not a array");
-            }
-        } else {
-            println!("without data field");
-        }
-
-        Ok((StatusCode::OK, [("content-type", "video/*")], resp))
+        Ok(response::Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "video/*")
+            .body(body::Body::from(_response))
+            .unwrap())
     }
 
     /// Executes a GraphQL query against an application.
