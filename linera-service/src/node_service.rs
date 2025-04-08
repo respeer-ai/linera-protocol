@@ -1454,8 +1454,7 @@ where
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
         let request = format!(
-            "{\"query\": \" query {} fetch(blobHash: {blob_hash}) {}\"",
-            "{", "}"
+            "{\"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\"",
         );
 
         let response = service
@@ -1490,8 +1489,7 @@ where
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
         let request = format!(
-            "{\"query\": \" query {} fetch(blobHash: \"{blob_hash}\") \"",
-            "{", "}"
+            "{\"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\"",
         );
 
         let response = service
@@ -1526,8 +1524,7 @@ where
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
         let request = format!(
-            "{\"query\": \" query {} fetch(blobHash: {blob_hash}) {}\"",
-            "{", "}"
+            "{\"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\"",
         );
 
         let response = service
@@ -1562,8 +1559,7 @@ where
         let chain_id: ChainId = chain_id.parse().map_err(NodeServiceError::InvalidChainId)?;
         let application_id: ApplicationId = application_id.parse()?;
         let request = format!(
-            "{\"query\": \" query {} fetch(blobHash: {blob_hash}) {}\"",
-            "{", "}"
+            "{\"query\": \" query {{ fetch(blobHash: \\\"{blob_hash}\\\") }}\"",
         );
 
         let response = service
