@@ -39,7 +39,7 @@ mkdir -p $OFFICIAL_BIN_DIR
 # Cleanup before building
 docker stop prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
 docker rm prometheus docker-shard-4 docker-shard-3 docker-shard-2 proxy docker-shard-1 shard-init grafana watchtower scylla faucet rpc
-docker rmi linera-respeer linera-official
+docker rmi linera-official
 docker volume rm docker_linera-scylla-data docker_linera-shared
 
 cp -v \
