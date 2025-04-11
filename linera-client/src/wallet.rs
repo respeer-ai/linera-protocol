@@ -115,6 +115,19 @@ impl Wallet {
             .collect()
     }
 
+    pub fn owner_chain_ids(&self, owner: AccountOwner) -> Vec<ChainId> {
+        self.chains
+            .iter()
+            .filter_map(|(chain_id, chain)| {
+                chain
+                    .key_pair
+                    .as_ref()
+                    .is_some_and(|key_pair| AccountOwner::from(key_pair.public()) == owner)
+                    .then_some(*chain_id)
+            })
+            .collect()
+    }
+
     pub fn num_chains(&self) -> usize {
         self.chains.len()
     }

@@ -1098,23 +1098,12 @@ where
 
     /// Returns the maintained chains of given owner
     async fn owner_chains(&self, owner: AccountOwner) -> Result<Chains, Error> {
-        let all_chain_ids = self.context.lock().await.wallet().chain_ids();
-        let mut chain_ids = Vec::new();
-
-        for chain_id in all_chain_ids.iter() {
-            let client = self
-                .context
-                .lock()
-                .await
-                .make_chain_client(chain_id.clone())?;
-            if AccountOwner::from(client.public_key().await?) == owner {
-                chain_ids.push(chain_id.clone());
-            }
-        }
+        let chain_ids = self.context.lock().await.wallet().owner_chain_ids(owner);
+        let default_chain = self.context.lock().await.owner_default_chain(owner);
 
         Ok(Chains {
             list: chain_ids,
-            default: self.context.lock().await.owner_default_chain(owner),
+            default: default_chain,
         })
     }
 
