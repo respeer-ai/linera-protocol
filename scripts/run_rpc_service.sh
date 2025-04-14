@@ -53,6 +53,8 @@ if [ "x$COMPILE" = "x1" ]; then
     fi
 fi
 
+export PATH=$BIN_DIR:$PATH
+
 # Make sure to clean up child processes on exit.
 trap 'kill $(jobs -p)' EXIT
 
