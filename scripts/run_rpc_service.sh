@@ -37,6 +37,8 @@ mkdir -p $WALLET_DIR
 BIN_DIR="${OUTPUT_DIR}/bin"
 mkdir -p $BIN_DIR
 
+export PATH=$BIN_DIR:$PATH
+
 cd $SCRIPT_DIR/..
 
 if [ "x$COMPILE" = "x1" ]; then
@@ -52,8 +54,6 @@ if [ "x$COMPILE" = "x1" ]; then
   	mv $PWD/target/release/linera-storage-server $BIN_DIR
     fi
 fi
-
-export PATH=$BIN_DIR:$PATH
 
 # Make sure to clean up child processes on exit.
 trap 'kill $(jobs -p)' EXIT
