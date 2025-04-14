@@ -95,7 +95,7 @@ generate_rpc_nginx_conf
 
 echo -e "\n\nService domain"
 echo -e "   $LAN_IP api.rpc.respeer.ai"
-echo -e "   http://api.rpc.respeer.ai/rpc\n\n"
+echo -e "   http://api.rpc.respeer.ai/api/rpc\n\n"
 
 function run_rpc_service() {
     linera --wallet $WALLET_DIR/rpc/wallet.json \
