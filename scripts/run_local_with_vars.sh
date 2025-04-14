@@ -9,7 +9,7 @@ LAN_IP=$( hostname -I | awk '{print $1}' )
 NUM_VALIDATORS=1
 RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
-GIT_COMMIT=ba638d3c99
+GIT_COMMIT=7fe154eac96
 COMPILE=1
 
 options="s:n:c:C:R:"
@@ -48,6 +48,11 @@ mkdir -p $WALLET_DIR
 SOURCE_DIR="${OUTPUT_DIR}/source"
 mkdir -p $SOURCE_DIR
 
+BIN_DIR=$OUTPUT_DIR/official/bin
+mkdir -p $BIN_DIR
+
+export PATH=$BIN_DIR:$PATH
+
 if [ "x$COMPILE" = "x1" ]; then
     # Install official linera for genesis cluster
     cd $SOURCE_DIR
@@ -63,8 +68,10 @@ if [ "x$COMPILE" = "x1" ]; then
     INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
 
     if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
-        cargo install --path linera-service --features storage-service
-        cargo install --path linera-storage-service --features storage-service
+        cargo build --release --features storage-service
+  	mv $PWD/target/release/linera $BIN_DIR
+  	mv $PWD/target/release/linera-server $BIN_DIR
+  	mv $PWD/target/release/linera-storage-server $BIN_DIR
     fi
 fi
 

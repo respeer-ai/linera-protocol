@@ -34,6 +34,9 @@ mkdir -p $CONFIG_DIR
 WALLET_DIR="${OUTPUT_DIR}/wallet"
 mkdir -p $WALLET_DIR
 
+BIN_DIR="${OUTPUT_DIR}/bin"
+mkdir -p $BIN_DIR
+
 cd $SCRIPT_DIR/..
 
 if [ "x$COMPILE" = "x1" ]; then
@@ -43,8 +46,10 @@ if [ "x$COMPILE" = "x1" ]; then
     INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}' | awk '{print $1}'`
 
     if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
-        cargo install --path linera-service --features storage-service,disable-native-rpc,enable-wallet-rpc
-        cargo install --path linera-storage-service --features storage-service
+        cargo build --release --features storage-service,disable-native-rpc,enable-wallet-rpc
+  	mv $PWD/target/release/linera $BIN_DIR
+  	mv $PWD/target/release/linera-server $BIN_DIR
+  	mv $PWD/target/release/linera-storage-server $BIN_DIR
     fi
 fi
 
