@@ -10,9 +10,9 @@ use std::{
 use async_trait::async_trait;
 use futures::{channel::mpsc, lock::Mutex, FutureExt as _, SinkExt as _, Stream, StreamExt};
 use linera_base::{
-    crypto::AccountSecretKey,
+    crypto::{AccountSecretKey, ValidatorPublicKey},
     data_types::Timestamp,
-    identifiers::{ChainId, Destination},
+    identifiers::{AccountOwner, ChainId, Destination, MessageId},
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
@@ -81,6 +81,26 @@ pub trait ClientContext: 'static {
         }
         Ok(clients)
     }
+
+    fn destroy_chain_client(&self, chain_id: ChainId);
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        message_id: MessageId,
+        owner: AccountOwner,
+        validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error>;
+
+    async fn save_wallet(&mut self) -> Result<(), Error>;
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
@@ -136,7 +156,7 @@ impl<C: ClientContext> ChainListener<C> {
 
     /// Spawns a task running the listener for the given chain, if it is not already running.
     #[instrument(level = "trace", skip_all, fields(?chain_id))]
-    fn run_with_chain_id(&self, chain_id: ChainId) {
+    pub fn run_with_chain_id(&self, chain_id: ChainId) {
         if !self.listening.lock().unwrap().insert(chain_id) {
             // If we are already listening to notifications, there's nothing to do.
             // This can happen if we download a child before the parent

@@ -333,6 +333,37 @@ where
         }
         Ok(outcome)
     }
+
+    /// Executes a block without persisting any changes to the state.
+    pub(super) async fn stage_block_execution_with_local_time(
+        &mut self,
+        block: ProposedBlock,
+        round: Option<u32>,
+        published_blobs: &[Blob],
+        local_time: Timestamp,
+    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
+        let signer = block.authenticated_signer;
+        let (_, committee) = self.0.chain.current_committee()?;
+        block.check_proposal_size(committee.policy().maximum_block_proposal_size)?;
+
+        let outcome = self
+            .execute_block(&block, local_time, round, published_blobs)
+            .await?;
+
+        let mut response = ChainInfoResponse::new(&self.0.chain, None);
+        if let Some(signer) = signer {
+            response.info.requested_owner_balance = self
+                .0
+                .chain
+                .execution_state
+                .system
+                .balances
+                .get(&signer)
+                .await?;
+        }
+
+        Ok((outcome.with(block), response))
+    }
 }
 
 impl<StorageClient> Drop for ChainWorkerStateWithTemporaryChanges<'_, StorageClient>

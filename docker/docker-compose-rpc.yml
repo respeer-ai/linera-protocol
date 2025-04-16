@@ -1,0 +1,9 @@
+services:
+  rpc:
+    image: "${LINERA_IMAGE:-linera}"
+    container_name: rpc
+    ports:
+      - "30080:30080"
+    command: [ "./rpc-entrypoint.sh" ]
+    volumes:
+      - ../output/wallet/rpc:/wallet

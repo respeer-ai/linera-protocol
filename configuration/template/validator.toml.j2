@@ -1,0 +1,23 @@
+server_config_path = "{{ validator.config_path }}"
+host = "{{ validator.host }}"
+port = {{ validator.port }}
+metrics_port = {{ validator.metrics_port }}
+pyroscope_host = "{{ validator.pyroscope_host }}"
+pyroscope_port = {{ validator.pyroscope_port }}
+pyroscope_sample_rate = 100
+internal_host = "{{ validator.internal_host }}"
+internal_port = {{ validator.internal_port }}
+[external_protocol]
+Grpc = "ClearText"
+[internal_protocol]
+Grpc = "ClearText"
+
+{% for key, value in shards.items() %}
+[[shards]]
+host = "{{ value.host }}"
+port = {{ value.port }}
+metrics_port = {{ value.metrics_port }}
+pyroscope_host = "{{ value.pyroscope_host }}"
+pyroscope_port = {{ value.pyroscope_port }}
+pyroscope_sample_rate = 100
+{% endfor %}

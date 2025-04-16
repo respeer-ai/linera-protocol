@@ -162,6 +162,15 @@ where
         new_trackers: BTreeMap<ValidatorPublicKey, u64>,
         callback: oneshot::Sender<Result<(), WorkerError>>,
     },
+
+    /// Execute a block but discard any changes to the chain state.
+    StageBlockExecutionWithLocalTime {
+        block: ProposedBlock,
+        round: Option<u32>,
+        published_blobs: Vec<Blob>,
+        local_time: Timestamp,
+        callback: oneshot::Sender<Result<(Block, ChainInfoResponse), WorkerError>>,
+    },
 }
 
 /// The actor worker type.
@@ -197,6 +206,7 @@ where
             ChainWorkerRequest<StorageClient::Context>,
             tracing::Span,
         )>,
+        local_time: Option<Timestamp>,
     ) {
         let actor = loop {
             let load_result = Self::load(
@@ -207,6 +217,7 @@ where
                 tracked_chains.clone(),
                 delivery_notifier.clone(),
                 chain_id,
+                local_time,
             )
             .await
             .inspect_err(|error| warn!("Failed to load chain state: {error:?}"));
@@ -235,10 +246,12 @@ where
         tracked_chains: Option<Arc<RwLock<HashSet<ChainId>>>>,
         delivery_notifier: DeliveryNotifier,
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> Result<Self, WorkerError> {
         let (service_runtime_thread, service_runtime_endpoint) = {
             if config.long_lived_services {
-                let (thread, endpoint) = Self::spawn_service_runtime_actor(chain_id).await;
+                let (thread, endpoint) =
+                    Self::spawn_service_runtime_actor(chain_id, local_time).await;
                 (Some(thread), Some(endpoint))
             } else {
                 (None, None)
@@ -268,11 +281,12 @@ where
     /// Returns the task handle and the endpoints to interact with the actor.
     async fn spawn_service_runtime_actor(
         chain_id: ChainId,
+        local_time: Option<Timestamp>,
     ) -> (linera_base::task::Blocking, ServiceRuntimeEndpoint) {
         let context = QueryContext {
             chain_id,
             next_block_height: BlockHeight(0),
-            local_time: Timestamp::from(0),
+            local_time: local_time.unwrap_or(Timestamp::from(0)),
         };
 
         let (execution_state_sender, incoming_execution_requests) =
@@ -427,6 +441,24 @@ where
                         .await,
                 )
                 .is_ok(),
+            ChainWorkerRequest::StageBlockExecutionWithLocalTime {
+                block,
+                round,
+                published_blobs,
+                local_time,
+                callback,
+            } => callback
+                .send(
+                    self.worker
+                        .stage_block_execution_with_local_time(
+                            block,
+                            round,
+                            &published_blobs,
+                            local_time,
+                        )
+                        .await,
+                )
+                .is_ok(),
         };
 
         if !responded {
@@ -490,6 +522,9 @@ where
                 callback.send(Err(error)).is_ok()
             }
             ChainWorkerRequest::UpdateReceivedCertificateTrackers { callback, .. } => {
+                callback.send(Err(error)).is_ok()
+            }
+            ChainWorkerRequest::StageBlockExecutionWithLocalTime { callback, .. } => {
                 callback.send(Err(error)).is_ok()
             }
         };
