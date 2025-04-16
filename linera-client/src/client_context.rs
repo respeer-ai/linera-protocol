@@ -677,6 +677,11 @@ where
             .set_owner_default_chain(owner, chain_id)?;
         self.save_wallet().await
     }
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
+        self.wallet.as_mut().add_unassigned_key_pair(key_pair);
+        self.save_wallet().await
+    }
 }
 
 #[cfg(feature = "benchmark")]
