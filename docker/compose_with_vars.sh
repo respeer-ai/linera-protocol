@@ -114,7 +114,6 @@ function generate_validators() {
             \"host\": \"$LAN_IP\",
             \"port\": 19100,
             \"metrics_port\": 21100,
-            \"pyroscope_host\": \"docker-pyroscope\",
             \"pyroscope_port\": 4040,
             \"internal_host\": \"proxy\",
             \"internal_port\": 20100
@@ -124,28 +123,24 @@ function generate_validators() {
                 \"host\": \"docker-shard-1\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
           },
             \"shard_2\": {
                 \"host\": \"docker-shard-2\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
             },
             \"shard_3\": {
                 \"host\": \"docker-shard-3\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
             },
             \"shard_4\": {
                 \"host\": \"docker-shard-4\",
                 \"port\": 19100,
                 \"metrics_port\": 21100,
-                \"pyroscope_host\": \"docker-pyroscope\",
                 \"pyroscope_port\": 4040
             }
         }

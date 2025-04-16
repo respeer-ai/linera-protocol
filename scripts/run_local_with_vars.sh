@@ -92,7 +92,6 @@ for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
             \"host\": \"$LAN_IP\",
             \"port\": $((19100 + i * 2)),
             \"metrics_port\": $((20100 + i * 2)),
-            \"pyroscope_host\": \"$LAN_IP\",
             \"pyroscope_port\": $((4040 + i * 2)),
             \"internal_host\": \"$LAN_IP\",
             \"internal_port\": $((21100 + i * 2))
@@ -102,28 +101,24 @@ for i in $(seq 0 $((NUM_VALIDATORS - 1))); do
                 \"host\": \"$LAN_IP\",
                 \"port\": $((22100 + i * 2)),
                 \"metrics_port\": $((23100 + i * 2)),
-                \"pyroscope_host\": \"$LAN_IP\",
                 \"pyroscope_port\": $((24140 + i * 2))
           },
             \"shard_2\": {
                 \"host\": \"$LAN_IP\",
                 \"port\": $((25100 + i * 2)),
                 \"metrics_port\": $((26100 + i * 2)),
-                \"pyroscope_host\": \"$LAN_IP\",
                 \"pyroscope_port\": $((27140 + i * 2))
             },
             \"shard_3\": {
                 \"host\": \"$LAN_IP\",
                 \"port\": $((28100 + i * 2)),
                 \"metrics_port\": $((29100 + i * 2)),
-                \"pyroscope_host\": \"$LAN_IP\",
                 \"pyroscope_port\": $((30140 + i * 2))
             },
             \"shard_4\": {
                 \"host\": \"$LAN_IP\",
                 \"port\": $((31100 + i * 2)),
                 \"metrics_port\": $((32100 + i * 2)),
-                \"pyroscope_host\": \"$LAN_IP\",
                 \"pyroscope_port\": $((33140 + i * 2))
             }
         }
