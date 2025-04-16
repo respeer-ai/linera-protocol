@@ -69,9 +69,10 @@ if [ "x$COMPILE" = "x1" ]; then
 
     if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
         cargo build --release --features storage-service
-  	mv $PWD/target/release/linera $BIN_DIR
-  	mv $PWD/target/release/linera-server $BIN_DIR
-  	mv $PWD/target/release/linera-storage-server $BIN_DIR
+        mv $PWD/target/release/linera $BIN_DIR
+        mv $PWD/target/release/linera-server $BIN_DIR
+        mv $PWD/target/release/linera-proxy $BIN_DIR
+        mv $PWD/target/release/linera-storage-server $BIN_DIR
     fi
 fi
 
