@@ -1,6 +1,19 @@
 #!/bin/bash
 
+####
+## E.g. ./run_rpc_service.sh -f https://faucet.testnet-babbage.linera.net -C 0
+####
+
 LAN_IP=$( hostname -I | awk '{print $1}' )
+FAUCET_URL=https://faucet.testnet-babbage.linera.net
+
+options="f:"
+
+while getopts $options opt; do
+  case ${opt} in
+    f) FAUCET_URL=${OPTARG} ;;
+  esac
+done
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
@@ -48,7 +61,7 @@ if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
   mv $PWD/target/release/linera $RESPEER_BIN_DIR
 fi
 
-linera --wallet $RPC_DIR/wallet.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet http://$LAN_IP:8080
+linera --wallet $RPC_DIR/wallet.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet $FAUCET_URL
 
 cd $SCRIPT_DIR
 # Compose up rpc
