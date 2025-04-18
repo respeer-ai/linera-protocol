@@ -1,16 +1,21 @@
 #!/bin/bash
 
 ####
-## export RPC_EXTERNAL_HOST=api.rpc.external.respeer.ai
-## export RPC_HOST=api.rpc.respeer.ai
-## ./run_external_rpc.sh
+## ./run_external_service.sh -p api.linera-respeer-devnet
 ####
-
-[ "x" == "x$RPC_EXTERNAL_HOST" ] && RPC_EXTERNAL_HOST=api.rpc.external.respeer.ai
-[ "x" == "x$RPC_HOST" ] && RPC_HOST=api.rpc.respeer.ai
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 TEMPLATE_FILE="${SCRIPT_DIR}/../configuration/template/external-ingress.conf.j2"
+
+DOMAIN_PREFIX=api
+
+options="p:"
+
+while getopts $options opt; do
+  case ${opt} in
+    p) DOMAIN_PREFIX=${OPTARG} ;;
+  esac
+done
 
 # All generated files will be put here
 OUTPUT_DIR="${SCRIPT_DIR}/../output/k8s"
@@ -21,13 +26,15 @@ CONFIG_DIR="${OUTPUT_DIR}/config"
 mkdir -p $CONFIG_DIR
 
 function generate_external_ingress() {
-    endpoint=rpc
+    endpoint=$1
+    host=$DOMAIN_PREFIX.$2
+    external_host=$DOMAIN_PREFIX.external.$2
     domain=`echo $host | sed 's/\./-/g'`
     echo "{
         \"service\": {
             \"name\": \"$endpoint\",
-            \"external_name\": \"$RPC_EXTERNAL_HOST\",
-            \"host\": \"$RPC_HOST\",
+            \"external_name\": \"$external_host\",
+            \"host\": \"$host\",
             \"domain\": \"$domain\"
         }
     }" > ${CONFIG_DIR}/$endpoint.external.ingress.json
@@ -36,4 +43,5 @@ function generate_external_ingress() {
     kubectl apply -f ${CONFIG_DIR}/$endpoint-external-ingress.yaml
 }
 
-generate_external_ingress
+generate_external_ingress rpc rpc.respeer.ai
+generate_external_ingress faucet faucet.respeer.ai
