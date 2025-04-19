@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ####
-## ./deploy_ingress_route.sh -z testnet-babbage
+## ./apply_ingress.sh -z testnet-babbage
 ####
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
@@ -36,11 +36,11 @@ function generate_ingress_route() {
             \"target_host\": \"$target_host\",
             \"domain\": \"$domain\"
         }
-    }" > ${CONFIG_DIR}/$endpoint.target.ingress.json
+    }" > ${CONFIG_DIR}/$endpoint-ingress.json
 
-    jinja -d ${CONFIG_DIR}/$endpoint.target.ingress.json $TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint-target-ingress.yaml
-    kubectl apply -f ${CONFIG_DIR}/$endpoint-target-ingress.yaml
+    jinja -d ${CONFIG_DIR}/$endpoint-ingress.json $TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint-ingress.yaml
+    kubectl apply -f ${CONFIG_DIR}/$endpoint-ingress.yaml
 }
 
-generate_ingress_route rpc.respeer.ai
+generate_ingress_route rpc rpc.respeer.ai
 generate_ingress_route faucet faucet.respeer.ai
