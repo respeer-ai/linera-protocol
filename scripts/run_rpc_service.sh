@@ -99,8 +99,8 @@ SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')
 generate_rpc_nginx_conf
 
 echo -e "\n\nService domain"
-echo -e "   $LAN_IP api.rpc.respeer.ai"
-echo -e "   http://api.rpc.respeer.ai/api/rpc\n\n"
+echo -e "   $LAN_IP ${SUB_DOMAIN}rpc.respeer.ai"
+echo -e "   http://${SUB_DOMAIN}rpc.respeer.ai/api/rpc\n\n"
 
 function run_rpc_service() {
     linera --wallet $WALLET_DIR/rpc/wallet.json \
