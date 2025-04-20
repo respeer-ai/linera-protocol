@@ -8,14 +8,16 @@ LAN_IP=$( hostname -I | awk '{print $1}' )
 FAUCET_URL=http://api.faucet.respeer.ai/api/faucet
 COMPILE=1
 CREATE_WALLET=1
+CLUSTER=
 
-options="f:c:C:W:"
+options="f:c:C:W:z:"
 
 while getopts $options opt; do
   case ${opt} in
     f) FAUCET_URL=${OPTARG} ;;
     C) COMPILE=${OPTARG} ;;
     W) CREATE_WALLET=${OPTARG} ;;
+    z) CLUSTER=${OPTARG} ;;
   esac
 done
 
@@ -82,6 +84,7 @@ function generate_rpc_nginx_conf() {
             \"endpoint\": \"$endpoint\",
             \"servers\": [\"localhost:30080\"],
             \"domain\": \"$domain\",
+            \"sub_domain\": \"$SUB_DOMAIN\",
             \"api_endpoint\": \"$endpoint\"
         }
     }" > ${CONFIG_DIR}/$endpoint.nginx.json
@@ -90,12 +93,14 @@ function generate_rpc_nginx_conf() {
     echo "cp ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/"
 }
 
+SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')
+
 # Generate service nginx conf
 generate_rpc_nginx_conf
 
 echo -e "\n\nService domain"
-echo -e "   $LAN_IP api.rpc.respeer.ai"
-echo -e "   http://api.rpc.respeer.ai/api/rpc\n\n"
+echo -e "   $LAN_IP ${SUB_DOMAIN}rpc.respeer.ai"
+echo -e "   http://${SUB_DOMAIN}rpc.respeer.ai/api/rpc\n\n"
 
 function run_rpc_service() {
     linera --wallet $WALLET_DIR/rpc/wallet.json \
