@@ -6,12 +6,14 @@
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
 FAUCET_URL=https://faucet.testnet-babbage.linera.net
+CLUSTER=
 
-options="f:"
+options="f:z:"
 
 while getopts $options opt; do
   case ${opt} in
     f) FAUCET_URL=${OPTARG} ;;
+    z) CLUSTER=${OPTARG} ;;
   esac
 done
 
@@ -40,7 +42,7 @@ docker rmi linera-respeer
 
 ROOT_DIR=$SCRIPT_DIR/..
 
-NGINX_TEMPLATE_FILE=$OUTPUT_DIR/configuration/template/nginx.conf.j2
+NGINX_TEMPLATE_FILE=$ROOT_DIR/configuration/template/nginx.conf.j2
 
 # Run rpc service
 cd "$ROOT_DIR"
@@ -71,12 +73,13 @@ function generate_nginx_conf() {
   port_base=$1
   endpoint=$2
   domain=$3
-  
+
   echo "{
       \"service\": {
       \"endpoint\": \"$endpoint\",
       \"servers\": [\"localhost:$port_base\"],
       \"domain\": \"$domain\",
+      \"sub_domain\": \"$SUB_DOMAIN\",
       \"api_endpoint\": \"$endpoint\"
     }
   }" > ${CONFIG_DIR}/$endpoint.nginx.json
@@ -85,12 +88,14 @@ function generate_nginx_conf() {
   cp -v ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/
 }
 
+SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')
+
 generate_nginx_conf 30080 rpc rpc.respeer.ai
 
 sudo nginx -s reload
 
 echo -e "\n\nService domain"
-echo -e "   $LAN_IP api.rpc.respeer.ai"
+echo -e "   $LAN_IP ${SUB_DOMAIN}rpc.respeer.ai"
 echo -e "   $LAN_IP graphiql.rpc.respeer.ai"
 echo -e "   http://graphiql.rpc.respeer.ai"
-echo -e "   http://api.rpc.respeer.ai/api/rpc"
+echo -e "   http://${SUB_DOMAIN}rpc.respeer.ai/api/rpc"
