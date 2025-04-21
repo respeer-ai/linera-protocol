@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use futures::{channel::mpsc, lock::Mutex, FutureExt as _, SinkExt as _, Stream, StreamExt};
 use linera_base::{
     crypto::{AccountSecretKey, ValidatorPublicKey},
-    data_types::Timestamp,
+    data_types::{TimeDelta, Timestamp},
     identifiers::{AccountOwner, ChainId, Destination, MessageId},
 };
 use linera_core::{
@@ -326,7 +326,10 @@ impl<C: ClientContext> ChainClientListener<C> {
         debug!("Processing inbox");
         match self.client.process_inbox_without_prepare().await {
             Err(ChainClientError::CannotFindKeyForChain(_)) => {}
-            Err(error) => warn!(%error, "Failed to process inbox."),
+            Err(error) => {
+                warn!(%error, "Failed to process inbox.");
+                self.timeout = Timestamp::now().saturating_add(TimeDelta::from_secs(3));
+            }
             Ok((certs, None)) => info!("Done processing inbox. {} blocks created.", certs.len()),
             Ok((certs, Some(new_timeout))) => {
                 info!(
