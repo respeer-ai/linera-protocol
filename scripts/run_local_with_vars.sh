@@ -11,8 +11,9 @@ RUN_VALIDATORS=1
 SHARDS_PER_VALIDATOR=4
 GIT_COMMIT=3dc32c18
 COMPILE=1
+CLUSTER=
 
-options="s:n:c:C:R:"
+options="s:n:c:C:R:z:"
 
 while getopts $options opt; do
   case ${opt} in
@@ -21,6 +22,7 @@ while getopts $options opt; do
     c) GIT_COMMIT=${OPTARG} ;;
     C) COMPILE=${OPTARG} ;;
     R) RUN_VALIDATORS=${OPTARG} ;;
+    z) CLUSTER=${OPTARG} ;;
   esac
 done
 
@@ -207,6 +209,7 @@ function generate_nginx_conf() {
             \"endpoint\": \"$endpoint\",
             \"servers\": [\"localhost:8080\"],
             \"domain\": \"$domain\",
+            \"sub_domain\": \"$SUB_DOMAIN\",
             \"api_endpoint\": \"$endpoint\"
         }
     }" > ${CONFIG_DIR}/$endpoint.nginx.json
@@ -214,6 +217,8 @@ function generate_nginx_conf() {
     jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $NGINX_TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
     echo "cp ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/"
 }
+
+SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')
 
 generate_nginx_conf
 echo -e "\n\nFaucet domain"
