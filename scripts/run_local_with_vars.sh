@@ -209,7 +209,7 @@ function generate_nginx_conf() {
             \"endpoint\": \"$endpoint\",
             \"servers\": [\"localhost:8080\"],
             \"domain\": \"$domain\",
-	    \"sub_domain\": \"$SUB_DOMAIN\",
+            \"sub_domain\": \"$SUB_DOMAIN\",
             \"api_endpoint\": \"$endpoint\"
         }
     }" > ${CONFIG_DIR}/$endpoint.nginx.json
