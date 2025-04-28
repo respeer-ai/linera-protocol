@@ -14,7 +14,7 @@ use std::{
 
 use linera_base::{
     crypto::{CryptoHash, ValidatorPublicKey},
-    data_types::{ApplicationDescription, Blob, BlockHeight},
+    data_types::{ApplicationDescription, Blob, BlockHeight, Timestamp},
     ensure,
     hashed::Hashed,
     identifiers::{ApplicationId, BlobId, ChainId},
@@ -565,6 +565,20 @@ where
         ChainWorkerStateWithAttemptedChanges::new(self)
             .await
             .update_received_certificate_trackers(new_trackers)
+            .await
+    }
+
+    /// Executes a block without persisting any changes to the state.
+    pub(super) async fn stage_block_execution_with_local_time(
+        &mut self,
+        block: ProposedBlock,
+        round: Option<u32>,
+        published_blobs: &[Blob],
+        local_time: Timestamp,
+    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
+        ChainWorkerStateWithTemporaryChanges::new(self)
+            .await
+            .stage_block_execution_with_local_time(block, round, published_blobs, local_time)
             .await
     }
 }

@@ -44,6 +44,8 @@ kubernetes = ["dep:k8s-openapi", "dep:kube", "dep:pathdiff", "dep:fs_extra"]
 remote-net = []
 metrics = ["prometheus", "linera-base/metrics", "linera-client/metrics"]
 storage-service = ["linera-storage-service"]
+enable-wallet-rpc = []
+disable-native-rpc = []
 
 [dependencies]
 alloy-sol-types = { workspace = true, optional = true }

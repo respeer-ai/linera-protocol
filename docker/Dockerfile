@@ -20,10 +20,12 @@ ARG build_date
 ARG target=x86_64-unknown-linux-gnu
 ARG binaries=
 ARG copy=${binaries:+_copy}
+ARG features=scylladb,metrics
 
 FROM rust:1.74-slim-bookworm AS builder
 ARG git_commit
 ARG target
+ARG features
 
 RUN apt-get update && apt-get install -y \
     pkg-config \
@@ -63,7 +65,7 @@ RUN cargo build --release \
     --bin linera \
     --bin linera-proxy \
     --bin linera-server \
-    --features scylladb,metrics
+    --features "${features}"
 
 RUN mv \
     target/"$target"/release/linera \
@@ -113,4 +115,7 @@ COPY --chmod=755 \
     docker/compose-server-entrypoint.sh \
     docker/compose-proxy-entrypoint.sh \
     docker/compose-server-init.sh \
+    docker/faucet-entrypoint.sh \
+    docker/rpc-entrypoint.sh \
+    docker/wallet-entrypoint.sh \
     ./

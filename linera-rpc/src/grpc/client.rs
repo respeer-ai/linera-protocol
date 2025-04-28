@@ -1,15 +1,22 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fmt, future::Future, iter};
+use std::{
+    collections::HashMap,
+    fmt,
+    future::Future,
+    iter,
+    sync::{Arc, Mutex},
+};
 
 use futures::{future, stream, StreamExt};
+use lazy_static::lazy_static;
 use linera_base::{
     crypto::CryptoHash,
     data_types::BlobContent,
     ensure,
     identifiers::{BlobId, ChainId},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use linera_chain::{
     data_types::{self},
@@ -37,11 +44,140 @@ use crate::{
 };
 
 #[derive(Clone)]
+struct ClientMetrics {
+    requests: u128,
+    request_errors: u128,
+    total_request_delay_ms: u128,
+    total_error_delay_ms: u128,
+    last_window_delay_ms: u128,
+
+    subscribed_chains: HashMap<ChainId, Instant>,
+    subscribed_at: Instant,
+    subscription_total_reconects: usize,
+    subscription_window_subscribe_at: Instant,
+    subscription_window_reconnects: usize,
+}
+
+lazy_static! {
+    static ref CLIENT_METRICS: Arc<Mutex<HashMap<String, ClientMetrics>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+}
+
+#[derive(Clone)]
 pub struct GrpcClient {
     address: String,
     client: ValidatorNodeClient<transport::Channel>,
     retry_delay: Duration,
     max_retries: u32,
+}
+
+fn client_request(address: String) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                metrics.requests += 1;
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn client_response(address: String, success: bool, elapsed: u128) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                if !success {
+                    metrics.request_errors += 1;
+                    metrics.total_error_delay_ms += elapsed;
+                }
+                metrics.total_request_delay_ms += elapsed;
+                metrics.last_window_delay_ms += elapsed;
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn client_subscribe_chain(address: String, chain_id: ChainId) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                metrics.subscribed_chains.insert(chain_id, Instant::now());
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn client_retry_subscribe_chain(address: String) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                let mut metrics = metrics.clone();
+                metrics.subscription_total_reconects += 1;
+                metrics.subscription_window_reconnects += 1;
+                if metrics
+                    .subscription_window_subscribe_at
+                    .elapsed()
+                    .as_millis()
+                    > 300000
+                {
+                    metrics.subscription_window_subscribe_at = Instant::now();
+                    metrics.subscription_window_reconnects = 0;
+                }
+                guard.insert(address, metrics);
+            }
+            _ => {}
+        },
+        _ => {}
+    }
+}
+
+fn client_print_if_needed(address: String) {
+    match CLIENT_METRICS.lock() {
+        Ok(mut guard) => match guard.get(&address) {
+            Some(metrics) => {
+                if metrics.last_window_delay_ms >= 60000 && metrics.requests > 0 {
+                    info!(
+                        "{} requests {} errors {} average rtt {}ms average success rtt {}ms average error rtt {}ms chains {} reconnects {}/{} elapsed {}ms/{}ms",
+                        address,
+                        metrics.requests,
+                        metrics.request_errors,
+                        metrics.total_request_delay_ms / metrics.requests,
+                        if metrics.requests > metrics.request_errors {
+                            (metrics.total_request_delay_ms - metrics.total_error_delay_ms) / (metrics.requests - metrics.request_errors)
+                        } else {
+                            0
+                        },
+                        if metrics.request_errors > 0 {
+                            metrics.total_error_delay_ms / metrics.request_errors
+                        } else {
+                            0
+                        },
+                        metrics.subscribed_chains.len(),
+                        metrics.subscription_window_reconnects,
+                        metrics.subscription_total_reconects,
+                        metrics.subscription_window_subscribe_at.elapsed().as_millis(),
+                        metrics.subscribed_at.elapsed().as_millis(),
+                    );
+                    let mut metrics = metrics.clone();
+                    metrics.last_window_delay_ms = 0;
+                    guard.insert(address, metrics);
+                }
+            }
+            _ => {}
+        },
+        _ => {}
+    }
 }
 
 impl GrpcClient {
@@ -54,6 +190,23 @@ impl GrpcClient {
         let client = ValidatorNodeClient::new(channel)
             .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE);
+
+        let mut metrics = CLIENT_METRICS.lock().unwrap();
+        let client_metrics = ClientMetrics {
+            requests: 0,
+            request_errors: 0,
+            total_request_delay_ms: 0,
+            total_error_delay_ms: 0,
+            last_window_delay_ms: 0,
+
+            subscribed_chains: HashMap::new(),
+            subscribed_at: Instant::now(),
+            subscription_total_reconects: 0,
+            subscription_window_subscribe_at: Instant::now(),
+            subscription_window_reconnects: 0,
+        };
+        metrics.entry(address.clone()).or_insert(client_metrics);
+
         Self {
             address,
             client,
@@ -105,20 +258,35 @@ impl GrpcClient {
         let request_inner = request.try_into().map_err(|_| NodeError::GrpcError {
             error: "could not convert request to proto".to_string(),
         })?;
+        let address = self.address.clone();
         loop {
+            client_print_if_needed(address.clone());
+            client_request(address.clone());
+            let request_at = Instant::now();
+
             match f(self.client.clone(), Request::new(request_inner.clone())).await {
                 Err(s) if Self::is_retryable(&s) && retry_count < self.max_retries => {
+                    let elapsed = request_at.elapsed().as_millis();
+                    client_response(address.clone(), false, elapsed);
+
                     let delay = self.retry_delay.saturating_mul(retry_count);
                     retry_count += 1;
                     linera_base::time::timer::sleep(delay).await;
                     continue;
                 }
                 Err(s) => {
+                    let elapsed = request_at.elapsed().as_millis();
+                    client_response(address.clone(), false, elapsed);
+
                     return Err(NodeError::GrpcError {
                         error: format!("remote request [{handler}] failed with status: {s:?}"),
                     });
                 }
-                Ok(result) => return Ok(result.into_inner()),
+                Ok(result) => {
+                    let elapsed = request_at.elapsed().as_millis();
+                    client_response(address.clone(), true, elapsed);
+                    return Ok(result.into_inner());
+                }
             };
         }
     }
@@ -260,11 +428,17 @@ impl ValidatorNode for GrpcClient {
 
     #[instrument(target = "grpc_client", skip_all, err, fields(address = self.address))]
     async fn subscribe(&self, chains: Vec<ChainId>) -> Result<Self::NotificationStream, NodeError> {
+        let address = self.address.clone();
+        let subscribe_address = self.address.clone();
         let retry_delay = self.retry_delay;
         let max_retries = self.max_retries;
         let mut retry_count = 0;
         let subscription_request = SubscriptionRequest {
-            chain_ids: chains.into_iter().map(|chain| chain.into()).collect(),
+            chain_ids: chains
+                .clone()
+                .into_iter()
+                .map(|chain| chain.into())
+                .collect(),
         };
         let mut client = self.client.clone();
 
@@ -279,16 +453,23 @@ impl ValidatorNode for GrpcClient {
                 .into_inner(),
         );
 
+        for chain_id in chains {
+            client_subscribe_chain(address.clone(), chain_id);
+        }
+
         // A stream of `Result<grpc::Notification, tonic::Status>` that keeps calling
         // `client.subscribe(request)` endlessly and without delay.
         let endlessly_retrying_notification_stream = stream::unfold((), move |()| {
             let mut client = client.clone();
             let subscription_request = subscription_request.clone();
             let mut stream = stream.take();
+            let address = subscribe_address.clone();
             async move {
                 let stream = if let Some(stream) = stream.take() {
                     future::Either::Right(stream)
                 } else {
+                    client_retry_subscribe_chain(address.clone());
+
                     match client.subscribe(subscription_request.clone()).await {
                         Err(err) => future::Either::Left(stream::iter(iter::once(Err(err)))),
                         Ok(response) => future::Either::Right(response.into_inner()),
@@ -316,6 +497,13 @@ impl ValidatorNode for GrpcClient {
                 };
 
                 if !span.in_scope(|| Self::is_retryable(status)) || retry_count >= max_retries {
+                    error!(
+                        "{} notification Error {}, {:?} {} retries",
+                        address,
+                        status.code(),
+                        status,
+                        retry_count
+                    );
                     return future::Either::Left(future::ready(false));
                 }
                 let delay = retry_delay.saturating_mul(retry_count);

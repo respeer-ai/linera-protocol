@@ -803,6 +803,7 @@ pub enum Operation {
     /// A system operation.
     System(Box<SystemOperation>),
     /// A user operation (in serialized form).
+    #[serde(rename_all = "camelCase")]
     User {
         application_id: ApplicationId,
         #[serde(with = "serde_bytes")]
@@ -948,6 +949,7 @@ pub enum MessageKind {
 
 /// A posted message together with routing information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct OutgoingMessage {
     /// The destination of the message.
     pub destination: Destination,
