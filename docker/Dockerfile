@@ -60,7 +60,8 @@ COPY rust-toolchain* Cargo.* ./
 
 ENV GIT_COMMIT=${git_commit}
 
-RUN cargo build --release \
+RUN cargo clean
+RUN cargo build --release -j8 \
     --target "$target" \
     --bin linera \
     --bin linera-proxy \

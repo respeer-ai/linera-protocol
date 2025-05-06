@@ -5,15 +5,18 @@
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
-FAUCET_URL=https://faucet.testnet-babbage.linera.net
-CLUSTER=
 
-options="f:z:"
+GENERATE=0
+FAUCET_URL=https://faucet.testnet-babbage.linera.net
+CLUSTER=testnet-babbage
+
+options="f:z:g:"
 
 while getopts $options opt; do
   case ${opt} in
     f) FAUCET_URL=${OPTARG} ;;
     z) CLUSTER=${OPTARG} ;;
+    g) GENERATE=${OPTARG} ;;
   esac
 done
 
@@ -23,7 +26,9 @@ OUTPUT_DIR="$SCRIPT_DIR"/../output
 mkdir -p $OUTPUT_DIR
 
 WALLET_DIR=$OUTPUT_DIR/wallet
-rm $WALLET_DIR -rf
+if [ "x$GENERATE" == "x1" ]; then
+  rm $WALLET_DIR -rf
+fi
 mkdir -p $WALLET_DIR
 
 RPC_DIR=$WALLET_DIR/rpc
@@ -63,7 +68,9 @@ if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
   mv $PWD/target/release/linera $RESPEER_BIN_DIR
 fi
 
-linera --wallet $RPC_DIR/wallet.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet $FAUCET_URL
+if [ "x$GENERATE" == "x1" ]; then
+  linera --wallet $RPC_DIR/wallet.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet $FAUCET_URL
+fi
 
 cd $SCRIPT_DIR
 # Compose up rpc
@@ -90,6 +97,8 @@ function generate_nginx_conf() {
 
 SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')
 
+rm $OUTPUT_DIR/configuration -rf
+cp -rvf $ROOT_DIR/configuration $OUTPUT_DIR/
 generate_nginx_conf 30080 rpc rpc.respeer.ai
 
 sudo nginx -s reload
