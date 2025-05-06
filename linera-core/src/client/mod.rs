@@ -3633,12 +3633,12 @@ where
         validated_block_certificate: Option<ValidatedBlockCertificate>,
         blobs: Vec<Blob>,
     ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
-        self.prepare_chain().await?;
+        let info = self.prepare_chain().await?;
 
         let mutex = self.state().client_mutex();
         let _guard = mutex.lock_owned().await;
 
-        let info = self.request_leader_timeout_if_needed().await?;
+        // let info = self.request_leader_timeout_if_needed().await?;
         let committee = self.local_committee().await?;
 
         // If there is a validated block in the current round, finalize it.
@@ -3893,9 +3893,9 @@ where
     #[tracing::instrument(level = "trace")]
     /// Processes the last pending block. Assumes that the local chain is up to date.
     pub async fn block_round(&self) -> Result<Round, ChainClientError> {
-        self.prepare_chain().await?;
+        let info = self.prepare_chain().await?;
 
-        let info = self.request_leader_timeout_if_needed().await?;
+        // let info = self.request_leader_timeout_if_needed().await?;
         let identity = self.identity().await?;
 
         match self.state().pending_proposal() {
@@ -3929,8 +3929,8 @@ where
         let mutex = self.state().client_mutex();
         let _guard = mutex.lock_owned().await;
 
-        self.prepare_chain().await?;
-        let info = self.request_leader_timeout_if_needed().await?;
+        let info = self.prepare_chain().await?;
+        // let info = self.request_leader_timeout_if_needed().await?;
 
         // If there is a validated block in the current round, finalize it.
         if info.manager.has_locking_block_in_current_round()

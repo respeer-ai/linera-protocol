@@ -60,7 +60,7 @@ export PATH=$RESPEER_BIN_DIR:$PATH
 
 LATEST_COMMIT=`git rev-parse HEAD`
 LATEST_COMMIT=${LATEST_COMMIT:0:10}
-INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}'`
+INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}' | awk '{print $1}'`
 
 # Compile official for local linera toolchain
 if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
