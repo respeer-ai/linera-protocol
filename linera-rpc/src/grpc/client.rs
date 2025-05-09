@@ -86,9 +86,9 @@ impl Drop for RequestGuard {
         let finalized = self.finalized;
         let canceled = self.canceled;
 
-        client_response(address.clone(), success, elapsed, finalized, canceled);
+        client_response(address.clone(), success, elapsed, canceled);
 
-        if !finalized {
+        if !finalized && !canceled {
             return;
         }
 
@@ -195,7 +195,7 @@ fn client_request(address: String) {
     metrics.requests += 1;
 }
 
-fn client_response(address: String, success: bool, elapsed: u128, finalized: bool, canceled: bool) {
+fn client_response(address: String, success: bool, elapsed: u128, canceled: bool) {
     let arc_metrics = client_metrics(address);
     let mut metrics = arc_metrics.lock().unwrap();
 
@@ -205,12 +205,11 @@ fn client_response(address: String, success: bool, elapsed: u128, finalized: boo
     }
     if canceled {
         metrics.canceleds += 1;
+    } else {
+        metrics.responses += 1;
     }
     metrics.total_request_delay_ms += elapsed;
     metrics.last_window_delay_ms += elapsed;
-    if finalized {
-        metrics.responses += 1;
-    }
 }
 
 fn client_subscribe_chain(address: String, chain_id: ChainId) {
@@ -376,7 +375,7 @@ impl GrpcClient {
         let try_lock_at = Instant::now();
 
         client_try_lock(address.clone());
-        let permit = semaphore.acquire_owned().await.unwrap();
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
         std::hint::black_box(&permit);
         client_locked(address.clone());
 

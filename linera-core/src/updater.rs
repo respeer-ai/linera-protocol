@@ -154,8 +154,6 @@ where
                 highest_key_score = highest_key_score.max(entry.0);
             }
             Err(err) => {
-                tracing::error!("validator {:?} vote error {}", committee.network_address(&name), err);
-
                 // TODO(#2857): Handle non-remote errors properly.
                 let err = match err {
                     ChainClientError::RemoteNodeError(err) => err,
