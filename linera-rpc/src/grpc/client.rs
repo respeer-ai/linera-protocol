@@ -6,7 +6,7 @@ use std::{
     fmt,
     future::Future,
     iter,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use futures::{future, stream, StreamExt};
@@ -31,6 +31,7 @@ use linera_core::{
     worker::Notification,
 };
 use linera_version::VersionInfo;
+use tokio::sync::{Mutex, Semaphore};
 use tonic::{Code, IntoRequest, Request, Status};
 use tracing::{debug, error, info, instrument, warn};
 
@@ -45,8 +46,10 @@ use crate::{
 
 #[derive(Clone)]
 struct ClientMetrics {
+    lock_waits: u128,
     requests: u128,
     request_errors: u128,
+    in_flights: u128,
     total_request_delay_ms: u128,
     total_error_delay_ms: u128,
     last_window_delay_ms: u128,
@@ -61,6 +64,8 @@ struct ClientMetrics {
 lazy_static! {
     static ref CLIENT_METRICS: Arc<Mutex<HashMap<String, ClientMetrics>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    static ref CLIENT_SEMAPHORES: Arc<Mutex<HashMap<String, Arc<Semaphore>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 }
 
 #[derive(Clone)]
@@ -71,112 +76,144 @@ pub struct GrpcClient {
     max_retries: u32,
 }
 
-fn client_request(address: String) {
-    match CLIENT_METRICS.lock() {
-        Ok(mut guard) => match guard.get(&address) {
-            Some(metrics) => {
-                let mut metrics = metrics.clone();
-                metrics.requests += 1;
-                guard.insert(address, metrics);
-            }
-            _ => {}
-        },
-        _ => {}
-    }
+async fn client_metrics(address: String) -> ClientMetrics {
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut metrics = arc_metrics.lock().await;
+    let client_metrics = ClientMetrics {
+        lock_waits: 0,
+        requests: 0,
+        request_errors: 0,
+        in_flights: 0,
+        total_request_delay_ms: 0,
+        total_error_delay_ms: 0,
+        last_window_delay_ms: 0,
+
+        subscribed_chains: HashMap::new(),
+        subscribed_at: Instant::now(),
+        subscription_total_reconects: 0,
+        subscription_window_subscribe_at: Instant::now(),
+        subscription_window_reconnects: 0,
+    };
+    metrics.entry(address).or_insert(client_metrics).clone()
 }
 
-fn client_response(address: String, success: bool, elapsed: u128) {
-    match CLIENT_METRICS.lock() {
-        Ok(mut guard) => match guard.get(&address) {
-            Some(metrics) => {
-                let mut metrics = metrics.clone();
-                if !success {
-                    metrics.request_errors += 1;
-                    metrics.total_error_delay_ms += elapsed;
-                }
-                metrics.total_request_delay_ms += elapsed;
-                metrics.last_window_delay_ms += elapsed;
-                guard.insert(address, metrics);
-            }
-            _ => {}
-        },
-        _ => {}
-    }
+async fn client_try_lock(address: String) {
+    let mut metrics = client_metrics(address.clone()).await;
+
+    metrics.lock_waits += 1;
+
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut guard = arc_metrics.lock().await;
+    guard.insert(address, metrics);
 }
 
-fn client_subscribe_chain(address: String, chain_id: ChainId) {
-    match CLIENT_METRICS.lock() {
-        Ok(mut guard) => match guard.get(&address) {
-            Some(metrics) => {
-                let mut metrics = metrics.clone();
-                metrics.subscribed_chains.insert(chain_id, Instant::now());
-                guard.insert(address, metrics);
-            }
-            _ => {}
-        },
-        _ => {}
-    }
+async fn client_locked(address: String) {
+    let mut metrics = client_metrics(address.clone()).await;
+
+    metrics.lock_waits -= 1;
+
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut guard = arc_metrics.lock().await;
+    guard.insert(address, metrics);
 }
 
-fn client_retry_subscribe_chain(address: String) {
-    match CLIENT_METRICS.lock() {
-        Ok(mut guard) => match guard.get(&address) {
-            Some(metrics) => {
-                let mut metrics = metrics.clone();
-                metrics.subscription_total_reconects += 1;
-                metrics.subscription_window_reconnects += 1;
-                if metrics
-                    .subscription_window_subscribe_at
-                    .elapsed()
-                    .as_millis()
-                    > 300000
-                {
-                    metrics.subscription_window_subscribe_at = Instant::now();
-                    metrics.subscription_window_reconnects = 0;
-                }
-                guard.insert(address, metrics);
-            }
-            _ => {}
-        },
-        _ => {}
-    }
+async fn client_request(address: String) {
+    let mut metrics = client_metrics(address.clone()).await;
+
+    metrics.requests += 1;
+    metrics.in_flights += 1;
+
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut guard = arc_metrics.lock().await;
+    guard.insert(address, metrics);
 }
 
-fn client_print_if_needed(address: String) {
-    match CLIENT_METRICS.lock() {
-        Ok(mut guard) => match guard.get(&address) {
-            Some(metrics) => {
-                if metrics.last_window_delay_ms >= 60000 && metrics.requests > 0 {
-                    info!(
-                        "{} requests {} errors {} average rtt {}ms average success rtt {}ms average error rtt {}ms chains {} reconnects {}/{} elapsed {}ms/{}ms",
-                        address,
-                        metrics.requests,
-                        metrics.request_errors,
-                        metrics.total_request_delay_ms / metrics.requests,
-                        if metrics.requests > metrics.request_errors {
-                            (metrics.total_request_delay_ms - metrics.total_error_delay_ms) / (metrics.requests - metrics.request_errors)
-                        } else {
-                            0
-                        },
-                        if metrics.request_errors > 0 {
-                            metrics.total_error_delay_ms / metrics.request_errors
-                        } else {
-                            0
-                        },
-                        metrics.subscribed_chains.len(),
-                        metrics.subscription_window_reconnects,
-                        metrics.subscription_total_reconects,
-                        metrics.subscription_window_subscribe_at.elapsed().as_millis(),
-                        metrics.subscribed_at.elapsed().as_millis(),
-                    );
-                    let mut metrics = metrics.clone();
-                    metrics.last_window_delay_ms = 0;
-                    guard.insert(address, metrics);
-                }
-            }
-            _ => {}
-        },
-        _ => {}
+async fn client_response(address: String, success: bool, elapsed: u128) {
+    let mut metrics = client_metrics(address.clone()).await;
+
+    if !success {
+        metrics.request_errors += 1;
+        metrics.total_error_delay_ms += elapsed;
+    }
+    metrics.total_request_delay_ms += elapsed;
+    metrics.last_window_delay_ms += elapsed;
+    metrics.in_flights -= 1;
+
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut guard = arc_metrics.lock().await;
+    guard.insert(address, metrics);
+}
+
+async fn client_subscribe_chain(address: String, chain_id: ChainId) {
+    let mut metrics = client_metrics(address.clone()).await;
+
+    metrics.subscribed_chains.insert(chain_id, Instant::now());
+
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut guard = arc_metrics.lock().await;
+    guard.insert(address, metrics);
+}
+
+async fn client_lock_waits(address: String) -> u128 {
+    let metrics = client_metrics(address).await;
+
+    metrics.lock_waits
+}
+
+async fn client_inflight(address: String) -> u128 {
+    let metrics = client_metrics(address).await;
+
+    metrics.in_flights
+}
+
+async fn client_retry_subscribe_chain(address: String) {
+    let mut metrics = client_metrics(address.clone()).await;
+
+    metrics.subscription_total_reconects += 1;
+    metrics.subscription_window_reconnects += 1;
+    if metrics
+        .subscription_window_subscribe_at
+        .elapsed()
+        .as_millis()
+        > 300000
+    {
+        metrics.subscription_window_subscribe_at = Instant::now();
+        metrics.subscription_window_reconnects = 0;
+    }
+
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut guard = arc_metrics.lock().await;
+    guard.insert(address, metrics);
+}
+
+async fn client_print_if_needed(address: String) {
+    let metrics = client_metrics(address.clone()).await;
+
+    if metrics.last_window_delay_ms >= 60000 && metrics.requests > 0 {
+        info!(
+            "{} requests {} errors {} average rtt {}ms average success rtt {}ms average error rtt {}ms chains {} reconnects {}/{} elapsed {}ms/{}ms",
+            address,
+            metrics.requests,
+            metrics.request_errors,
+            metrics.total_request_delay_ms / metrics.requests,
+            if metrics.requests > metrics.request_errors {
+                (metrics.total_request_delay_ms - metrics.total_error_delay_ms) / (metrics.requests - metrics.request_errors)
+            } else {
+                0
+            },
+            if metrics.request_errors > 0 {
+                metrics.total_error_delay_ms / metrics.request_errors
+            } else {
+                0
+            },
+            metrics.subscribed_chains.len(),
+            metrics.subscription_window_reconnects,
+            metrics.subscription_total_reconects,
+            metrics.subscription_window_subscribe_at.elapsed().as_millis(),
+            metrics.subscribed_at.elapsed().as_millis(),
+        );
+        let mut metrics = metrics.clone();
+        metrics.last_window_delay_ms = 0;
     }
 }
 
@@ -190,22 +227,6 @@ impl GrpcClient {
         let client = ValidatorNodeClient::new(channel)
             .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE);
-
-        let mut metrics = CLIENT_METRICS.lock().unwrap();
-        let client_metrics = ClientMetrics {
-            requests: 0,
-            request_errors: 0,
-            total_request_delay_ms: 0,
-            total_error_delay_ms: 0,
-            last_window_delay_ms: 0,
-
-            subscribed_chains: HashMap::new(),
-            subscribed_at: Instant::now(),
-            subscription_total_reconects: 0,
-            subscription_window_subscribe_at: Instant::now(),
-            subscription_window_reconnects: 0,
-        };
-        metrics.entry(address.clone()).or_insert(client_metrics);
 
         Self {
             address,
@@ -258,16 +279,35 @@ impl GrpcClient {
         let request_inner = request.try_into().map_err(|_| NodeError::GrpcError {
             error: "could not convert request to proto".to_string(),
         })?;
+
         let address = self.address.clone();
+
+        let try_lock_at = Instant::now();
+        client_try_lock(address.clone()).await;
+
+        let arc_semaphores = Arc::clone(&CLIENT_SEMAPHORES);
+        let semaphore = {
+            let mut semaphores = arc_semaphores.lock().await;
+            semaphores
+                .entry(address.clone())
+                .or_insert_with(|| Arc::new(Semaphore::new(10)))
+                .clone()
+        };
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        std::hint::black_box(&permit);
+
+        client_locked(address.clone()).await;
+        let first_request_at = Instant::now();
+
         loop {
-            client_print_if_needed(address.clone());
-            client_request(address.clone());
+            client_print_if_needed(address.clone()).await;
+            client_request(address.clone()).await;
             let request_at = Instant::now();
 
             match f(self.client.clone(), Request::new(request_inner.clone())).await {
                 Err(s) if Self::is_retryable(&s) && retry_count < self.max_retries => {
                     let elapsed = request_at.elapsed().as_millis();
-                    client_response(address.clone(), false, elapsed);
+                    client_response(address.clone(), false, elapsed).await;
 
                     let delay = self.retry_delay.saturating_mul(retry_count);
                     retry_count += 1;
@@ -276,7 +316,20 @@ impl GrpcClient {
                 }
                 Err(s) => {
                     let elapsed = request_at.elapsed().as_millis();
-                    client_response(address.clone(), false, elapsed);
+                    client_response(address.clone(), false, elapsed).await;
+
+                    let request_elapsed = first_request_at.elapsed().as_millis();
+                    let lock_wait = try_lock_at.elapsed().as_millis() - request_elapsed;
+                    tracing::info!(
+                        "failed remote request {} to {} took {}ms lock wait {}ms with {} retries {} in flights {} lock waits",
+                        handler,
+                        address.clone(),
+                        request_elapsed,
+                        lock_wait,
+                        retry_count,
+                        client_inflight(address.clone()).await,
+                        client_lock_waits(address).await,
+                    );
 
                     return Err(NodeError::GrpcError {
                         error: format!("remote request [{handler}] failed with status: {s:?}"),
@@ -284,7 +337,21 @@ impl GrpcClient {
                 }
                 Ok(result) => {
                     let elapsed = request_at.elapsed().as_millis();
-                    client_response(address.clone(), true, elapsed);
+                    client_response(address.clone(), true, elapsed).await;
+
+                    let request_elapsed = first_request_at.elapsed().as_millis();
+                    let lock_wait = try_lock_at.elapsed().as_millis() - request_elapsed;
+                    tracing::info!(
+                        "succeed remote request {} to {} took {}ms lock wait {}ms with {} retries {} in flights {} lock waits",
+                        handler,
+                        address.clone(),
+                        request_elapsed,
+                        lock_wait,
+                        retry_count,
+                        client_inflight(address.clone()).await,
+                        client_lock_waits(address).await,
+                    );
+
                     return Ok(result.into_inner());
                 }
             };
@@ -454,7 +521,7 @@ impl ValidatorNode for GrpcClient {
         );
 
         for chain_id in chains {
-            client_subscribe_chain(address.clone(), chain_id);
+            client_subscribe_chain(address.clone(), chain_id).await;
         }
 
         // A stream of `Result<grpc::Notification, tonic::Status>` that keeps calling
@@ -468,7 +535,7 @@ impl ValidatorNode for GrpcClient {
                 let stream = if let Some(stream) = stream.take() {
                     future::Either::Right(stream)
                 } else {
-                    client_retry_subscribe_chain(address.clone());
+                    client_retry_subscribe_chain(address.clone()).await;
 
                     match client.subscribe(subscription_request.clone()).await {
                         Err(err) => future::Either::Left(stream::iter(iter::once(Err(err)))),
