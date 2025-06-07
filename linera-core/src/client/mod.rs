@@ -3887,7 +3887,7 @@ where
         // Using the round number during execution counts as an oracle.
         // Accessing the round number in single-leader rounds where we are not the leader
         // is not currently supported.
-        let round = match Self::round_for_new_proposal(&info, &identity, &block, true)? {
+        let round = match Self::round_for_new_proposal(&info, &identity, true)? {
             Either::Left(round) => round.multi_leader(),
             Either::Right(_) => None,
         };
@@ -3909,9 +3909,11 @@ where
         // let info = self.request_leader_timeout_if_needed().await?;
         let identity = self.identity().await?;
 
+        // TODO: use latest process
+
         match self.state().pending_proposal() {
-            Some(proposal) => {
-                match Self::round_for_new_proposal(&info, &identity, &proposal.block, true)? {
+            Some(_) => {
+                match Self::round_for_new_proposal(&info, &identity, true)? {
                     Either::Left(round) => Ok(round),
                     Either::Right(_) => Err(ChainClientError::InvalidBlockRound),
                 }
