@@ -26,6 +26,7 @@ where
 {
     application_parameters: Mutex<Option<Application::Parameters>>,
     application_id: Mutex<Option<ApplicationId<Application::Abi>>>,
+    application_creator_chain_id: Mutex<Option<ChainId>>,
     chain_id: Mutex<Option<ChainId>>,
     next_block_height: Mutex<Option<BlockHeight>>,
     timestamp: Mutex<Option<Timestamp>>,
@@ -56,6 +57,7 @@ where
         MockServiceRuntime {
             application_parameters: Mutex::new(None),
             application_id: Mutex::new(None),
+            application_creator_chain_id: Mutex::new(None),
             chain_id: Mutex::new(None),
             next_block_height: Mutex::new(None),
             timestamp: Mutex::new(None),
@@ -122,6 +124,27 @@ where
     pub fn application_id(&self) -> ApplicationId<Application::Abi> {
         Self::fetch_mocked_value(
             &self.application_id,
+            "Application ID has not been mocked, \
+            please call `MockServiceRuntime::set_application_id` first",
+        )
+    }
+
+    /// Configures the application creator chain ID to return during the test.
+    pub fn with_application_creator_chain_id(self, chain_id: ChainId) -> Self {
+        *self.application_creator_chain_id.lock().unwrap() = Some(chain_id);
+        self
+    }
+
+    /// Configures the application creator chain ID to return during the test.
+    pub fn set_application_creator_chain_id(&mut self, chain_id: ChainId) -> &mut Self {
+        *self.application_creator_chain_id.lock().unwrap() = Some(chain_id);
+        self
+    }
+
+    /// Returns the chain ID of the current application creator.
+    pub fn application_creator_chain_id(&self) -> ChainId {
+        Self::fetch_mocked_value(
+            &self.application_creator_chain_id,
             "Application ID has not been mocked, \
             please call `MockServiceRuntime::set_application_id` first",
         )

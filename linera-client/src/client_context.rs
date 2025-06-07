@@ -119,6 +119,37 @@ where
             .map_err(|e| error::Inner::Persistence(Box::new(e)))??;
         Ok(())
     }
+
+    fn destroy_chain_client(&self, chain_id: ChainId) {
+        self.destroy_chain_client(chain_id);
+    }
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        message_id: MessageId,
+        owner: AccountOwner,
+        validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error> {
+        self.assign_new_chain_to_key(chain_id, message_id, owner, validators)
+            .await
+    }
+
+    async fn save_wallet(&mut self) -> Result<(), Error> {
+        self.save_wallet().await
+    }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.set_owner_default_chain(owner, chain_id).await
+    }
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
+        self.add_unassigned_key_pair(key_pair).await
+    }
 }
 
 impl<S, W> ClientContext<S, W>
@@ -638,6 +669,26 @@ where
 
         info!("{}", "Data blob verified successfully!");
         Ok(())
+    }
+
+    fn destroy_chain_client(&self, chain_id: ChainId) {
+        self.client.destroy_chain(chain_id);
+    }
+
+    pub async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.wallet
+            .as_mut()
+            .set_owner_default_chain(owner, chain_id)?;
+        self.save_wallet().await
+    }
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
+        self.wallet.as_mut().add_unassigned_key_pair(key_pair);
+        self.save_wallet().await
     }
 }
 

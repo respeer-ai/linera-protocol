@@ -10,9 +10,9 @@ use std::{
 use async_trait::async_trait;
 use futures::{channel::mpsc, lock::Mutex, FutureExt as _, SinkExt as _, Stream, StreamExt};
 use linera_base::{
-    crypto::AccountSecretKey,
-    data_types::Timestamp,
-    identifiers::{ChainId, Destination},
+    crypto::{AccountSecretKey, ValidatorPublicKey},
+    data_types::{TimeDelta, Timestamp},
+    identifiers::{AccountOwner, ChainId, Destination, MessageId},
 };
 use linera_core::{
     client::{ChainClient, ChainClientError},
@@ -83,6 +83,26 @@ pub trait ClientContext: 'static {
     }
 
     async fn forget_chain(&mut self, chain_id: &ChainId) -> Result<(), Error>;
+
+    fn destroy_chain_client(&self, chain_id: ChainId);
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        message_id: MessageId,
+        owner: AccountOwner,
+        validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error>;
+
+    async fn save_wallet(&mut self) -> Result<(), Error>;
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
@@ -138,7 +158,7 @@ impl<C: ClientContext> ChainListener<C> {
 
     /// Spawns a task running the listener for the given chain, if it is not already running.
     #[instrument(level = "trace", skip_all, fields(?chain_id))]
-    fn run_with_chain_id(&self, chain_id: ChainId) {
+    pub fn run_with_chain_id(&self, chain_id: ChainId) {
         if !self.listening.lock().unwrap().insert(chain_id) {
             // If we are already listening to notifications, there's nothing to do.
             // This can happen if we download a child before the parent
@@ -308,7 +328,10 @@ impl<C: ClientContext> ChainClientListener<C> {
         debug!("Processing inbox");
         match self.client.process_inbox_without_prepare().await {
             Err(ChainClientError::CannotFindKeyForChain(_)) => {}
-            Err(error) => warn!(%error, "Failed to process inbox."),
+            Err(error) => {
+                warn!(%error, "Failed to process inbox.");
+                self.timeout = Timestamp::now().saturating_add(TimeDelta::from_secs(3));
+            }
             Ok((certs, None)) => info!("Done processing inbox. {} blocks created.", certs.len()),
             Ok((certs, Some(new_timeout))) => {
                 info!(

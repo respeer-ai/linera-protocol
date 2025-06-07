@@ -27,6 +27,7 @@ pub struct Wallet {
     pub chains: BTreeMap<ChainId, UserChain>,
     pub unassigned_key_pairs: HashMap<AccountOwner, AccountSecretKey>,
     pub default: Option<ChainId>,
+    pub defaults: HashMap<AccountOwner, ChainId>,
     pub genesis_config: GenesisConfig,
     pub testing_prng_seed: Option<u64>,
 }
@@ -51,6 +52,7 @@ impl Wallet {
             chains: BTreeMap::new(),
             unassigned_key_pairs: HashMap::new(),
             default: None,
+            defaults: HashMap::new(),
             genesis_config,
             testing_prng_seed,
         }
@@ -200,6 +202,36 @@ impl Wallet {
         if self.testing_prng_seed.is_some() {
             self.testing_prng_seed = Some(rng.gen());
         }
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.defaults.get(&owner).copied()
+    }
+
+    pub fn owner_chain_ids(&self, owner: AccountOwner) -> Vec<ChainId> {
+        self.chains
+            .iter()
+            .filter_map(|(chain_id, chain)| {
+                chain
+                    .key_pair
+                    .as_ref()
+                    .is_some_and(|key_pair| AccountOwner::from(key_pair.public()) == owner)
+                    .then_some(*chain_id)
+            })
+            .collect()
+    }
+
+    pub fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        ensure!(
+            self.chains.contains_key(&chain_id),
+            error::Inner::NonexistentChain(chain_id)
+        );
+        self.defaults.insert(owner, chain_id);
+        Ok(())
     }
 }
 
