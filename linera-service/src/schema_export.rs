@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use linera_base::{
-    crypto::CryptoHash,
+    crypto::{AccountSecretKey, CryptoHash},
     data_types::{BlobContent, BlockHeight, NetworkDescription, Timestamp},
-    identifiers::{AccountOwner, BlobId, ChainId},
+    identifiers::{AccountOwner, BlobId, ChainId, MessageId},
 };
 use linera_chain::{
     data_types::BlockProposal,
@@ -218,6 +218,36 @@ impl ClientContext for DummyContext {
 
     async fn update_wallet(&mut self, _: &ChainClient<Self::Environment>) -> Result<(), Error> {
         Ok(())
+    }
+
+    fn destroy_chain_client(&self, _: ChainId) {
+        unimplemented!()
+    }
+
+    async fn save_wallet(&mut self) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        _owner: AccountOwner,
+        _chain_id: ChainId,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        _chain_id: ChainId,
+        _message_id: MessageId,
+        _owner: AccountOwner,
+        _validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    async fn add_unassigned_key_pair(&mut self, _key_pair: AccountSecretKey) -> Result<(), Error> {
+        unimplemented!()
     }
 }
 

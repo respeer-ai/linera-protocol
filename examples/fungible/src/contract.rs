@@ -126,6 +126,7 @@ impl Contract for FungibleTokenContract {
 
     async fn execute_message(&mut self, message: Message) {
         match message {
+            // ANCHOR: execute_message_credit
             Message::Credit {
                 amount,
                 target,
@@ -134,10 +135,11 @@ impl Contract for FungibleTokenContract {
                 let is_bouncing = self
                     .runtime
                     .message_is_bouncing()
-                    .expect("Message delivery status has to be available when executing a message");
+                    .expect("Delivery status is available when executing a message");
                 let receiver = if is_bouncing { source } else { target };
                 self.state.credit(receiver, amount).await;
             }
+            // ANCHOR_END: execute_message_credit
             Message::Withdraw {
                 owner,
                 amount,
@@ -177,6 +179,7 @@ impl FungibleTokenContract {
         }
     }
 
+    // ANCHOR: finish_transfer_to_account
     /// Executes the final step of a transfer where the tokens are sent to the destination.
     async fn finish_transfer_to_account(
         &mut self,
@@ -199,4 +202,5 @@ impl FungibleTokenContract {
                 .send_to(target_account.chain_id);
         }
     }
+    // ANCHOR_END: finish_transfer_to_account
 }

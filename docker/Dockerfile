@@ -127,4 +127,7 @@ COPY --chmod=755 \
     docker/compose-server-entrypoint.sh \
     docker/compose-proxy-entrypoint.sh \
     docker/compose-server-init.sh \
+    docker/faucet-entrypoint.sh \
+    docker/rpc-entrypoint.sh \
+    docker/wallet-entrypoint.sh \
     ./

@@ -274,6 +274,7 @@ web-sys = "0.3.69"
 web-time = "1.1.0"
 wit-bindgen = "0.24.0"
 zstd = "0.13.2"
+lazy_static = "1.5.0"
 
 linera-base = { version = "0.15.1", path = "./linera-base" }
 linera-chain = { version = "0.15.1", path = "./linera-chain" }
@@ -357,3 +358,9 @@ branch = "post-message"
 
 [workspace.metadata.spellcheck]
 config = "spellcheck-cfg.toml"
+
+[patch.crates-io.ed25519-dalek]
+version = "2.1.1"
+git = "https://github.com/respeer-ai/curve25519-dalek"
+branch = "respeer-pub-field-1efe6a93"
+

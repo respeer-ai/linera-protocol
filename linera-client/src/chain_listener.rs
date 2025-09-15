@@ -13,9 +13,9 @@ use futures::{
     Future, FutureExt as _, StreamExt,
 };
 use linera_base::{
-    crypto::{CryptoHash, Signer},
+    crypto::{AccountSecretKey, CryptoHash, Signer, ValidatorPublicKey},
     data_types::{ChainDescription, Timestamp},
-    identifiers::{AccountOwner, BlobType, ChainId},
+    identifiers::{AccountOwner, BlobType, ChainId, MessageId},
     task::NonBlockingFuture,
 };
 use linera_core::{
@@ -167,6 +167,28 @@ impl<C: ClientContext> ListeningClient<C> {
             warn!("Failed to join listening task: {error:?}");
         }
     }
+
+    async fn forget_chain(&mut self, chain_id: &ChainId) -> Result<(), Error>;
+
+    fn destroy_chain_client(&self, chain_id: ChainId);
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        message_id: MessageId,
+        owner: AccountOwner,
+        validators: Option<Vec<(ValidatorPublicKey, String)>>,
+    ) -> Result<(), Error>;
+
+    async fn save_wallet(&mut self) -> Result<(), Error>;
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
@@ -233,6 +255,13 @@ impl<C: ClientContext> ChainListener<C> {
             join_all(self.listening.into_values().map(|client| client.stop())).await;
             Ok(())
         })
+    }
+
+    #[instrument(skip(self))]
+    pub async fn run_with_chain_id(
+        mut self,
+    ) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+        unimplemented!()
     }
 
     /// Processes a notification, updating local chains and validators as needed.

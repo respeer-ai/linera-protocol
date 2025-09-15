@@ -19,6 +19,7 @@ pub struct Wallet {
     pub chains: BTreeMap<ChainId, UserChain>,
     pub default: Option<ChainId>,
     genesis_config: GenesisConfig,
+    pub defaults: HashMap<AccountOwner, ChainId>,
 }
 
 impl Extend<UserChain> for Wallet {
@@ -36,6 +37,7 @@ impl Wallet {
         Wallet {
             chains: BTreeMap::new(),
             default: None,
+            defaults: HashMap::new(),
             genesis_config,
         }
     }
@@ -153,6 +155,36 @@ impl Wallet {
 
     pub fn genesis_config(&self) -> &GenesisConfig {
         &self.genesis_config
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.defaults.get(&owner).copied()
+    }
+
+    pub fn owner_chain_ids(&self, owner: AccountOwner) -> Vec<ChainId> {
+        self.chains
+            .iter()
+            .filter_map(|(chain_id, chain)| {
+                chain
+                    .key_pair
+                    .as_ref()
+                    .is_some_and(|key_pair| AccountOwner::from(key_pair.public()) == owner)
+                    .then_some(*chain_id)
+            })
+            .collect()
+    }
+
+    pub fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        ensure!(
+            self.chains.contains_key(&chain_id),
+            error::Inner::NonexistentChain(chain_id)
+        );
+        self.defaults.insert(owner, chain_id);
+        Ok(())
     }
 }
 

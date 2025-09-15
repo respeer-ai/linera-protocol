@@ -50,13 +50,21 @@ use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tracing::info;
 
+/// A rough estimate of the maximum fee for a block.
+const MAX_FEE: Amount = Amount::from_millis(100);
+
 /// Returns an HTML response constructing the GraphiQL web page for the given URI.
 pub(crate) async fn graphiql(uri: axum::http::Uri) -> impl axum::response::IntoResponse {
     axum::response::Html(
         async_graphql::http::GraphiQLSource::build()
             .endpoint(uri.path())
             .subscription_endpoint("/ws")
-            .finish(),
+            .finish()
+            .replace("@17", "@18")
+            .replace(
+                "ReactDOM.render(",
+                "ReactDOM.createRoot(document.getElementById(\"graphiql\")).render(",
+            ),
     )
 }
 
@@ -502,7 +510,8 @@ pub struct FaucetService<C>
 where
     C: ClientContext,
 {
-    chain_id: ChainId,
+    main_chain_id: ChainId,
+    faucet_chain_id: Arc<Mutex<Option<ChainId>>>,
     context: Arc<Mutex<C>>,
     client: ChainClient<C::Environment>,
     genesis_config: Arc<GenesisConfig>,
@@ -513,6 +522,7 @@ where
     metrics_port: u16,
     amount: Amount,
     end_timestamp: Timestamp,
+    faucet_init_balance: Amount,
     start_timestamp: Timestamp,
     start_balance: Amount,
     faucet_storage: Arc<Mutex<FaucetStorage>>,
@@ -531,7 +541,8 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            chain_id: self.chain_id,
+            main_chain_id: self.main_chain_id,
+            faucet_chain_id: Arc::clone(&self.faucet_chain_id),
             context: Arc::clone(&self.context),
             client: self.client.clone(),
             genesis_config: Arc::clone(&self.genesis_config),
@@ -541,6 +552,7 @@ where
             #[cfg(feature = "metrics")]
             metrics_port: self.metrics_port,
             amount: self.amount,
+            faucet_init_balance: self.faucet_init_balance,
             end_timestamp: self.end_timestamp,
             start_timestamp: self.start_timestamp,
             start_balance: self.start_balance,
@@ -706,5 +718,29 @@ where
     async fn index_handler(service: Extension<Self>, request: GraphQLRequest) -> GraphQLResponse {
         let schema = service.0.schema();
         schema.execute(request.into_inner()).await.into()
+    }
+}
+
+trait ClientOutcomeExt {
+    type Output;
+
+    /// Returns the committed result or an error if we are not the leader.
+    ///
+    /// It is recommended to use single-owner chains for the faucet to avoid this error.
+    fn try_unwrap(self) -> Result<Self::Output, Error>;
+}
+
+impl<T> ClientOutcomeExt for ClientOutcome<T> {
+    type Output = T;
+
+    fn try_unwrap(self) -> Result<Self::Output, Error> {
+        match self {
+            ClientOutcome::Committed(result) => Ok(result),
+            ClientOutcome::WaitForTimeout(timeout) => Err(Error::new(format!(
+                "This faucet is using a multi-owner chain and is not the leader right now. \
+                Try again at {}",
+                timeout.timestamp,
+            ))),
+        }
     }
 }
