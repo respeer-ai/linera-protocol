@@ -13,7 +13,7 @@ use futures::{
     Future, FutureExt as _, StreamExt,
 };
 use linera_base::{
-    crypto::{AccountSecretKey, CryptoHash, Signer, ValidatorPublicKey},
+    crypto::{CryptoHash, Signer},
     data_types::{ChainDescription, Timestamp},
     identifiers::{AccountOwner, BlobType, ChainId},
     task::NonBlockingFuture,
@@ -145,13 +145,14 @@ impl<T: ClientContext> ClientContextExt for T {}
 /// A background task listens to the validators and updates the local node, so any updates to
 /// this chain will trigger a notification. The background task is terminated when this gets
 /// dropped.
+#[derive(Clone)]
 struct ListeningClient<C: ClientContext> {
     /// The chain client.
     client: ContextChainClient<C>,
     /// The abort handle for the task that listens to the validators.
     abort_handle: AbortOnDrop,
     /// The listening task's join handle.
-    join_handle: NonBlockingFuture<()>,
+    join_handle: Arc<Mutex<Option<NonBlockingFuture<()>>>>,
     /// The stream of notifications from the local node.
     notification_stream: Arc<Mutex<NotificationStream>>,
     /// This is only `< u64::MAX` when the client is waiting for a timeout to process the inbox.
@@ -168,7 +169,7 @@ impl<C: ClientContext> ListeningClient<C> {
         Self {
             client,
             abort_handle,
-            join_handle,
+            join_handle: Arc::new(Mutex::new(Some(join_handle))),
             #[allow(clippy::arc_with_non_send_sync)] // Only `Send` with `futures-util/alloc`.
             notification_stream: Arc::new(Mutex::new(notification_stream)),
             timeout: Timestamp::from(u64::MAX),
@@ -177,7 +178,7 @@ impl<C: ClientContext> ListeningClient<C> {
 
     async fn stop(self) {
         drop(self.abort_handle);
-        if let Err(error) = self.join_handle.await {
+        if let Err(error) = self.join_handle.lock().await.take().unwrap().await {
             warn!("Failed to join listening task: {error:?}");
         }
     }
@@ -185,6 +186,7 @@ impl<C: ClientContext> ListeningClient<C> {
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
 /// appropriately.
+#[derive(Clone)]
 pub struct ChainListener<C: ClientContext> {
     context: Arc<Mutex<C>>,
     storage: <C::Environment as Environment>::Storage,
@@ -250,10 +252,7 @@ impl<C: ClientContext> ChainListener<C> {
     }
 
     #[instrument(skip(self))]
-    pub async fn run_with_chain_id(
-        mut self,
-        chain_id: ChainId,
-    ) -> Result<impl Future<Output = Result<(), Error>>, Error> {
+    pub async fn run_with_chain_id(mut self, chain_id: ChainId) -> Result<(), Error> {
         let chain_ids = {
             let guard = self.context.lock().await;
             let admin_chain_id = guard.wallet().genesis_admin_chain();
@@ -261,27 +260,9 @@ impl<C: ClientContext> ChainListener<C> {
                 .make_chain_client(admin_chain_id)
                 .synchronize_from_validators()
                 .await?;
-            BTreeSet::from_iter(
-                [chain_id]
-                    .into_iter()
-                    .chain([admin_chain_id]),
-            )
+            BTreeSet::from_iter([chain_id].into_iter().chain([admin_chain_id]))
         };
-
-        Ok(async {
-            self.listen_recursively(chain_ids).await?;
-            loop {
-                match self.next_action().await? {
-                    Action::ProcessInbox(chain_id) => self.maybe_process_inbox(chain_id).await?,
-                    Action::Notification(notification) => {
-                        self.process_notification(notification).await?
-                    }
-                    Action::Stop => break,
-                }
-            }
-            join_all(self.listening.into_values().map(|client| client.stop())).await;
-            Ok(())
-        })
+        self.listen_recursively(chain_ids).await
     }
 
     /// Processes a notification, updating local chains and validators as needed.

@@ -41,8 +41,8 @@ use linera_base::{
 use linera_base::{data_types::Bytecode, vm::VmRuntime};
 use linera_chain::{
     data_types::{
-        BlockExecutionOutcome, BlockProposal, ChainAndHeight, IncomingBundle, LiteVote,
-        MessageAction, OriginalProposal, ProposalContent, ProposedBlock, Transaction,
+        BlockProposal, ChainAndHeight, IncomingBundle, LiteVote, MessageAction, ProposedBlock,
+        Transaction,
     },
     manager::LockingBlock,
     types::{
@@ -247,12 +247,6 @@ impl<Env: Environment> Client<Env> {
             initial_block_hash: block_hash,
             initial_next_block_height: next_block_height,
             timing_sender,
-        }
-    }
-
-    pub fn destroy_chain(self: &Arc<Self>, chain_id: ChainId) {
-        if let dashmap::mapref::entry::Entry::Occupied(entry) = self.chains.entry(chain_id) {
-            entry.remove();
         }
     }
 
@@ -1324,21 +1318,21 @@ impl<Env: Environment> Client<Env> {
                         panic!(
                             "Expected incoming bundle at transaction index {}, found operation",
                             index
-                            );
+                        );
                     };
                     ensure!(
                         !message.bundle.is_protected(),
                         ChainClientError::BlockProposalError(
                             "Protected incoming message failed to execute locally"
-                            )
-                        );
+                        )
+                    );
                     // Reject the faulty message from the block and continue.
                     // TODO(#1420): This is potentially a bit heavy-handed for
                     // retryable errors.
                     info!(
-                        %error, origin = ?message.origin,
-                        "Message failed to execute locally and will be rejected."
-                        );
+                    %error, origin = ?message.origin,
+                    "Message failed to execute locally and will be rejected."
+                    );
                     message.action = MessageAction::Reject;
                     continue;
                 }
@@ -4110,7 +4104,8 @@ impl<Env: Environment> ChainClient<Env> {
             }
         }
 
-        self.state_mut().set_pending_proposal(proposed_block.clone(), blobs);
+        self.state_mut()
+            .set_pending_proposal(proposed_block.clone(), blobs);
         let block = Block::new(proposed_block, outcome);
 
         let certificate = if round.is_fast() {
@@ -4253,7 +4248,7 @@ impl<Env: Environment> ChainClient<Env> {
         let owner = self.identity().await?;
         let local_node = &self.client.local_node;
 
-        let (block, blobs) = if let Some(locking) = &info.manager.requested_locking {
+        let (block, _blobs) = if let Some(locking) = &info.manager.requested_locking {
             match &**locking {
                 LockingBlock::Regular(certificate) => {
                     let blob_ids = certificate.block().required_blob_ids();
@@ -4295,13 +4290,10 @@ impl<Env: Environment> ChainClient<Env> {
         let (proposed_block, outcome) = block.into_proposal();
         let round = match Self::round_for_new_proposal(&info, &owner, has_oracle_responses)? {
             Either::Left(round) => round,
-            Either::Right(timeout) => return Ok(None),
+            Either::Right(_) => return Ok(None),
         };
         debug!("Proposing block for round {}", round);
 
-        let already_handled_locally = info
-            .manager
-            .already_handled_proposal(round, &proposed_block);
         // Create the final block proposal.
         let proposal = if let Some(locking) = info.manager.requested_locking {
             Box::new(match *locking {
@@ -4313,9 +4305,11 @@ impl<Env: Environment> ChainClient<Env> {
                 }
             })
         } else {
-            Box::new(
-                UnsignedBlockProposal::new_initial(round, proposed_block.clone(), outcome)
-            )
+            Box::new(UnsignedBlockProposal::new_initial(
+                round,
+                proposed_block.clone(),
+                outcome,
+            ))
         };
 
         return Ok(Some(*proposal));
@@ -4367,6 +4361,7 @@ enum ExecuteBlockOutcome {
 
 /// Wrapper for `AbortHandle` that aborts when its dropped.
 #[must_use]
+#[derive(Clone)]
 pub struct AbortOnDrop(pub AbortHandle);
 
 impl Drop for AbortOnDrop {

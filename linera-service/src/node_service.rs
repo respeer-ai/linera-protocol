@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    borrow::Cow, collections::HashMap, iter, net::SocketAddr, num::NonZeroU16, str::FromStr,
-    sync::Arc, future::IntoFuture,
+    borrow::Cow, collections::HashMap, future::IntoFuture, iter, net::SocketAddr, num::NonZeroU16,
+    str::FromStr, sync::Arc,
 };
 
 use async_graphql::{
@@ -21,8 +21,7 @@ use linera_base::{
         AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
     },
     data_types::{
-        Amount, ApplicationDescription, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round,
-        TimeDelta, Epoch,
+        Amount, ApplicationDescription, ApplicationPermissions, Blob, Bytecode, Epoch, TimeDelta,
     },
     doc_scalar, ensure,
     identifiers::{
@@ -33,8 +32,8 @@ use linera_base::{
     BcsHexParseError,
 };
 use linera_chain::{
-    data_types::{BlockExecutionOutcome, CandidateBlockMaterial, IncomingBundle, OriginalProposal},
-    types::{Block, ConfirmedBlock, GenericCertificate},
+    data_types::{CandidateBlockMaterial, IncomingBundle},
+    types::{ConfirmedBlock, GenericCertificate},
     ChainStateView,
 };
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
@@ -56,7 +55,7 @@ use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, instrument, trace};
 
-use crate::{cli_wrappers::Faucet, util};
+use crate::util;
 
 #[derive(SimpleObject, Serialize, Deserialize, Clone)]
 pub struct Chains {
@@ -83,7 +82,7 @@ where
 {
     context: Arc<Mutex<C>>,
 
-    chain_listener: Arc<Mutex<ChainListener<C>>>,
+    chain_listener: Arc<Mutex<Option<ChainListener<C>>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,7 +148,6 @@ bcs_scalar!(
 pub struct WalletInitializer {
     owner: AccountOwner,
     signature: AccountSignature,
-    faucet_url: String,
     creator_chain_id: ChainId,
 }
 
@@ -713,7 +711,6 @@ where
         let WalletInitializer {
             owner,
             signature,
-            faucet_url,
             creator_chain_id,
         } = initializer;
 
@@ -721,7 +718,10 @@ where
         struct Nonce(ChainId);
         impl BcsSignable<'_> for Nonce {}
 
-        ensure!(owner == self.signature_owner(signature), "Invalid signature");
+        ensure!(
+            owner == self.signature_owner(signature),
+            "Invalid signature"
+        );
 
         tracing::info!("Verifing signature ...");
         let nonce = Nonce(creator_chain_id);
@@ -747,8 +747,10 @@ where
         self.chain_listener
             .lock()
             .await
-            .clone()
-            .run_with_chain_id(chain_id);
+            .take()
+            .unwrap()
+            .run_with_chain_id(chain_id)
+            .await?;
 
         tokio::task::yield_now().await;
         std::thread::sleep(std::time::Duration::from_millis(2000));
@@ -854,6 +856,7 @@ where
             .collect();
         let blobs: Vec<_> = blob_bytes.into_iter().map(Blob::new_data).collect();
 
+        // TODO: Should we consider about the proposal blobs?
         let Some(block_proposal) = client
             .simulate_execute_block(operations, bundles, blobs.clone(), local_time)
             .await?
@@ -1218,7 +1221,7 @@ where
     default_chain: Option<ChainId>,
     context: Arc<Mutex<C>>,
 
-    chain_listener: Arc<Mutex<ChainListener<C>>>,
+    chain_listener: Arc<Mutex<Option<ChainListener<C>>>>,
 }
 
 impl<C> Clone for NodeService<C>
@@ -1257,13 +1260,12 @@ where
             default_chain,
             context: Arc::clone(&context),
 
-
-            chain_listener: Arc::new(Mutex::new(ChainListener::new(
+            chain_listener: Arc::new(Mutex::new(Some(ChainListener::new(
                 config,
                 Arc::clone(&context),
                 storage,
                 CancellationToken::new(),
-            ))),
+            )))),
         }
     }
 
@@ -1288,7 +1290,7 @@ where
 
     /// Runs the node service.
     #[instrument(name = "node_service", level = "info", skip_all, fields(port = ?self.port))]
-    pub async fn run(self, cancellation_token: CancellationToken) -> Result<(), anyhow::Error> {
+    pub async fn run(self, _cancellation_token: CancellationToken) -> Result<(), anyhow::Error> {
         let port = self.port.get();
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
         let application_handler =
@@ -1328,9 +1330,16 @@ where
 
         info!("GraphiQL IDE: http://localhost:{}", port);
 
-        self.chain_listener.lock().await.clone().run().await;
+        let chain_listener = self
+            .chain_listener
+            .lock()
+            .await
+            .take()
+            .unwrap()
+            .run()
+            .await?;
 
-        let mut chain_listener = Box::pin(self.chain_listener.lock().await.clone()).fuse();
+        let mut chain_listener = Box::pin(chain_listener).fuse();
         let tcp_listener =
             tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?;
         let server = axum::serve(tcp_listener, app).into_future();

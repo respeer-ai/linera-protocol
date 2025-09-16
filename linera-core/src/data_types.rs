@@ -6,12 +6,12 @@ use std::{collections::BTreeMap, ops::Not};
 
 use custom_debug_derive::Debug;
 use linera_base::{
-    doc_scalar,
     crypto::{
         BcsSignable, CryptoError, CryptoHash, ValidatorPublicKey, ValidatorSecretKey,
         ValidatorSignature,
     },
     data_types::{Amount, BlockHeight, ChainDescription, Epoch, Round, Timestamp},
+    doc_scalar,
     identifiers::{AccountOwner, ChainId},
 };
 use linera_chain::{
@@ -408,11 +408,7 @@ pub struct UnsignedBlockProposal {
 doc_scalar!(UnsignedBlockProposal, "Unsigned block proposal");
 
 impl UnsignedBlockProposal {
-    pub fn new_initial(
-        round: Round,
-        block: ProposedBlock,
-        outcome: BlockExecutionOutcome,
-    ) -> Self {
+    pub fn new_initial(round: Round, block: ProposedBlock, outcome: BlockExecutionOutcome) -> Self {
         let content = ProposalContent {
             round,
             block,

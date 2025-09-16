@@ -1,10 +1,13 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::{BTreeMap, HashMap}, iter::IntoIterator};
+use std::{
+    collections::{BTreeMap, HashMap},
+    iter::IntoIterator,
+};
 
 use linera_base::{
-    crypto::{CryptoHash, AccountSecretKey},
+    crypto::CryptoHash,
     data_types::{BlockHeight, ChainDescription, Timestamp},
     ensure,
     identifiers::{AccountOwner, ChainId},

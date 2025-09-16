@@ -33,7 +33,7 @@ use linera_core::{
 use linera_version::VersionInfo;
 use tokio::sync::Semaphore;
 use tonic::{Code, IntoRequest, Request, Status};
-use tracing::{debug, info, instrument, warn, Level, error};
+use tracing::{debug, error, info, instrument, warn, Level};
 
 use super::{
     api::{self, validator_node_client::ValidatorNodeClient, SubscriptionRequest},

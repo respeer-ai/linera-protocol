@@ -32,7 +32,7 @@ use {
     },
     futures::{stream, StreamExt, TryStreamExt},
     linera_base::{
-        crypto::{AccountPublicKey, AccountSecretKey},
+        crypto::AccountPublicKey,
         data_types::Amount,
         identifiers::{ApplicationId, BlobType},
     },
@@ -680,10 +680,6 @@ where
 
         info!("{}", "Data blob verified successfully!");
         Ok(())
-    }
-
-    fn destroy_chain_client(&self, chain_id: ChainId) {
-        self.client.destroy_chain(chain_id);
     }
 
     pub async fn set_owner_default_chain(
