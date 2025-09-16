@@ -1252,6 +1252,8 @@ where
         context: C,
     ) -> Self {
         let context = Arc::new(Mutex::new(context));
+
+        #[cfg(not(feature = "fake-chain-listener"))]
         let storage = context.lock().await.storage().clone();
 
         Self {
@@ -1260,12 +1262,15 @@ where
             default_chain,
             context: Arc::clone(&context),
 
+            #[cfg(not(feature = "fake-chain-listener"))]
             chain_listener: Arc::new(Mutex::new(Some(ChainListener::new(
                 config,
                 Arc::clone(&context),
                 storage,
                 CancellationToken::new(),
             )))),
+            #[cfg(feature = "fake-chain-listener")]
+            chain_listener: Arc::new(Mutex::new(None)),
         }
     }
 

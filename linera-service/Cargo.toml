@@ -52,6 +52,7 @@ metrics = [
 storage-service = ["linera-storage-service"]
 enable-wallet-rpc = []
 disable-native-rpc = []
+fake-chain-listener = []
 
 [dependencies]
 alloy-primitives.workspace = true
@@ -181,6 +182,7 @@ path = "src/proxy/main.rs"
 [[bin]]
 name = "linera-schema-export"
 path = "src/schema_export.rs"
+required-features = ["fake-chain-listener"]
 
 [[bin]]
 name = "linera-benchmark"
