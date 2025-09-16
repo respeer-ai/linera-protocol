@@ -1,10 +1,10 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{collections::BTreeMap, iter::IntoIterator};
+use std::{collections::{BTreeMap, HashMap}, iter::IntoIterator};
 
 use linera_base::{
-    crypto::CryptoHash,
+    crypto::{CryptoHash, AccountSecretKey},
     data_types::{BlockHeight, ChainDescription, Timestamp},
     ensure,
     identifiers::{AccountOwner, ChainId},
@@ -166,9 +166,9 @@ impl Wallet {
             .iter()
             .filter_map(|(chain_id, chain)| {
                 chain
-                    .key_pair
+                    .owner
                     .as_ref()
-                    .is_some_and(|key_pair| AccountOwner::from(key_pair.public()) == owner)
+                    .is_some_and(|&_owner| _owner == owner)
                     .then_some(*chain_id)
             })
             .collect()

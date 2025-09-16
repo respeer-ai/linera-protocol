@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, ops::Not};
 
 use custom_debug_derive::Debug;
 use linera_base::{
+    doc_scalar,
     crypto::{
         BcsSignable, CryptoError, CryptoHash, ValidatorPublicKey, ValidatorSecretKey,
         ValidatorSignature,
@@ -403,6 +404,8 @@ pub struct UnsignedBlockProposal {
     #[debug(skip_if = Option::is_none)]
     pub original_proposal: Option<OriginalProposal>,
 }
+
+doc_scalar!(UnsignedBlockProposal, "Unsigned block proposal");
 
 impl UnsignedBlockProposal {
     pub fn new_initial(

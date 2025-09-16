@@ -15,7 +15,7 @@ use futures::{
 use linera_base::{
     crypto::{AccountSecretKey, CryptoHash, Signer, ValidatorPublicKey},
     data_types::{ChainDescription, Timestamp},
-    identifiers::{AccountOwner, BlobType, ChainId, MessageId},
+    identifiers::{AccountOwner, BlobType, ChainId},
     task::NonBlockingFuture,
 };
 use linera_core::{
@@ -110,6 +110,20 @@ pub trait ClientContext {
     ) -> Result<(), Error>;
 
     async fn update_wallet(&mut self, client: &ContextChainClient<Self>) -> Result<(), Error>;
+
+    async fn assign_new_chain_to_owner(
+        &mut self,
+        chain_id: ChainId,
+        owner: AccountOwner,
+    ) -> Result<(), Error>;
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    async fn save_wallet(&mut self) -> Result<(), Error>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -167,28 +181,6 @@ impl<C: ClientContext> ListeningClient<C> {
             warn!("Failed to join listening task: {error:?}");
         }
     }
-
-    async fn forget_chain(&mut self, chain_id: &ChainId) -> Result<(), Error>;
-
-    fn destroy_chain_client(&self, chain_id: ChainId);
-
-    async fn assign_new_chain_to_key(
-        &mut self,
-        chain_id: ChainId,
-        message_id: MessageId,
-        owner: AccountOwner,
-        validators: Option<Vec<(ValidatorPublicKey, String)>>,
-    ) -> Result<(), Error>;
-
-    async fn save_wallet(&mut self) -> Result<(), Error>;
-
-    async fn set_owner_default_chain(
-        &mut self,
-        owner: AccountOwner,
-        chain_id: ChainId,
-    ) -> Result<(), Error>;
-
-    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error>;
 }
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
@@ -260,8 +252,36 @@ impl<C: ClientContext> ChainListener<C> {
     #[instrument(skip(self))]
     pub async fn run_with_chain_id(
         mut self,
+        chain_id: ChainId,
     ) -> Result<impl Future<Output = Result<(), Error>>, Error> {
-        unimplemented!()
+        let chain_ids = {
+            let guard = self.context.lock().await;
+            let admin_chain_id = guard.wallet().genesis_admin_chain();
+            guard
+                .make_chain_client(admin_chain_id)
+                .synchronize_from_validators()
+                .await?;
+            BTreeSet::from_iter(
+                [chain_id]
+                    .into_iter()
+                    .chain([admin_chain_id]),
+            )
+        };
+
+        Ok(async {
+            self.listen_recursively(chain_ids).await?;
+            loop {
+                match self.next_action().await? {
+                    Action::ProcessInbox(chain_id) => self.maybe_process_inbox(chain_id).await?,
+                    Action::Notification(notification) => {
+                        self.process_notification(notification).await?
+                    }
+                    Action::Stop => break,
+                }
+            }
+            join_all(self.listening.into_values().map(|client| client.stop())).await;
+            Ok(())
+        })
     }
 
     /// Processes a notification, updating local chains and validators as needed.

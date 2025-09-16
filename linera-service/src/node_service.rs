@@ -3,7 +3,7 @@
 
 use std::{
     borrow::Cow, collections::HashMap, iter, net::SocketAddr, num::NonZeroU16, str::FromStr,
-    sync::Arc,
+    sync::Arc, future::IntoFuture,
 };
 
 use async_graphql::{
@@ -22,11 +22,11 @@ use linera_base::{
     },
     data_types::{
         Amount, ApplicationDescription, ApplicationPermissions, Blob, BlockHeight, Bytecode, Round,
-        TimeDelta,
+        TimeDelta, Epoch,
     },
     doc_scalar, ensure,
     identifiers::{
-        Account, AccountOwner, ApplicationId, ChainId, IndexAndEvent, MessageId, ModuleId, StreamId,
+        Account, AccountOwner, ApplicationId, ChainId, IndexAndEvent, ModuleId, StreamId,
     },
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
@@ -40,7 +40,7 @@ use linera_chain::{
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
 use linera_core::{
     client::{ChainClient, ChainClientError},
-    data_types::ClientOutcome,
+    data_types::{ClientOutcome, UnsignedBlockProposal},
     worker::Notification,
 };
 use linera_execution::{
@@ -112,19 +112,15 @@ pub struct Balances {
 
 #[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
 pub struct SimulatedBlockMaterial {
-    block: Block,
-    outcome: Option<BlockExecutionOutcome>,
+    block_proposal: UnsignedBlockProposal,
     blob_bytes: Vec<Vec<u8>>,
-    original_proposal: Option<OriginalProposal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignedBlock {
-    block: Block,
-    round: Round,
+    unsigned_block_proposal: UnsignedBlockProposal,
     signature: AccountSignature,
-    original_proposal: Option<OriginalProposal>,
     // If block contains PublishDataBlob, it should have blobs, too
     blob_bytes: Vec<Vec<u8>>,
 }
@@ -137,10 +133,8 @@ doc_scalar!(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignedBlockBcs {
-    block: Block,
-    round: Round,
+    unsigned_block_proposal: UnsignedBlockProposal,
     signature: AccountSignature,
-    original_proposal: Option<OriginalProposal>,
     // If block contains PublishDataBlob, it should have blobs, too
     blob_bytes: Vec<Vec<u8>>,
 }
@@ -156,8 +150,7 @@ pub struct WalletInitializer {
     owner: AccountOwner,
     signature: AccountSignature,
     faucet_url: String,
-    // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
-    // message_id: MessageId,
+    creator_chain_id: ChainId,
 }
 
 doc_scalar!(
@@ -267,14 +260,22 @@ where
     async fn chain_initialized(
         &self,
         chain_id: ChainId,
-        message_id: MessageId,
+        creator_chain_id: ChainId,
     ) -> Result<(), Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let client = self.context.lock().await.make_chain_client(chain_id);
         client.track_chain(chain_id);
-        client.track_chain(message_id.chain_id);
+        client.track_chain(creator_chain_id);
         client.retry_pending_outgoing_messages().await?;
         client.prepare_chain().await?;
         Ok(())
+    }
+
+    fn signature_owner(&self, signature: AccountSignature) -> AccountOwner {
+        match signature {
+            AccountSignature::Ed25519 { public_key, .. } => public_key.into(),
+            AccountSignature::Secp256k1 { public_key, .. } => public_key.into(),
+            AccountSignature::EvmSecp256k1 { address, .. } => AccountOwner::Address20(address),
+        }
     }
 }
 
@@ -706,8 +707,6 @@ where
         &self,
         chain_id: ChainId,
         initializer: WalletInitializer,
-        // TODO: work around for https://github.com/linera-io/linera-protocol/issues/3477
-        message_id: MessageId,
     ) -> Result<ChainId, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
@@ -715,33 +714,25 @@ where
             owner,
             signature,
             faucet_url,
+            creator_chain_id,
         } = initializer;
 
         #[derive(Debug, Serialize, Deserialize)]
-        struct Nonce(MessageId);
+        struct Nonce(ChainId);
         impl BcsSignable<'_> for Nonce {}
 
-        let secret_key = self
-            .context
-            .lock()
-            .await
-            .wallet()
-            .key_pair_for_owner(&owner)
-            .expect("Public key must be added firstly");
+        ensure!(owner == self.signature_owner(signature), "Invalid signature");
 
         tracing::info!("Verifing signature ...");
-        let nonce = Nonce(message_id);
-        signature.verify(&nonce, secret_key.public())?;
-
-        let faucet = Faucet::new(faucet_url.clone());
-        let validators = faucet.current_validators().await?;
+        let nonce = Nonce(creator_chain_id);
+        signature.verify(&nonce)?;
 
         tracing::info!("Assigning new chain to public key ...");
         // Public key must already be added before claim new chain
         self.context
             .lock()
             .await
-            .assign_new_chain_to_key(chain_id, message_id, owner, Some(validators))
+            .assign_new_chain_to_owner(chain_id, owner)
             .await?;
 
         tracing::info!("Setting default chain with public key ...");
@@ -763,7 +754,7 @@ where
         std::thread::sleep(std::time::Duration::from_millis(2000));
 
         tracing::info!("Finalizing initialization ...");
-        self.chain_initialized(chain_id, message_id).await?;
+        self.chain_initialized(chain_id, creator_chain_id).await?;
 
         tracing::info!("Initialized chain {}", chain_id);
 
@@ -771,31 +762,25 @@ where
     }
 
     /// Submit block proposal with signature
-    async fn submit_block_and_signature(
+    async fn submit_signed_block(
         &self,
         chain_id: ChainId,
-        height: BlockHeight,
         block: SignedBlock,
     ) -> Result<CryptoHash, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let client = self.context.lock().await.make_chain_client(chain_id);
 
         let SignedBlock {
-            block,
-            round,
+            unsigned_block_proposal,
             signature,
-            validated_block_certificate,
             blob_bytes,
         } = block;
 
         let hash = client
             .submit_external_signed_block_proposal_and_signature(
-                height,
-                block,
-                round,
+                unsigned_block_proposal,
                 signature,
-                validated_block_certificate,
                 blob_bytes
                     .into_iter()
                     .map(|bytes| Blob::new_data(bytes))
@@ -813,28 +798,22 @@ where
     async fn submit_block_and_signature_bcs(
         &self,
         chain_id: ChainId,
-        height: BlockHeight,
         block: SignedBlockBcs,
     ) -> Result<CryptoHash, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let client = self.context.lock().await.make_chain_client(chain_id);
 
         let SignedBlockBcs {
-            block,
-            round,
+            unsigned_block_proposal,
             signature,
-            validated_block_certificate,
             blob_bytes,
         } = block;
 
         let hash = client
             .submit_external_signed_block_proposal_and_signature(
-                height,
-                block,
-                round,
+                unsigned_block_proposal,
                 signature,
-                validated_block_certificate,
                 blob_bytes
                     .into_iter()
                     .map(|bytes| Blob::new_data(bytes))
@@ -867,16 +846,16 @@ where
             ..
         } = candidate;
 
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let client = self.context.lock().await.make_chain_client(chain_id);
 
         let bundles: Vec<_> = incoming_bundles
             .iter()
             .map(|bundle| bundle.clone())
             .collect();
-        let blobs = blob_bytes.into_iter().map(Blob::new_data).collect();
+        let blobs: Vec<_> = blob_bytes.into_iter().map(Blob::new_data).collect();
 
-        let Some((block, outcome, blobs, original_proposal)) = client
-            .simulate_execute_block(operations, bundles, blobs, local_time)
+        let Some(block_proposal) = client
+            .simulate_execute_block(operations, bundles, blobs.clone(), local_time)
             .await?
         else {
             // Finalizing last block, waiting for a moment
@@ -887,36 +866,9 @@ where
             .map(|blob| blob.bytes().to_vec())
             .collect();
         Ok(Some(SimulatedBlockMaterial {
-            block,
-            outcome,
+            block_proposal,
             blob_bytes,
-            original_proposal,
         }))
-    }
-
-    /// Add key pair info which only has public key
-    pub async fn wallet_init_public_key(
-        &self,
-        public_key: AccountPublicKey,
-        signature: AccountSignature,
-    ) -> Result<AccountOwner, Error> {
-        ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
-
-        #[derive(Debug, Serialize, Deserialize)]
-        struct Nonce(Vec<u8>);
-        impl BcsSignable<'_> for Nonce {}
-
-        let nonce = Nonce(public_key.as_bytes());
-        let _ = AccountSecretKey::generate().sign(&nonce);
-        signature.verify(&nonce, public_key)?;
-
-        let secret_key = AccountSecretKey::from_public_key(public_key);
-        self.context
-            .lock()
-            .await
-            .add_unassigned_key_pair(secret_key)
-            .await?;
-        Ok(public_key.into())
     }
 }
 
@@ -1035,7 +987,7 @@ where
 
     /// Returns the pending message of the chain
     async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let client = self.context.lock().await.make_chain_client(chain_id);
         Ok(client.pending_message_bundles().await?)
     }
 
@@ -1045,10 +997,10 @@ where
         chain_id: ChainId,
         max_pending_messages: usize,
     ) -> Result<CandidateBlockMaterial, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let client = self.context.lock().await.make_chain_client(chain_id);
 
         let incoming_bundles = client.pending_message_bundles().await?;
-        let local_time = client.next_timestamp(&incoming_bundles, client.state().timestamp());
+        let local_time = client.next_timestamp(&incoming_bundles, client.block_time().await?);
         let round = client.block_round().await?;
 
         let incoming_bundles = if incoming_bundles.len() > max_pending_messages {
@@ -1070,7 +1022,7 @@ where
         chain_id: ChainId,
         owner: Option<AccountOwner>,
     ) -> Result<Amount, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id)?;
+        let client = self.context.lock().await.make_chain_client(chain_id);
         Ok(match owner {
             Some(owner) => client.query_owner_balance(owner).await?,
             _ => client.query_balance().await?,
@@ -1086,9 +1038,7 @@ where
 
         let mut chain_balances = HashMap::new();
         for chain in chain_owners {
-            let Ok(client) = self.context.lock().await.make_chain_client(chain.chain_id) else {
-                continue;
-            };
+            let client = self.context.lock().await.make_chain_client(chain.chain_id);
             let mut owner_balances = HashMap::new();
             for owner in chain.owners {
                 owner_balances.insert(owner, client.query_owner_balance(owner).await?);
@@ -1157,28 +1107,6 @@ where
             )
             .unwrap(),
         }
-    }
-
-    async fn transfer_pattern(&self) -> Operation {
-        let from_owner = AccountOwner::from_str(
-            "0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
-        )
-        .unwrap();
-        let to_owner = AccountOwner::from_str(
-            "0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa33",
-        )
-        .unwrap();
-        Operation::system(SystemOperation::Transfer {
-            owner: from_owner,
-            recipient: Recipient::Account(Account {
-                chain_id: ChainId::from_str(
-                    "8eeff319f14a33ff906799140246c525880861d654dfa1a13d0c019c3d18f1c6",
-                )
-                .unwrap(),
-                owner: to_owner,
-            }),
-            amount: Amount::from_str("0.123").unwrap(),
-        })
     }
 }
 
@@ -1321,17 +1249,20 @@ where
         context: C,
     ) -> Self {
         let context = Arc::new(Mutex::new(context));
+        let storage = context.lock().await.storage().clone();
+
         Self {
             config: config.clone(),
             port,
             default_chain,
-            storage: storage.clone(),
             context: Arc::clone(&context),
+
 
             chain_listener: Arc::new(Mutex::new(ChainListener::new(
                 config,
                 Arc::clone(&context),
                 storage,
+                CancellationToken::new(),
             ))),
         }
     }
@@ -1396,8 +1327,6 @@ where
             .layer(CorsLayer::permissive());
 
         info!("GraphiQL IDE: http://localhost:{}", port);
-
-        let storage = self.context.lock().await.storage().clone();
 
         self.chain_listener.lock().await.clone().run().await;
 

@@ -32,7 +32,7 @@ use {
     },
     futures::{stream, StreamExt, TryStreamExt},
     linera_base::{
-        crypto::AccountPublicKey,
+        crypto::{AccountPublicKey, AccountSecretKey},
         data_types::Amount,
         identifiers::{ApplicationId, BlobType},
     },
@@ -116,31 +116,12 @@ where
         self.update_wallet_from_client(client).await
     }
 
-    async fn forget_chain(&mut self, chain_id: &ChainId) -> Result<(), Error> {
-        self.wallet
-            .mutate(|w| w.forget_chain(chain_id))
-            .await
-            .map_err(|e| error::Inner::Persistence(Box::new(e)))??;
-        Ok(())
-    }
-
-    fn destroy_chain_client(&self, chain_id: ChainId) {
-        self.destroy_chain_client(chain_id);
-    }
-
-    async fn assign_new_chain_to_key(
+    async fn assign_new_chain_to_owner(
         &mut self,
         chain_id: ChainId,
-        message_id: MessageId,
         owner: AccountOwner,
-        validators: Option<Vec<(ValidatorPublicKey, String)>>,
     ) -> Result<(), Error> {
-        self.assign_new_chain_to_key(chain_id, message_id, owner, validators)
-            .await
-    }
-
-    async fn save_wallet(&mut self) -> Result<(), Error> {
-        self.save_wallet().await
+        self.assign_new_chain_to_owner(chain_id, owner).await
     }
 
     async fn set_owner_default_chain(
@@ -151,8 +132,8 @@ where
         self.set_owner_default_chain(owner, chain_id).await
     }
 
-    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
-        self.add_unassigned_key_pair(key_pair).await
+    async fn save_wallet(&mut self) -> Result<(), Error> {
+        self.save_wallet().await
     }
 }
 
@@ -407,7 +388,7 @@ impl<Env: Environment, W: Persist<Target = Wallet>> ClientContext<Env, W> {
         }
     }
 
-    pub async fn assign_new_chain_to_key(
+    pub async fn assign_new_chain_to_owner(
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
@@ -713,11 +694,6 @@ where
         self.wallet
             .as_mut()
             .set_owner_default_chain(owner, chain_id)?;
-        self.save_wallet().await
-    }
-
-    async fn add_unassigned_key_pair(&mut self, key_pair: AccountSecretKey) -> Result<(), Error> {
-        self.wallet.as_mut().add_unassigned_key_pair(key_pair);
         self.save_wallet().await
     }
 }

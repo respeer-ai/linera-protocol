@@ -1618,9 +1618,6 @@ pub enum ChainClientError {
     #[error("Epoch is already revoked")]
     EpochAlreadyRevoked,
 
-    #[error("Mismatch block height {0} != {1}")]
-    MismatchBlockHeight(BlockHeight, BlockHeight),
-
     #[error("Mismatch block timestamp {0} != {1}")]
     MismatchBlockTimestamp(u64, u64),
 
@@ -4043,7 +4040,6 @@ impl<Env: Environment> ChainClient<Env> {
 
     pub async fn submit_external_signed_block_proposal_and_signature(
         &self,
-        height: BlockHeight,
         unsigned_block_proposal: UnsignedBlockProposal,
         signature: AccountSignature,
         blobs: Vec<Blob>,
@@ -4067,11 +4063,6 @@ impl<Env: Environment> ChainClient<Env> {
         let proposed_block = unsigned_block_proposal.clone().content.block;
         let round = unsigned_block_proposal.content.round;
         let outcome = unsigned_block_proposal.outcome;
-
-        ensure!(
-            proposed_block.height == height,
-            ChainClientError::MismatchBlockHeight(proposed_block.height, height)
-        );
 
         let already_handled_locally = info
             .manager
@@ -4328,6 +4319,15 @@ impl<Env: Environment> ChainClient<Env> {
         };
 
         return Ok(Some(*proposal));
+    }
+
+    pub fn track_chain(&self, chain_id: ChainId) {
+        self.client.track_chain(chain_id);
+    }
+
+    pub async fn block_time(&self) -> Result<Timestamp, ChainClientError> {
+        let info = self.chain_info().await?;
+        Ok(info.timestamp)
     }
 }
 

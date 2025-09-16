@@ -284,6 +284,8 @@ pub enum OriginalProposal {
     },
 }
 
+doc_scalar!(OriginalProposal, "Exists proposal of new block.");
+
 /// An authenticated proposal for a new block.
 // TODO(#456): the signature of the block owner is currently lost but it would be useful
 // to have it for auditing purposes.
