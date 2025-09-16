@@ -11,11 +11,16 @@ use linera_base::{
         ValidatorSignature,
     },
     data_types::{Amount, BlockHeight, ChainDescription, Epoch, Round, Timestamp},
+    doc_scalar,
     identifiers::{AccountOwner, ChainId},
 };
 use linera_chain::{
-    data_types::{ChainAndHeight, IncomingBundle, MessageBundle},
+    data_types::{
+        BlockExecutionOutcome, BlockProposal, ChainAndHeight, IncomingBundle, MessageBundle,
+        OriginalProposal, ProposalContent, ProposedBlock,
+    },
     manager::ChainManagerInfo,
+    types::ValidatedBlockCertificate,
     ChainStateView,
 };
 use linera_execution::{committee::Committee, ExecutionRuntimeContext};
@@ -387,6 +392,72 @@ impl<T> ClientOutcome<T> {
         match self {
             ClientOutcome::Committed(t) => Ok(ClientOutcome::Committed(f(t)?)),
             ClientOutcome::WaitForTimeout(timeout) => Ok(ClientOutcome::WaitForTimeout(timeout)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(with_testing, derive(Eq, PartialEq))]
+pub struct UnsignedBlockProposal {
+    pub content: ProposalContent,
+    pub outcome: BlockExecutionOutcome,
+    #[debug(skip_if = Option::is_none)]
+    pub original_proposal: Option<OriginalProposal>,
+}
+
+doc_scalar!(UnsignedBlockProposal, "Unsigned block proposal");
+
+impl UnsignedBlockProposal {
+    pub fn new_initial(round: Round, block: ProposedBlock, outcome: BlockExecutionOutcome) -> Self {
+        let content = ProposalContent {
+            round,
+            block,
+            outcome: None,
+        };
+
+        Self {
+            content,
+            outcome,
+            original_proposal: None,
+        }
+    }
+
+    pub fn new_retry_fast(
+        round: Round,
+        old_proposal: BlockProposal,
+        outcome: BlockExecutionOutcome,
+    ) -> Self {
+        let content = ProposalContent {
+            round,
+            block: old_proposal.content.block,
+            outcome: None,
+        };
+
+        Self {
+            content,
+            outcome,
+            original_proposal: Some(OriginalProposal::Fast(old_proposal.signature)),
+        }
+    }
+
+    pub fn new_retry_regular(
+        round: Round,
+        validated_block_certificate: ValidatedBlockCertificate,
+        _outcome: BlockExecutionOutcome,
+    ) -> Self {
+        let certificate = validated_block_certificate.lite_certificate().cloned();
+        let block = validated_block_certificate.into_inner().into_inner();
+        let (block, outcome) = block.into_proposal();
+        let content = ProposalContent {
+            block,
+            round,
+            outcome: Some(outcome),
+        };
+
+        Self {
+            content,
+            outcome: _outcome,
+            original_proposal: Some(OriginalProposal::Regular { certificate }),
         }
     }
 }

@@ -258,6 +258,7 @@ pub enum MessageAction {
 
 /// A set of messages from a single block, for a single destination.
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageBundle {
     /// The block height.
     pub height: BlockHeight,
@@ -283,6 +284,8 @@ pub enum OriginalProposal {
     },
 }
 
+doc_scalar!(OriginalProposal, "Exists proposal of new block.");
+
 /// An authenticated proposal for a new block.
 // TODO(#456): the signature of the block owner is currently lost but it would be useful
 // to have it for auditing purposes.
@@ -297,6 +300,7 @@ pub struct BlockProposal {
 
 /// A message together with kind, authentication and grant information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
@@ -359,6 +363,7 @@ doc_scalar!(
 
 /// The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(with_testing, derive(Default))]
 pub struct BlockExecutionOutcome {
     /// The list of outgoing messages for each transaction.
@@ -858,4 +863,12 @@ mod signing {
         };
         assert_eq!(block_proposal.owner(), public_key.into(),);
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateBlockMaterial {
+    pub incoming_bundles: Vec<IncomingBundle>,
+    pub local_time: Timestamp,
+    pub round: Round,
 }

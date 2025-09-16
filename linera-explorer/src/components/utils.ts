@@ -17,7 +17,6 @@ export function operation_id(key: Scalars['OperationKey']['output']): string {
 async function set_test_config_aux() {
   await init()
   config.global.mocks.short_hash = short_crypto_hash
-  config.global.mocks.short_app_id = short_app_id
   config.global.mocks.json_load = json_load
   config.global.mocks.operation_id = operation_id
   return

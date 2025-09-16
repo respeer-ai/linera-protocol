@@ -115,6 +115,26 @@ where
     async fn update_wallet(&mut self, client: &ChainClient<Env>) -> Result<(), Error> {
         self.update_wallet_from_client(client).await
     }
+
+    async fn assign_new_chain_to_owner(
+        &mut self,
+        chain_id: ChainId,
+        owner: AccountOwner,
+    ) -> Result<(), Error> {
+        self.assign_new_chain_to_owner(chain_id, owner).await
+    }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.set_owner_default_chain(owner, chain_id).await
+    }
+
+    async fn save_wallet(&mut self) -> Result<(), Error> {
+        self.save_wallet().await
+    }
 }
 
 impl<S, Si, W> ClientContext<linera_core::environment::Impl<S, NodeProvider, Si>, W>
@@ -368,7 +388,7 @@ impl<Env: Environment, W: Persist<Target = Wallet>> ClientContext<Env, W> {
         }
     }
 
-    pub async fn assign_new_chain_to_key(
+    pub async fn assign_new_chain_to_owner(
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
@@ -658,6 +678,17 @@ where
 
         info!("{}", "Data blob verified successfully!");
         Ok(())
+    }
+
+    pub async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.wallet
+            .as_mut()
+            .set_owner_default_chain(owner, chain_id)?;
+        self.save_wallet().await
     }
 }
 

@@ -95,7 +95,6 @@ mod tests {
             .expect("Initialization of counter state should not await anything");
 
         let increment = 42_308_u64;
-
         let response = counter
             .execute_operation(increment)
             .now_or_never()

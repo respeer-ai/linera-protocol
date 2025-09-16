@@ -1,15 +1,22 @@
 // Copyright (c) Zefchain Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-use std::{fmt, future::Future, iter};
+use std::{
+    collections::HashMap,
+    fmt,
+    future::Future,
+    iter,
+    sync::{Arc, Mutex},
+};
 
 use futures::{future, stream, StreamExt};
+use lazy_static::lazy_static;
 use linera_base::{
     crypto::CryptoHash,
     data_types::{BlobContent, BlockHeight, NetworkDescription},
     ensure,
     identifiers::{BlobId, ChainId},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use linera_chain::{
     data_types::{self},
@@ -24,8 +31,9 @@ use linera_core::{
     worker::Notification,
 };
 use linera_version::VersionInfo;
+use tokio::sync::Semaphore;
 use tonic::{Code, IntoRequest, Request, Status};
-use tracing::{debug, info, instrument, warn, Level};
+use tracing::{debug, error, info, instrument, warn, Level};
 
 use super::{
     api::{self, validator_node_client::ValidatorNodeClient, SubscriptionRequest},
@@ -36,12 +44,258 @@ use crate::{
     HandleTimeoutCertificateRequest, HandleValidatedCertificateRequest,
 };
 
+struct RequestGuard {
+    address: String,
+    pub request_at: Instant,
+    pub first_request_at: Instant,
+    pub try_lock_at: Instant,
+    pub success: bool,
+    pub finalized: bool,
+    pub retry_count: usize,
+    pub handler: String,
+    pub canceled: bool,
+}
+
+impl RequestGuard {
+    async fn new(
+        address: String,
+        first_request_at: Instant,
+        try_lock_at: Instant,
+        handler: String,
+    ) -> Self {
+        client_request(address.clone());
+        Self {
+            address,
+            request_at: Instant::now(),
+            first_request_at,
+            try_lock_at,
+            success: false,
+            finalized: false,
+            retry_count: 0,
+            handler,
+            canceled: true,
+        }
+    }
+}
+
+impl Drop for RequestGuard {
+    fn drop(&mut self) {
+        let address = self.address.clone();
+        let elapsed = self.request_at.elapsed().as_millis();
+        let success = self.success;
+        let finalized = self.finalized;
+        let canceled = self.canceled;
+
+        client_response(address.clone(), success, elapsed, canceled);
+
+        if !finalized && !canceled {
+            return;
+        }
+
+        let responses = client_responses(address.clone());
+        let requests = client_requests(address.clone());
+        let lock_waits = client_lock_waits(address.clone());
+        let canceleds = client_canceleds(address.clone());
+
+        let request_elapsed = self.first_request_at.elapsed().as_millis();
+        let lock_wait = self.try_lock_at.elapsed().as_millis() - request_elapsed;
+        tracing::info!(
+            "{} remote request {} to {} took {}ms lock wait {}ms with {} retries {}(requests)-{}(responses)-{}(canceleds)={} in flights {} lock waits",
+            if success { "SUCCESS" } else { "FAILED" },
+            self.handler,
+            address,
+            request_elapsed,
+            lock_wait,
+            self.retry_count,
+            requests,
+            responses,
+            canceleds,
+            requests - responses - canceleds,
+            lock_waits,
+        );
+    }
+}
+
+#[derive(Clone)]
+struct ClientMetrics {
+    lock_waits: u128,
+    requests: u128,
+    request_errors: u128,
+    responses: u128,
+    canceleds: u128,
+    total_request_delay_ms: u128,
+    total_error_delay_ms: u128,
+    last_window_delay_ms: u128,
+
+    subscribed_chains: HashMap<ChainId, Instant>,
+    subscribed_at: Instant,
+    subscription_total_reconects: usize,
+    subscription_window_subscribe_at: Instant,
+    subscription_window_reconnects: usize,
+}
+
+lazy_static! {
+    static ref CLIENT_METRICS: Arc<Mutex<HashMap<String, Arc<Mutex<ClientMetrics>>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    static ref CLIENT_SEMAPHORES: Arc<Mutex<HashMap<String, Arc<Semaphore>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+}
+
 #[derive(Clone)]
 pub struct GrpcClient {
     address: String,
     client: ValidatorNodeClient<transport::Channel>,
     retry_delay: Duration,
     max_retries: u32,
+}
+
+fn client_metrics(address: String) -> Arc<Mutex<ClientMetrics>> {
+    let arc_metrics = Arc::clone(&CLIENT_METRICS);
+    let mut metrics = arc_metrics.lock().unwrap();
+    let client_metrics = ClientMetrics {
+        lock_waits: 0,
+        requests: 0,
+        request_errors: 0,
+        responses: 0,
+        canceleds: 0,
+        total_request_delay_ms: 0,
+        total_error_delay_ms: 0,
+        last_window_delay_ms: 0,
+
+        subscribed_chains: HashMap::new(),
+        subscribed_at: Instant::now(),
+        subscription_total_reconects: 0,
+        subscription_window_subscribe_at: Instant::now(),
+        subscription_window_reconnects: 0,
+    };
+    metrics
+        .entry(address)
+        .or_insert(Arc::new(Mutex::new(client_metrics)))
+        .clone()
+}
+
+fn client_try_lock(address: String) {
+    let arc_metrics = client_metrics(address);
+    let mut metrics = arc_metrics.lock().unwrap();
+
+    metrics.lock_waits += 1;
+}
+
+fn client_locked(address: String) {
+    let arc_metrics = client_metrics(address.clone());
+    let mut metrics = arc_metrics.lock().unwrap();
+
+    metrics.lock_waits -= 1;
+}
+
+fn client_request(address: String) {
+    let arc_metrics = client_metrics(address);
+    let mut metrics = arc_metrics.lock().unwrap();
+
+    metrics.requests += 1;
+}
+
+fn client_response(address: String, success: bool, elapsed: u128, canceled: bool) {
+    let arc_metrics = client_metrics(address);
+    let mut metrics = arc_metrics.lock().unwrap();
+
+    if !success {
+        metrics.request_errors += 1;
+        metrics.total_error_delay_ms += elapsed;
+    }
+    if canceled {
+        metrics.canceleds += 1;
+    } else {
+        metrics.responses += 1;
+    }
+    metrics.total_request_delay_ms += elapsed;
+    metrics.last_window_delay_ms += elapsed;
+}
+
+fn client_subscribe_chain(address: String, chain_id: ChainId) {
+    let arc_metrics = client_metrics(address);
+    let mut metrics = arc_metrics.lock().unwrap();
+
+    metrics.subscribed_chains.insert(chain_id, Instant::now());
+}
+
+fn client_lock_waits(address: String) -> u128 {
+    let arc_metrics = client_metrics(address);
+    let metrics = arc_metrics.lock().unwrap();
+
+    metrics.lock_waits
+}
+
+fn client_requests(address: String) -> u128 {
+    let arc_metrics = client_metrics(address);
+    let metrics = arc_metrics.lock().unwrap();
+
+    metrics.requests
+}
+
+fn client_responses(address: String) -> u128 {
+    let arc_metrics = client_metrics(address);
+    let metrics = arc_metrics.lock().unwrap();
+
+    metrics.responses
+}
+
+fn client_canceleds(address: String) -> u128 {
+    let arc_metrics = client_metrics(address);
+    let metrics = arc_metrics.lock().unwrap();
+
+    metrics.canceleds
+}
+
+fn client_retry_subscribe_chain(address: String) {
+    let arc_metrics = client_metrics(address);
+    let mut metrics = arc_metrics.lock().unwrap();
+
+    metrics.subscription_total_reconects += 1;
+    metrics.subscription_window_reconnects += 1;
+    if metrics
+        .subscription_window_subscribe_at
+        .elapsed()
+        .as_millis()
+        > 300000
+    {
+        metrics.subscription_window_subscribe_at = Instant::now();
+        metrics.subscription_window_reconnects = 0;
+    }
+}
+
+fn client_print_if_needed(address: String) {
+    let arc_metrics = client_metrics(address.clone());
+    let metrics = arc_metrics.lock().unwrap();
+
+    if metrics.last_window_delay_ms < 60000 || metrics.requests == 0 {
+        return;
+    }
+
+    info!(
+        "{} requests {} errors {} average rtt {}ms average success rtt {}ms average error rtt {}ms chains {} reconnects {}/{} elapsed {}ms/{}ms",
+        address,
+        metrics.requests,
+        metrics.request_errors,
+        metrics.total_request_delay_ms / metrics.requests,
+        if metrics.requests > metrics.request_errors {
+            (metrics.total_request_delay_ms - metrics.total_error_delay_ms) / (metrics.requests - metrics.request_errors)
+        } else {
+            0
+        },
+        if metrics.request_errors > 0 {
+            metrics.total_error_delay_ms / metrics.request_errors
+        } else {
+            0
+        },
+        metrics.subscribed_chains.len(),
+        metrics.subscription_window_reconnects,
+        metrics.subscription_total_reconects,
+        metrics.subscription_window_subscribe_at.elapsed().as_millis(),
+        metrics.subscribed_at.elapsed().as_millis(),
+    );
+    let mut metrics = metrics.clone();
+    metrics.last_window_delay_ms = 0;
 }
 
 impl GrpcClient {
@@ -54,6 +308,7 @@ impl GrpcClient {
         let client = ValidatorNodeClient::new(channel)
             .max_encoding_message_size(GRPC_MAX_MESSAGE_SIZE)
             .max_decoding_message_size(GRPC_MAX_MESSAGE_SIZE);
+
         Self {
             address,
             client,
@@ -109,20 +364,66 @@ impl GrpcClient {
         let request_inner = request.try_into().map_err(|_| NodeError::GrpcError {
             error: "could not convert request to proto".to_string(),
         })?;
+
+        let address = self.address.clone();
+
+        let arc_semaphores = Arc::clone(&CLIENT_SEMAPHORES);
+        let semaphore = {
+            let mut semaphores = arc_semaphores.lock().unwrap();
+            semaphores
+                .entry(address.clone())
+                .or_insert_with(|| Arc::new(Semaphore::new(2)))
+                .clone()
+        };
+
+        let try_lock_at = Instant::now();
+
+        client_try_lock(address.clone());
+        let permit = semaphore.clone().acquire_owned().await.unwrap();
+        std::hint::black_box(&permit);
+        client_locked(address.clone());
+
+        let first_request_at = Instant::now();
+
         loop {
+            let mut request_guard = RequestGuard::new(
+                address.clone(),
+                first_request_at,
+                try_lock_at,
+                String::from(handler),
+            )
+            .await;
+
+            client_print_if_needed(address.clone());
+
             match f(self.client.clone(), Request::new(request_inner.clone())).await {
                 Err(s) if Self::is_retryable(&s) && retry_count < self.max_retries => {
+                    request_guard.success = false;
+                    request_guard.finalized = false;
+                    request_guard.retry_count += 1;
+                    request_guard.canceled = false;
+
                     let delay = self.retry_delay.saturating_mul(retry_count);
                     retry_count += 1;
                     linera_base::time::timer::sleep(delay).await;
                     continue;
                 }
                 Err(s) => {
+                    request_guard.success = false;
+                    request_guard.finalized = true;
+                    request_guard.canceled = false;
+
                     return Err(NodeError::GrpcError {
                         error: format!("remote request [{handler}] failed with status: {s:?}"),
                     });
                 }
-                Ok(result) => return Ok(result.into_inner()),
+                Ok(result) => {
+                    request_guard.success = true;
+                    request_guard.finalized = true;
+                    request_guard.canceled = false;
+
+                    return Ok(result.into_inner());
+                }
             };
         }
     }
@@ -264,11 +565,17 @@ impl ValidatorNode for GrpcClient {
 
     #[instrument(target = "grpc_client", skip_all, err(level = Level::WARN), fields(address = self.address))]
     async fn subscribe(&self, chains: Vec<ChainId>) -> Result<Self::NotificationStream, NodeError> {
+        let address = self.address.clone();
+        let subscribe_address = self.address.clone();
         let retry_delay = self.retry_delay;
         let max_retries = self.max_retries;
         let mut retry_count = 0;
         let subscription_request = SubscriptionRequest {
-            chain_ids: chains.into_iter().map(|chain| chain.into()).collect(),
+            chain_ids: chains
+                .clone()
+                .into_iter()
+                .map(|chain| chain.into())
+                .collect(),
         };
         let mut client = self.client.clone();
 
@@ -283,16 +590,23 @@ impl ValidatorNode for GrpcClient {
                 .into_inner(),
         );
 
+        for chain_id in chains {
+            client_subscribe_chain(address.clone(), chain_id);
+        }
+
         // A stream of `Result<grpc::Notification, tonic::Status>` that keeps calling
         // `client.subscribe(request)` endlessly and without delay.
         let endlessly_retrying_notification_stream = stream::unfold((), move |()| {
             let mut client = client.clone();
             let subscription_request = subscription_request.clone();
             let mut stream = stream.take();
+            let address = subscribe_address.clone();
             async move {
                 let stream = if let Some(stream) = stream.take() {
                     future::Either::Right(stream)
                 } else {
+                    client_retry_subscribe_chain(address.clone());
+
                     match client.subscribe(subscription_request.clone()).await {
                         Err(err) => future::Either::Left(stream::iter(iter::once(Err(err)))),
                         Ok(response) => future::Either::Right(response.into_inner()),
@@ -320,6 +634,13 @@ impl ValidatorNode for GrpcClient {
                 };
 
                 if !span.in_scope(|| Self::is_retryable(status)) || retry_count >= max_retries {
+                    error!(
+                        "{} notification Error {}, {:?} {} retries",
+                        address,
+                        status.code(),
+                        status,
+                        retry_count
+                    );
                     return future::Either::Left(future::ready(false));
                 }
                 let delay = retry_delay.saturating_mul(retry_count);

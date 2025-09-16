@@ -38,8 +38,10 @@ services:
       SCYLLA_AUTO_CONF: 1
     command:
       - "--developer-mode"
-      - "0"
+      - "1"
       - "--overprovisioned"
+      - "1"
+      - "--smp"
       - "1"
     depends_on:
       scylla-setup:
@@ -90,7 +92,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "9091:9090"
 
   grafana:
     image: grafana/grafana:latest

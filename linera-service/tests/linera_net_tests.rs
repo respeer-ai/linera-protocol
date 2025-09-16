@@ -3968,6 +3968,9 @@ async fn test_end_to_end_assign_greatgrandchild_chain(config: impl LineraNetConf
     let client3 = net.make_client().await;
     client3.wallet_init(None).await?;
 
+    let client3 = net.make_client().await;
+    client3.wallet_init(&[], FaucetOption::None).await?;
+
     let chain1 = *client1.load_wallet()?.chain_ids().first().unwrap();
 
     // Generate keys for client 2.
@@ -4063,8 +4066,9 @@ async fn test_end_to_end_faucet(config: impl LineraNetConfig) -> Result<()> {
     // Generate keys for client 2.
     let owner2 = client2.keygen().await?;
 
+    // We set the temporary chain limit to 1, so unused tokens remain on the main chain.
     let mut faucet_service = client1
-        .run_faucet(None, chain1, Amount::from_tokens(2))
+        .run_faucet(None, chain1, Amount::from_tokens(2), Some(1))
         .await?;
     let faucet = faucet_service.instance();
     let chain2 = faucet.claim(&owner2).await?.id();
@@ -4309,7 +4313,7 @@ async fn test_end_to_end_fungible_client_benchmark(config: impl LineraNetConfig)
 
     let chain1 = client1.load_wallet()?.default_chain().unwrap();
 
-    let mut faucet_service = client1.run_faucet(None, chain1, Amount::ONE).await?;
+    let mut faucet_service = client1.run_faucet(None, chain1, Amount::ONE, None).await?;
     let faucet = faucet_service.instance();
 
     let path =
