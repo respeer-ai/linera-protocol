@@ -1245,7 +1245,7 @@ where
     C: ClientContext,
 {
     /// Creates a new instance of the node service given a client chain and a port.
-    pub fn new(
+    pub async fn new(
         config: ChainListenerConfig,
         port: NonZeroU16,
         default_chain: Option<ChainId>,

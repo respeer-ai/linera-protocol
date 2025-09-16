@@ -1211,7 +1211,7 @@ impl Runnable for Job {
                 );
 
                 let default_chain = context.wallet().default_chain();
-                let service = NodeService::new(config, port, default_chain, context);
+                let service = NodeService::new(config, port, default_chain, context).await;
                 let cancellation_token = CancellationToken::new();
                 let child_token = cancellation_token.child_token();
                 tokio::spawn(listen_for_shutdown_signals(cancellation_token));
@@ -1225,7 +1225,6 @@ impl Runnable for Job {
                 metrics_port,
                 amount,
                 limit_rate_until,
-                max_claims_per_chain,
                 config,
                 storage_path,
                 max_batch_size,
@@ -1251,7 +1250,6 @@ impl Runnable for Job {
                     metrics_port,
                     chain_id,
                     amount,
-                    max_claims_per_chain,
                     end_timestamp,
                     genesis_config,
                     chain_listener_config: config,
@@ -1473,7 +1471,7 @@ impl Runnable for Job {
                     "Linking chain {chain_id} to its corresponding key in the wallet, owned by \
                     {owner}",
                 );
-                context.assign_new_chain_to_key(chain_id, owner).await?;
+                context.assign_new_chain_to_owner(chain_id, owner).await?;
                 context.save_wallet().await?;
                 info!(
                     "Chain linked to owner in {} ms",
@@ -1594,7 +1592,7 @@ impl Runnable for Job {
                 println!("{}", description.id());
                 println!("{owner}");
                 context
-                    .assign_new_chain_to_key(description.id(), owner)
+                    .assign_new_chain_to_owner(description.id(), owner)
                     .await?;
                 if set_default {
                     context
