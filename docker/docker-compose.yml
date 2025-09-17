@@ -48,7 +48,7 @@ services:
         condition: service_completed_successfully
 
   proxy:
-    image: "${LINERA_IMAGE:-linera}"
+    image: "${LINERA_IMAGE:-us-docker.pkg.dev/linera-io-dev/linera-public-registry/linera:testnet_conway_release}"
     container_name: proxy
     ports:
       - "19100:19100"
@@ -62,7 +62,7 @@ services:
         condition: service_completed_successfully
 
   shard:
-    image: "${LINERA_IMAGE:-linera}"
+    image: "${LINERA_IMAGE:-us-docker.pkg.dev/linera-io-dev/linera-public-registry/linera:testnet_conway_release}"
     deploy:
       replicas: 4
     command: ["./compose-server-entrypoint.sh", "scylladb:tcp:scylla:9042", "1"]
@@ -75,7 +75,7 @@ services:
         condition: service_completed_successfully
 
   shard-init:
-    image: "${LINERA_IMAGE:-linera}"
+    image: "${LINERA_IMAGE:-us-docker.pkg.dev/linera-io-dev/linera-public-registry/linera:testnet_conway_release}"
     container_name: shard-init
     command: ["./compose-server-init.sh", "scylladb:tcp:scylla:9042", "1"]
     volumes:
@@ -92,7 +92,7 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "9091:9090"
+      - "9090:9090"
 
   grafana:
     image: grafana/grafana:latest

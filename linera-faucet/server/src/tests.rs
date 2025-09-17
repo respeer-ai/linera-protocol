@@ -70,11 +70,6 @@ impl chain_listener::ClientContext for ClientContext {
         self.update_calls += 1;
         Ok(())
     }
-
-    async fn forget_chain(&mut self, chain_id: &ChainId) -> Result<(), linera_client::Error> {
-        self.clients.remove(chain_id);
-        Ok(())
-    }
 }
 
 #[tokio::test]
@@ -110,7 +105,6 @@ async fn test_faucet_rate_limiting() {
     // Create the BatchProcessor configuration and instance
     let batch_config = super::BatchProcessorConfig {
         amount: Amount::from_tokens(1),
-        faucet_init_balance: Amount::from_tokens(10),
         end_timestamp: Timestamp::from(6000),
         start_timestamp: Timestamp::from(0),
         start_balance: Amount::from_tokens(6),

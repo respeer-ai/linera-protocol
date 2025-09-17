@@ -192,7 +192,7 @@ impl AccountSecretKey {
         }
     }
 
-    #[cfg(all(with_getrandom))]
+    #[cfg(all(with_testing, with_getrandom))]
     /// Generates a new key pair using the operating system's RNG.
     pub fn generate() -> Self {
         AccountSecretKey::Ed25519(Ed25519SecretKey::generate())
@@ -208,18 +208,6 @@ impl AccountSecretKey {
     /// Generates a new Evm Secp256k1 key pair from the given RNG. Use with care.
     pub fn generate_from<R: CryptoRng>(rng: &mut R) -> Self {
         AccountSecretKey::EvmSecp256k1(EvmSecretKey::generate_from(rng))
-    }
-
-    /// Construct fake secret key with public key
-    pub fn from_public_key(public_key: AccountPublicKey) -> Self {
-        match public_key {
-            AccountPublicKey::Ed25519(public_key) => {
-                AccountSecretKey::Ed25519(Ed25519SecretKey::from_public_key(public_key))
-            }
-            AccountPublicKey::Secp256k1(_) | AccountPublicKey::EvmSecp256k1(_) => {
-                panic!("Not supported")
-            }
-        }
     }
 }
 
@@ -438,9 +426,11 @@ where
 }
 
 /// A BCS-signable struct for testing.
+#[cfg(with_testing)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TestString(pub String);
 
+#[cfg(with_testing)]
 impl TestString {
     /// Creates a new `TestString` with the given string.
     pub fn new(s: impl Into<String>) -> Self {

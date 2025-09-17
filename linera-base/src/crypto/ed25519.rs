@@ -34,7 +34,7 @@ pub struct Ed25519PublicKey(pub [u8; dalek::PUBLIC_KEY_LENGTH]);
 pub struct Ed25519Signature(pub dalek::Signature);
 
 impl Ed25519SecretKey {
-    #[cfg(all(with_getrandom))]
+    #[cfg(all(with_getrandom, with_testing))]
     /// Generates a new key pair using the operating system's RNG.
     ///
     /// If you want control over the RNG, use [`Ed25519SecretKey::generate_from`].
@@ -61,14 +61,6 @@ impl Ed25519SecretKey {
     /// accidental copies of secret keys.
     pub fn copy(&self) -> Ed25519SecretKey {
         Ed25519SecretKey(self.0.clone())
-    }
-
-    /// Create key-pair only have public key field
-    pub fn from_public_key(public_key: Ed25519PublicKey) -> Self {
-        Ed25519SecretKey(dalek::SigningKey {
-            secret_key: [0u8; dalek::SECRET_KEY_LENGTH],
-            verifying_key: public_key.to_verifying_key().expect("Invalid public key"),
-        })
     }
 }
 
@@ -97,11 +89,6 @@ impl Ed25519PublicKey {
                 expected: dalek::PUBLIC_KEY_LENGTH,
             })?;
         Ok(Ed25519PublicKey(key))
-    }
-
-    /// Convert public key to dalek verifying key
-    pub fn to_verifying_key(&self) -> Result<dalek::VerifyingKey, dalek::SignatureError> {
-        dalek::VerifyingKey::from_bytes(&self.0)
     }
 }
 
@@ -145,13 +132,7 @@ impl Serialize for Ed25519SecretKey {
     {
         // This is only used for JSON configuration.
         assert!(serializer.is_human_readable());
-
-        // serializer.serialize_str(&hex::encode(self.0.to_bytes()))
-
-        let mut key_buf = [0u8; dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH];
-        key_buf[..dalek::SECRET_KEY_LENGTH].copy_from_slice(&self.0.to_bytes());
-        key_buf[dalek::SECRET_KEY_LENGTH..].copy_from_slice(&self.public().as_bytes());
-        serializer.serialize_str(&hex::encode(key_buf))
+        serializer.serialize_str(&hex::encode(self.0.to_bytes()))
     }
 }
 
@@ -164,41 +145,8 @@ impl<'de> Deserialize<'de> for Ed25519SecretKey {
         assert!(deserializer.is_human_readable());
         let s = String::deserialize(deserializer)?;
         let value = hex::decode(s).map_err(serde::de::Error::custom)?;
-
-        // let key =
-        //     dalek::SigningKey::from_bytes(value[..].try_into().map_err(serde::de::Error::custom)?);
-
-        if value.len() != dalek::SECRET_KEY_LENGTH
-            && value.len() != dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH
-        {
-            return Err(anyhow::anyhow!("detect invalid key-pair"))
-                .map_err(serde::de::Error::custom)?;
-        }
-
-        let key = if value.len() == dalek::SECRET_KEY_LENGTH {
-            if value[..dalek::SECRET_KEY_LENGTH] == [0u8; dalek::SECRET_KEY_LENGTH] {
-                tracing::warn!("detect empty key-pair");
-            }
-            dalek::SigningKey::from_bytes(
-                value[..dalek::SECRET_KEY_LENGTH]
-                    .try_into()
-                    .map_err(serde::de::Error::custom)?,
-            )
-        } else {
-            let mut secret_key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
-            let mut public_key_buf = [0u8; dalek::PUBLIC_KEY_LENGTH];
-            secret_key_buf.copy_from_slice(&value[0..dalek::SECRET_KEY_LENGTH]);
-            public_key_buf.copy_from_slice(
-                &value
-                    [dalek::SECRET_KEY_LENGTH..dalek::SECRET_KEY_LENGTH + dalek::PUBLIC_KEY_LENGTH],
-            );
-            dalek::SigningKey {
-                secret_key: secret_key_buf,
-                verifying_key: Ed25519PublicKey(public_key_buf)
-                    .to_verifying_key()
-                    .expect("invalid public key"),
-            }
-        };
+        let key =
+            dalek::SigningKey::from_bytes(value[..].try_into().map_err(serde::de::Error::custom)?);
         Ok(Ed25519SecretKey(key))
     }
 }
