@@ -3,7 +3,7 @@
 
 use std::{
     borrow::Cow, collections::HashMap, future::IntoFuture, iter, net::SocketAddr, num::NonZeroU16,
-    str::FromStr, sync::Arc,
+    sync::Arc,
 };
 
 use async_graphql::{
@@ -17,9 +17,7 @@ use axum::{
 use futures::{lock::Mutex, Future, FutureExt as _};
 use linera_base::{
     bcs_scalar,
-    crypto::{
-        AccountPublicKey, AccountSecretKey, AccountSignature, BcsSignable, CryptoError, CryptoHash,
-    },
+    crypto::{AccountSignature, BcsSignable, CryptoError, CryptoHash},
     data_types::{
         Amount, ApplicationDescription, ApplicationPermissions, Blob, Bytecode, Epoch, TimeDelta,
     },
@@ -1072,45 +1070,6 @@ where
             default: default_chain,
         })
     }
-
-    async fn signature_pattern(&self) -> AccountSignature {
-        #[derive(Debug, Serialize, Deserialize)]
-        struct Nonce(String);
-        impl BcsSignable<'_> for Nonce {}
-        AccountSecretKey::generate().sign(&Nonce("Test signature".to_string()))
-    }
-
-    async fn public_key_pattern(&self) -> AccountPublicKey {
-        AccountSecretKey::generate().public()
-    }
-
-    async fn account_owner_pattern(&self) -> AccountOwner {
-        AccountOwner::from_str("0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32")
-            .unwrap()
-    }
-
-    async fn chain_account_pattern(&self) -> Account {
-        Account {
-            chain_id: ChainId::from_str(
-                "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
-            )
-            .unwrap(),
-            owner: AccountOwner::CHAIN,
-        }
-    }
-
-    async fn owner_account_pattern(&self) -> Account {
-        Account {
-            chain_id: ChainId::from_str(
-                "83899bf2074ff823f7d8ba4b8ead001cf3e4e134af990f69e855095852afc062",
-            )
-            .unwrap(),
-            owner: AccountOwner::from_str(
-                "0x02a37763b75410c5bf1902fa8cb6269167470dccf69db0c9cc9a662aab06fa32",
-            )
-            .unwrap(),
-        }
-    }
 }
 
 // What follows is a hack to add a chain_id field to `ChainStateView` based on
@@ -1312,19 +1271,19 @@ where
                 application_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/contents/:blob_hash",
+                "/chains/{chain_id}/applications/{application_id}/contents/{blob_hash}",
                 blob_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/images/:blob_hash",
+                "/chains/{chain_id}/applications/{application_id}/images/{blob_hash}",
                 blob_image_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/htmls/:blob_hash",
+                "/chains/{chain_id}/applications/{application_id}/htmls/{blob_hash}",
                 blob_html_handler,
             )
             .route(
-                "/chains/:chain_id/applications/:application_id/videos/:blob_hash",
+                "/chains/{chain_id}/applications/{application_id}/videos/{blob_hash}",
                 blob_video_handler,
             )
             .route("/ready", axum::routing::get(|| async { "ready!" }))
