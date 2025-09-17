@@ -178,11 +178,9 @@ impl<C: ClientContext> ListeningClient<C> {
 
     async fn stop(self) {
         drop(self.abort_handle);
-        info!("================================1");
         if let Err(error) = self.join_handle.lock().await.take().unwrap().await {
             warn!("Failed to join listening task: {error:?}");
         }
-        info!("================================2");
     }
 }
 

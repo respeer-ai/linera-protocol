@@ -99,7 +99,7 @@ impl Drop for RequestGuard {
 
         let request_elapsed = self.first_request_at.elapsed().as_millis();
         let lock_wait = self.try_lock_at.elapsed().as_millis() - request_elapsed;
-        tracing::info!(
+        info!(
             "{} remote request {} to {} took {}ms lock wait {}ms with {} retries {}(requests)-{}(responses)-{}(canceleds)={} in flights {} lock waits",
             if success { "SUCCESS" } else { "FAILED" },
             self.handler,

@@ -1211,9 +1211,16 @@ impl Runnable for Job {
                 );
 
                 let default_chain = context.wallet().default_chain();
-                let service = NodeService::new(config, port, default_chain, context).await;
                 let cancellation_token = CancellationToken::new();
                 let child_token = cancellation_token.child_token();
+                let service = NodeService::new(
+                    config,
+                    port,
+                    default_chain,
+                    context,
+                    cancellation_token.clone(),
+                )
+                .await;
                 tokio::spawn(listen_for_shutdown_signals(cancellation_token));
                 service.run(child_token).await?;
             }

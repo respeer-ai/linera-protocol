@@ -1209,6 +1209,7 @@ where
         port: NonZeroU16,
         default_chain: Option<ChainId>,
         context: C,
+        cancellation_token: CancellationToken,
     ) -> Self {
         let context = Arc::new(Mutex::new(context));
 
@@ -1226,7 +1227,7 @@ where
                 config,
                 Arc::clone(&context),
                 storage,
-                CancellationToken::new(),
+                cancellation_token,
             )))),
             #[cfg(feature = "fake-chain-listener")]
             chain_listener: Arc::new(Mutex::new(None)),
