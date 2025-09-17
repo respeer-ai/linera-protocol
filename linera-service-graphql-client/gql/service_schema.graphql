@@ -9,16 +9,6 @@ A unique identifier for a user or an application.
 scalar AccountOwner
 
 """
-A crypto public key.
-"""
-scalar AccountPublicKey
-
-"""
-A crypto signature.
-"""
-scalar AccountSignature
-
-"""
 A non-negative amount of tokens.
 """
 scalar Amount
@@ -896,7 +886,7 @@ type MutationRoot {
 	"""
 	Submit block proposal with signature
 	"""
-	submitBlockAndSignatureBcs(chainId: ChainId!, block: SignedBlockBcs!): CryptoHash!
+	submitSignedBlockBcs(chainId: ChainId!, block: SignedBlockBcs!): CryptoHash!
 	"""
 	Calculate block execution state hash
 	"""
@@ -1071,11 +1061,6 @@ type QueryRoot {
 	Returns the maintained chains of given owner
 	"""
 	ownerChains(owner: AccountOwner!): Chains!
-	signaturePattern: AccountSignature!
-	publicKeyPattern: AccountPublicKey!
-	accountOwnerPattern: AccountOwner!
-	chainAccountPattern: Account!
-	ownerAccountPattern: Account!
 }
 
 type QueueView_MessageBundle_f4399f0b {

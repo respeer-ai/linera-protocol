@@ -795,7 +795,7 @@ where
     }
 
     /// Submit block proposal with signature
-    async fn submit_block_and_signature_bcs(
+    async fn submit_signed_block_bcs(
         &self,
         chain_id: ChainId,
         block: SignedBlockBcs,
@@ -1209,7 +1209,8 @@ where
         port: NonZeroU16,
         default_chain: Option<ChainId>,
         context: C,
-        cancellation_token: CancellationToken,
+        #[cfg(not(feature = "fake-chain-listener"))] cancellation_token: CancellationToken,
+        #[cfg(feature = "fake-chain-listener")] _cancellation_token: CancellationToken,
     ) -> Self {
         let context = Arc::new(Mutex::new(context));
 

@@ -249,6 +249,7 @@ async fn main() -> std::io::Result<()> {
         std::num::NonZeroU16::new(8080).unwrap(),
         None,
         DummyContext,
+        tokio_util::sync::CancellationToken::new(),
     )
     .await;
     let schema = service.schema().sdl();
