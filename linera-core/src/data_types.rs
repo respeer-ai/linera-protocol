@@ -4,6 +4,7 @@
 
 use std::{collections::BTreeMap, ops::Not};
 
+use async_graphql::{InputObject, SimpleObject};
 use custom_debug_derive::Debug;
 use linera_base::{
     crypto::{
@@ -11,7 +12,6 @@ use linera_base::{
         ValidatorSignature,
     },
     data_types::{Amount, BlockHeight, ChainDescription, Epoch, Round, Timestamp},
-    doc_scalar,
     identifiers::{AccountOwner, ChainId},
 };
 use linera_chain::{
@@ -396,8 +396,9 @@ impl<T> ClientOutcome<T> {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, InputObject, SimpleObject)]
 #[cfg_attr(with_testing, derive(Eq, PartialEq))]
+#[graphql(input_name = "InputUnsignedBlockProposal")]
 pub struct UnsignedBlockProposal {
     pub content: ProposalContent,
     pub outcome: BlockExecutionOutcome,
@@ -405,7 +406,7 @@ pub struct UnsignedBlockProposal {
     pub original_proposal: Option<OriginalProposal>,
 }
 
-doc_scalar!(UnsignedBlockProposal, "Unsigned block proposal");
+// doc_scalar!(UnsignedBlockProposal, "Unsigned block proposal");
 
 impl UnsignedBlockProposal {
     pub fn new_initial(round: Round, block: ProposedBlock, outcome: BlockExecutionOutcome) -> Self {

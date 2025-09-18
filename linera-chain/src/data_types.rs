@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, SimpleObject};
 use custom_debug_derive::Debug;
 use linera_base::{
     bcs,
@@ -39,8 +39,9 @@ mod data_types_tests;
 /// * When a block is proposed to a validator, all cross-chain messages must have been
 ///   received ahead of time in the inbox of the chain.
 /// * This constraint does not apply to the execution of confirmed blocks.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(complex)]
+#[graphql(input_name = "InputProposedBlock")]
 pub struct ProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -362,9 +363,10 @@ doc_scalar!(
 );
 
 /// The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(with_testing, derive(Default))]
+#[graphql(input_name = "InputBlockExecutionOutcome")]
 pub struct BlockExecutionOutcome {
     /// The list of outgoing messages for each transaction.
     pub messages: Vec<Vec<OutgoingMessage>>,
@@ -540,7 +542,8 @@ impl BlockExecutionOutcome {
 }
 
 /// The data a block proposer signs.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, SimpleObject, InputObject)]
+#[graphql(input_name = "InputProposalContent")]
 pub struct ProposalContent {
     /// The proposed block.
     pub block: ProposedBlock,

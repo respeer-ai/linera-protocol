@@ -113,7 +113,7 @@ pub struct SimulatedBlockMaterial {
     blob_bytes: Vec<Vec<u8>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, InputObject)]
 #[serde(rename_all = "camelCase")]
 pub struct SignedBlock {
     unsigned_block_proposal: UnsignedBlockProposal,
@@ -122,10 +122,10 @@ pub struct SignedBlock {
     blob_bytes: Vec<Vec<u8>>,
 }
 
-doc_scalar!(
-    SignedBlock,
-    "A signed block which will be submitted to blockchain with its signature."
-);
+// doc_scalar!(
+//     SignedBlock,
+//     "A signed block which will be submitted to blockchain with its signature."
+// );
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -699,18 +699,14 @@ where
     }
 
     /// ResPeer::CheCko::Initialize offline wallet
-    async fn wallet_init_without_secret_key(
+    async fn import_chain(
         &self,
+        owner: AccountOwner,
         chain_id: ChainId,
-        initializer: WalletInitializer,
+        signature: AccountSignature,
+        creator_chain_id: ChainId,
     ) -> Result<ChainId, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
-
-        let WalletInitializer {
-            owner,
-            signature,
-            creator_chain_id,
-        } = initializer;
 
         #[derive(Debug, Serialize, Deserialize)]
         struct Nonce(ChainId);
@@ -722,7 +718,7 @@ where
         );
 
         tracing::info!("Verifing signature ...");
-        let nonce = Nonce(creator_chain_id);
+        let nonce = Nonce(chain_id);
         signature.verify(&nonce)?;
 
         tracing::info!("Assigning new chain to public key ...");
