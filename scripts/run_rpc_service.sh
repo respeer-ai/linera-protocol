@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ####
-## E.g. ./run_rpc_service.sh -f http://172.16.31.73:8080 -C 0
+## E.g. ./run_rpc_service.sh -f https://faucet.testnet-conway.linera.net -C 0 -W 0 -z testnet-conway
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
@@ -65,6 +65,7 @@ function create_rpc_wallet() {
 
     # Init wallet from faucet
     linera --wallet $WALLET_DIR/rpc/wallet.json \
+           --keystore $WALLET_DIR/rpc/keystore.json \
            --storage rocksdb://$WALLET_DIR/rpc/client.db \
            wallet init \
            --faucet $FAUCET_URL
@@ -90,7 +91,8 @@ function generate_rpc_nginx_conf() {
     }" > ${CONFIG_DIR}/$endpoint.nginx.json
 
     jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
-    echo "cp ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/"
+    sudo cp ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/
+    sudo nginx -s reload
 }
 
 SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')

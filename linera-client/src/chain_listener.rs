@@ -145,7 +145,6 @@ impl<T: ClientContext> ClientContextExt for T {}
 /// A background task listens to the validators and updates the local node, so any updates to
 /// this chain will trigger a notification. The background task is terminated when this gets
 /// dropped.
-#[derive(Clone)]
 struct ListeningClient<C: ClientContext> {
     /// The chain client.
     client: ContextChainClient<C>,
@@ -157,6 +156,18 @@ struct ListeningClient<C: ClientContext> {
     notification_stream: Arc<Mutex<NotificationStream>>,
     /// This is only `< u64::MAX` when the client is waiting for a timeout to process the inbox.
     timeout: Timestamp,
+}
+
+impl<C: ClientContext> Clone for ListeningClient<C> {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            abort_handle: self.abort_handle.clone(),
+            join_handle: self.join_handle.clone(),
+            notification_stream: self.notification_stream.clone(),
+            timeout: self.timeout,
+        }
+    }
 }
 
 impl<C: ClientContext> ListeningClient<C> {
@@ -186,7 +197,6 @@ impl<C: ClientContext> ListeningClient<C> {
 
 /// A `ChainListener` is a process that listens to notifications from validators and reacts
 /// appropriately.
-#[derive(Clone)]
 pub struct ChainListener<C: ClientContext> {
     context: Arc<Mutex<C>>,
     storage: <C::Environment as Environment>::Storage,
@@ -196,6 +206,19 @@ pub struct ChainListener<C: ClientContext> {
     /// Events emitted on the _publishing chain_ are of interest to the _subscriber chains_.
     event_subscribers: BTreeMap<ChainId, BTreeSet<ChainId>>,
     cancellation_token: CancellationToken,
+}
+
+impl<C: ClientContext> Clone for ChainListener<C> {
+    fn clone(&self) -> Self {
+        Self {
+            context: self.context.clone(),
+            storage: self.storage.clone(),
+            config: self.config.clone(),
+            listening: self.listening.clone(),
+            event_subscribers: self.event_subscribers.clone(),
+            cancellation_token: self.cancellation_token.clone(),
+        }
+    }
 }
 
 impl<C: ClientContext> ChainListener<C> {

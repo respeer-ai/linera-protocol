@@ -741,8 +741,9 @@ where
         self.chain_listener
             .lock()
             .await
-            .take()
+            .as_ref()
             .unwrap()
+            .clone()
             .run_with_chain_id(chain_id)
             .await?;
 
@@ -1292,16 +1293,17 @@ where
 
         info!("GraphiQL IDE: http://localhost:{}", port);
 
-        let chain_listener = self
+        let listener = self
             .chain_listener
             .lock()
             .await
-            .take()
+            .as_ref()
             .unwrap()
+            .clone()
             .run()
             .await?;
 
-        let mut chain_listener = Box::pin(chain_listener).fuse();
+        let mut chain_listener = Box::pin(listener).fuse();
         let tcp_listener =
             tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?;
         let server = axum::serve(tcp_listener, app).into_future();
