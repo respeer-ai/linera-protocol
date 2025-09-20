@@ -74,6 +74,7 @@ pub struct MutationRoot {
     faucet_storage: Arc<Mutex<FaucetStorage>>,
     pending_requests: Arc<Mutex<VecDeque<PendingRequest>>>,
     request_notifier: Arc<Notify>,
+    without_cache: bool,
 }
 
 /// The result of a successful `claim` mutation.
@@ -213,7 +214,7 @@ impl MutationRoot {
 impl MutationRoot {
     async fn do_claim(&self, owner: AccountOwner) -> Result<ChainDescription, Error> {
         // Check if this owner already has a chain
-        {
+        if !self.without_cache {
             let storage = self.faucet_storage.lock().await;
             if let Some(existing_description) = storage.get_chain(&owner) {
                 return Ok(existing_description.clone());
@@ -523,6 +524,7 @@ where
     pending_requests: Arc<Mutex<VecDeque<PendingRequest>>>,
     request_notifier: Arc<Notify>,
     max_batch_size: usize,
+    without_cache: bool,
 }
 
 impl<C> Clone for FaucetService<C>
@@ -550,6 +552,7 @@ where
             pending_requests: Arc::clone(&self.pending_requests),
             request_notifier: Arc::clone(&self.request_notifier),
             max_batch_size: self.max_batch_size,
+            without_cache: self.without_cache,
         }
     }
 }
@@ -565,6 +568,7 @@ pub struct FaucetConfig {
     pub chain_listener_config: ChainListenerConfig,
     pub storage_path: Option<PathBuf>,
     pub max_batch_size: usize,
+    pub without_cache: bool,
 }
 
 impl<C> FaucetService<C>
@@ -624,6 +628,7 @@ where
             pending_requests,
             request_notifier,
             max_batch_size: config.max_batch_size,
+            without_cache: config.without_cache,
         })
     }
 
@@ -632,6 +637,7 @@ where
             faucet_storage: Arc::clone(&self.faucet_storage),
             pending_requests: Arc::clone(&self.pending_requests),
             request_notifier: Arc::clone(&self.request_notifier),
+            without_cache: self.without_cache,
         };
         let query_root = QueryRoot {
             genesis_config: Arc::clone(&self.genesis_config),

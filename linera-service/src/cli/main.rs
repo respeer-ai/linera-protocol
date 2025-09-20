@@ -1262,6 +1262,7 @@ impl Runnable for Job {
                     chain_listener_config: config,
                     storage_path,
                     max_batch_size,
+                    without_cache: true,
                 };
                 let faucet = FaucetService::new(config, context, storage).await?;
                 let cancellation_token = CancellationToken::new();
