@@ -115,6 +115,14 @@ function run_faucet_service() {
         --storage rocksdb://$WALLET_DIR/faucet/client.db \
         wallet show | grep AccountOwner | awk '{print $2}'`
 
+    echo 'Query balance ===================================================================='
+    echo "Chain: $chain_id"
+    linera --wallet $WALLET_DIR/faucet/wallet.json \
+        --keystore $WALLET_DIR/faucet/keystore.json \
+        --storage rocksdb://$WALLET_DIR/faucet/client.db \
+        query-balance
+    echo 'Balance =========================================================================='
+
     linera --wallet $WALLET_DIR/faucet/wallet.json \
         --keystore $WALLET_DIR/faucet/keystore.json \
         --storage rocksdb://$WALLET_DIR/faucet/client.db \
