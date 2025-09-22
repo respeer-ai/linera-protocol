@@ -107,6 +107,7 @@ struct BatchProcessorConfig {
     start_balance: Amount,
     storage_path: PathBuf,
     max_batch_size: usize,
+    without_cache: bool,
 }
 
 /// Batching coordinator for processing chain creation requests
@@ -333,7 +334,7 @@ where
 
         for request in batch_requests {
             // Check if this owner already has a chain
-            {
+            if !self.config.without_cache {
                 let storage = self.faucet_storage.lock().await;
                 if let Some(existing_description) = storage.get_chain(&request.owner) {
                     let _ = request.responder.send(Ok(existing_description.clone()));
@@ -677,6 +678,7 @@ where
             start_balance: self.start_balance,
             storage_path: self.storage_path.clone(),
             max_batch_size: self.max_batch_size,
+            without_cache: self.without_cache,
         };
         let mut batch_processor = BatchProcessor::new(
             batch_processor_config,
