@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ####
-## E.g. ./run_rpc_service.sh -f http://api.testnet-conway.faucet.respeer.ai -C 0 -W 0 -z testnet-conway
+## E.g. ./run_faucet_service.sh -f https://faucet.testnet-conway.linera.net -C 0 -W 0 -z testnet-conway
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
@@ -53,37 +53,42 @@ fi
 # Make sure to clean up child processes on exit.
 trap 'kill $(jobs -p)' EXIT
 
-RPC_WALLET=$WALLET_DIR/rpc
+FAUCET_WALLET=$WALLET_DIR/faucet
 
-if [ ! -d ${RPC_WALLET} ]; then
+if [ ! -d ${FAUCET_WALLET} ]; then
     CREATE_WALLET=1
 fi
 
-function create_rpc_wallet() {
-    rm -rf $WALLET_DIR/rpc
-    mkdir -p $WALLET_DIR/rpc
+function create_faucet_wallet() {
+    rm -rf $WALLET_DIR/faucet
+    mkdir -p $WALLET_DIR/faucet
 
     # Init wallet from faucet
-    linera --wallet $WALLET_DIR/rpc/wallet.json \
-           --keystore $WALLET_DIR/rpc/keystore.json \
-           --storage rocksdb://$WALLET_DIR/rpc/client.db \
+    linera --wallet $WALLET_DIR/faucet/wallet.json \
+           --keystore $WALLET_DIR/faucet/keystore.json \
+           --storage rocksdb://$WALLET_DIR/faucet/client.db \
            wallet init \
+           --faucet $FAUCET_URL
+    linera --wallet $WALLET_DIR/faucet/wallet.json \
+           --keystore $WALLET_DIR/faucet/keystore.json \
+           --storage rocksdb://$WALLET_DIR/faucet/client.db \
+           wallet request-chain \
            --faucet $FAUCET_URL
 }
 
-# Create rpc wallet
+# Create faucet wallet
 if [ "x$CREATE_WALLET" = "x1" ]; then
-    create_rpc_wallet
+    create_faucet_wallet
 fi
 
-function generate_rpc_nginx_conf() {
-    endpoint=rpc
-    domain=rpc.respeer.ai
+function generate_faucet_nginx_conf() {
+    endpoint=faucet
+    domain=faucet.respeer.ai
 
     echo "{
         \"service\": {
             \"endpoint\": \"$endpoint\",
-            \"servers\": [\"localhost:30080\"],
+            \"servers\": [\"localhost:30090\"],
             \"domain\": \"$domain\",
             \"sub_domain\": \"$SUB_DOMAIN\",
             \"api_endpoint\": \"$endpoint\"
@@ -98,20 +103,26 @@ function generate_rpc_nginx_conf() {
 SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')
 
 # Generate service nginx conf
-generate_rpc_nginx_conf
+generate_faucet_nginx_conf
 
 echo -e "\n\nService domain"
-echo -e "   $LAN_IP ${SUB_DOMAIN}rpc.respeer.ai"
-echo -e "   http://${SUB_DOMAIN}rpc.respeer.ai/api/rpc\n\n"
+echo -e "   $LAN_IP ${SUB_DOMAIN}faucet.respeer.ai"
+echo -e "   http://${SUB_DOMAIN}faucet.respeer.ai/api/faucet\n\n"
 
-function run_rpc_service() {
-    linera --wallet $WALLET_DIR/rpc/wallet.json \
-           --storage rocksdb://$WALLET_DIR/rpc/client.db \
-           service \
-           --listener-skip-process-inbox \
-           --port 30080 &
+function run_faucet_service() {
+    chain_id=`linera --wallet $WALLET_DIR/faucet/wallet.json \
+        --keystore $WALLET_DIR/faucet/keystore.json \
+        --storage rocksdb://$WALLET_DIR/faucet/client.db \
+        wallet show | grep AccountOwner | awk '{print $2}'`
+
+    linera --wallet $WALLET_DIR/faucet/wallet.json \
+        --keystore $WALLET_DIR/faucet/keystore.json \
+        --storage rocksdb://$WALLET_DIR/faucet/client.db \
+        faucet \
+        --amount 10 \
+        --port 30090 &
 }
 
-run_rpc_service
+run_faucet_service
 
 read
