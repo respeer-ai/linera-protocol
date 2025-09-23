@@ -16,7 +16,9 @@ use linera_base::{
     doc_scalar, ensure, hex, hex_debug,
     identifiers::{Account, AccountOwner, ApplicationId, BlobId, ChainId, StreamId},
 };
-use linera_execution::{committee::Committee, Message, MessageKind, Operation, OutgoingMessage};
+use linera_execution::{
+    committee::Committee, Message, MessageKind, Operation, OutgoingMessage, SystemOperation,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -52,6 +54,11 @@ pub struct ProposedBlock {
     /// incoming messages or an operation.
     #[debug(skip_if = Vec::is_empty)]
     #[graphql(skip)]
+    #[serde(
+        rename = "transaction_metadata",
+        alias = "transactionMetadata",
+        deserialize_with = "deserialize_transactions"
+    )]
     pub transactions: Vec<Transaction>,
     /// The block height.
     pub height: BlockHeight,
@@ -67,6 +74,14 @@ pub struct ProposedBlock {
     /// Certified hash (see `Certificate` below) of the previous block in the
     /// chain, if any.
     pub previous_block_hash: Option<CryptoHash>,
+}
+
+fn deserialize_transactions<'de, D>(deserializer: D) -> Result<Vec<Transaction>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let metas: Vec<TransactionMetadata> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(metas.into_iter().map(Transaction::from).collect())
 }
 
 impl ProposedBlock {
@@ -156,6 +171,79 @@ pub enum Transaction {
 }
 
 impl BcsHashable<'_> for Transaction {}
+
+impl From<TransactionMetadata> for Transaction {
+    fn from(metadata: TransactionMetadata) -> Self {
+        match metadata.transaction_type.as_str() {
+            "ReceiveMessages" => {
+                let incoming_bundle = metadata.incoming_bundle.unwrap();
+
+                let bundle = IncomingBundle {
+                    origin: incoming_bundle.origin,
+                    bundle: MessageBundle {
+                        height: incoming_bundle.bundle.height,
+                        timestamp: incoming_bundle.bundle.timestamp,
+                        certificate_hash: incoming_bundle.bundle.certificate_hash,
+                        transaction_index: incoming_bundle.bundle.transaction_index as u32,
+                        messages: incoming_bundle
+                            .bundle
+                            .messages
+                            .into_iter()
+                            .map(|msg| PostedMessage {
+                                authenticated_signer: msg.authenticated_signer,
+                                grant: msg.grant,
+                                refund_grant_to: msg.refund_grant_to,
+                                kind: msg.kind,
+                                index: msg.index as u32,
+                                message: msg.message,
+                            })
+                            .collect(),
+                    },
+                    action: incoming_bundle.action,
+                };
+
+                Transaction::ReceiveMessages(bundle)
+            }
+            "ExecuteOperation" => {
+                let graphql_operation = metadata.operation.unwrap();
+
+                let operation = match graphql_operation.operation_type.as_str() {
+                    "System" => {
+                        let bytes_hex = graphql_operation.system_bytes_hex.unwrap();
+
+                        // Convert hex string to bytes
+                        let bytes = hex::decode(bytes_hex).unwrap();
+
+                        // Deserialize the system operation from BCS bytes
+                        let system_operation: SystemOperation =
+                            linera_base::bcs::from_bytes(&bytes).unwrap();
+
+                        Operation::System(Box::new(system_operation))
+                    }
+                    "User" => {
+                        let application_id = graphql_operation.application_id.unwrap();
+
+                        let bytes_hex = graphql_operation.user_bytes_hex.unwrap();
+
+                        // Convert hex string to bytes
+                        let bytes = hex::decode(bytes_hex).unwrap();
+
+                        Operation::User {
+                            application_id,
+                            bytes,
+                        }
+                    }
+                    _ => {
+                        panic!("Unknown operation type");
+                    }
+                };
+
+                Transaction::ExecuteOperation(operation)
+            }
+            _ => panic!("Unknown transaction type"),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
 #[graphql(name = "Operation")]
