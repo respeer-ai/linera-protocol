@@ -42,6 +42,7 @@ mod data_types_tests;
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(complex)]
 #[graphql(input_name = "InputProposedBlock")]
+#[serde(rename_all = "camelCase")]
 pub struct ProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -545,6 +546,7 @@ impl BlockExecutionOutcome {
 /// The data a block proposer signs.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(input_name = "InputProposalContent")]
+#[serde(rename_all = "camelCase")]
 pub struct ProposalContent {
     /// The proposed block.
     pub block: ProposedBlock,
