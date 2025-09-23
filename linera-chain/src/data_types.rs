@@ -285,6 +285,7 @@ impl From<&Operation> for OperationMetadata {
 
 /// GraphQL-compatible metadata about a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactionMetadata {
     /// The type of transaction: "ReceiveMessages" or "ExecuteOperation"
     pub transaction_type: String,
