@@ -53,7 +53,7 @@ pub struct ProposedBlock {
     /// The transactions to execute in this block. Each transaction can be either
     /// incoming messages or an operation.
     #[debug(skip_if = Vec::is_empty)]
-    #[graphql(skip)]
+    #[graphql(skip_output)]
     #[serde(
         rename = "transaction_metadata",
         alias = "transactionMetadata",
@@ -171,6 +171,8 @@ pub enum Transaction {
 }
 
 impl BcsHashable<'_> for Transaction {}
+
+doc_scalar!(Transaction, "A transaction in a block.");
 
 impl From<TransactionMetadata> for Transaction {
     fn from(metadata: TransactionMetadata) -> Self {
