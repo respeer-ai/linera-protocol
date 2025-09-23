@@ -158,6 +158,7 @@ impl BcsHashable<'_> for Transaction {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
 #[graphql(name = "Operation")]
+#[serde(rename_all = "camelCase")]
 pub struct OperationMetadata {
     /// The type of operation: "System" or "User"
     pub operation_type: String,
