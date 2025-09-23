@@ -589,6 +589,17 @@ impl<Env: Environment, W: Persist<Target = Wallet>> ClientContext<Env, W> {
             .into()),
         }
     }
+
+    pub async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.wallet
+            .as_mut()
+            .set_owner_default_chain(owner, chain_id)?;
+        self.save_wallet().await
+    }
 }
 
 #[cfg(feature = "fs")]
@@ -680,17 +691,6 @@ where
 
         info!("{}", "Data blob verified successfully!");
         Ok(())
-    }
-
-    pub async fn set_owner_default_chain(
-        &mut self,
-        owner: AccountOwner,
-        chain_id: ChainId,
-    ) -> Result<(), Error> {
-        self.wallet
-            .as_mut()
-            .set_owner_default_chain(owner, chain_id)?;
-        self.save_wallet().await
     }
 }
 
