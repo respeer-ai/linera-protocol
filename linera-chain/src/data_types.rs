@@ -76,7 +76,7 @@ pub struct ProposedBlock {
     pub previous_block_hash: Option<CryptoHash>,
 }
 
-fn deserialize_transactions<'de, D>(deserializer: D) -> Result<Vec<Transaction>, D::Error>
+pub fn deserialize_transactions<'de, D>(deserializer: D) -> Result<Vec<Transaction>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
