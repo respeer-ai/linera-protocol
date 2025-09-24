@@ -2,7 +2,7 @@
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
-GIT_COMMIT=3dc32c18
+GIT_COMMIT=b910849c
 
 options="c:"
 

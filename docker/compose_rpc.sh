@@ -7,8 +7,8 @@
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
 GENERATE=0
-FAUCET_URL=https://faucet.testnet-babbage.linera.net
-CLUSTER=testnet-babbage
+FAUCET_URL=https://api.testnet-conway.faucet.respeer.ai/api/faucet
+CLUSTER=testnet-conway
 
 options="f:z:g:"
 

@@ -34,7 +34,7 @@ function generate_nginx_conf() {
   port_base=$1
   endpoint=$2
   domain=$3
-  
+
   echo "{
       \"service\": {
       \"endpoint\": \"$endpoint\",
