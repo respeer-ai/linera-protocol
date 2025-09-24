@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ####
-## E.g. ./run_rpc_service.sh -f https://faucet.testnet-babbage.linera.net -C 0
+## E.g. ./compose_rpc.sh -f https://faucet.testnet-conway.linera.net -g 0
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
@@ -54,7 +54,7 @@ cd "$ROOT_DIR"
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
-docker build --no-cache --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
 
 export PATH=$RESPEER_BIN_DIR:$PATH
 
