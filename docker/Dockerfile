@@ -39,6 +39,7 @@ ARG rustflags
 ARG all_proxy
 
 RUN apt-get update && apt-get install -y \
+    git \
     pkg-config \
     protobuf-compiler \
     clang
