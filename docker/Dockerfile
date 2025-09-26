@@ -85,7 +85,7 @@ RUN CARGO_NET_GIT_FETCH_WITH_CLI=true \
     --bin linera-proxy \
     --bin linera-server \
     --features $build_features \
-    -j 4
+    -j 2
 
 RUN mv \
     target/"$target"/"$build_folder"/linera \

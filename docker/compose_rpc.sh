@@ -92,7 +92,7 @@ function generate_nginx_conf() {
   }" > ${CONFIG_DIR}/$endpoint.nginx.json
 
   jinja -d ${CONFIG_DIR}/$endpoint.nginx.json $NGINX_TEMPLATE_FILE > ${CONFIG_DIR}/$endpoint.nginx.conf
-  cp -v ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/
+  sudo cp -v ${CONFIG_DIR}/$endpoint.nginx.conf /etc/nginx/sites-enabled/
 }
 
 SUB_DOMAIN=$(echo "api.${CLUSTER}." | sed 's/\.\./\./g')
