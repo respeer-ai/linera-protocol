@@ -22,7 +22,7 @@ mod wasm;
 
 use std::{any::Any, collections::BTreeMap, fmt, ops::RangeInclusive, str::FromStr, sync::Arc};
 
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, SimpleObject};
 use async_trait::async_trait;
 use custom_debug_derive::Debug;
 use derive_more::Display;
@@ -821,6 +821,7 @@ pub enum Operation {
     /// A system operation.
     System(Box<SystemOperation>),
     /// A user operation (in serialized form).
+    #[serde(rename_all = "camelCase")]
     User {
         application_id: ApplicationId,
         #[serde(with = "serde_bytes")]
@@ -934,7 +935,9 @@ impl Display for MessageKind {
 }
 
 /// A posted message together with routing information.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
+#[serde(rename_all = "camelCase")]
+#[graphql(input_name = "InputOutgoingMessage")]
 pub struct OutgoingMessage {
     /// The destination of the message.
     pub destination: ChainId,
