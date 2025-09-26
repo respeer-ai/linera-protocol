@@ -1275,7 +1275,7 @@ impl Runnable for Job {
                     cancellation_token.clone(),
                 )
                 .await;
-                tokio::spawn(listen_for_shutdown_signals(cancellation_token));
+                tokio::spawn(listen_for_shutdown_signals(cancellation_token.clone()));
                 service.run(cancellation_token).await?;
             }
 
