@@ -1,0 +1,10 @@
+services:
+  faucet:
+    image: "${LINERA_IMAGE:-linera}"
+    container_name: faucet
+    ports:
+      - "8080:8080"
+    command: [ "./faucet-shard-entrypoint.sh" ]
+    volumes:
+      - ./wallet/faucet:/wallet
+      - ./wallet/faucet-depositor:/depositor
