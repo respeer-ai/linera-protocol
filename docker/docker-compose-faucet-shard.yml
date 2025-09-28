@@ -6,5 +6,5 @@ services:
       - "8080:8080"
     command: [ "./faucet-shard-entrypoint.sh" ]
     volumes:
-      - ./wallet/faucet:/wallet
-      - ./wallet/faucet-depositor:/depositor
+      - ../output/local/wallet/faucet:/wallet
+      - ../output/local/wallet/faucet-depositor:/depositor

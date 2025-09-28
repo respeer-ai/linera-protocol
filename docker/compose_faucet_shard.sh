@@ -33,6 +33,7 @@ mkdir -p $WALLET_DIR
 
 FAUCET_DIR=$WALLET_DIR/faucet
 mkdir -p $FAUCET_DIR
+mkdir -p $WALLET_DIR/faucet-depositor
 
 CONFIG_DIR=$OUTPUT_DIR/config
 mkdir -p $CONFIG_DIR

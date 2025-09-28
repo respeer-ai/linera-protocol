@@ -1,15 +1,16 @@
 #!/bin/sh
 
-/usr/local/bin/faucet-entrypoint.sh &
+./faucet-entrypoint.sh &
 
-function query_faucet_balance() {
-  curl -d '{"query": "query { balance }"}' -X POST http://localhost:8080 | jq
+query_faucet_balance() {
+  balance=`curl -d '{"query": "query { balance }"}' -X POST http://localhost:8080 | jq -r '.data.balance'`
+  echo ${balance%%.*}
 }
 
-function deposit_faucet() {
+deposit_faucet() {
   wallet_id=`uuid`
   mkdir -p /depositor/$wallet_id
-  linera \
+  ./linera \
       --wallet /depositor/$wallet_id/wallet.json \
       --keystore /depositor/$wallet_id/keystore.json \
       --storage rocksdb:/depositor/$wallet_id/client.db \
@@ -18,7 +19,7 @@ function deposit_faucet() {
 
   faucet_chain_id=`cat /wallet/wallet.json | jq -r '.chains | keys[]'`
 
-  func_chain_id=`linera \
+  func_chain_id=`./linera \
       --wallet /depositor/$wallet_id/wallet.json \
       --keystore /depositor/$wallet_id/keystore.json \
       --storage rocksdb:/depositor/$wallet_id/client.db \
@@ -28,7 +29,7 @@ function deposit_faucet() {
   echo "From: $fund_chain_id"
   echo "To: $faucet_chain_id"
 
-  linera \
+  ./linera \
     --wallet /depositor/$wallet_id/wallet.json \
     --keystore /depositor/$wallet_id/keystore.json \
     --storage rocksdb:/depositor/$wallet_id/client.db \
@@ -38,13 +39,13 @@ function deposit_faucet() {
     99.99
 }
 
-function try_deposit_faucet() {
+try_deposit_faucet() {
   # Check balance
   balance=`query_faucet_balance`
-  if [ $balance -gt 10 ]; then
+  if [ "$balance" -gt 10 ]; then
     return
   fi
-  for i in `seq 1 100`; do
+  for i in `seq 1 1`; do
     deposit_faucet
   done
 }

@@ -115,7 +115,10 @@ LABEL build_date=$build_date
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    openssl
+    openssl \
+    jq \
+    curl \
+    uuid
 RUN update-ca-certificates
 
 ARG target
