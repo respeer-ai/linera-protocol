@@ -9,14 +9,16 @@ LAN_IP=$( hostname -I | awk '{print $1}' )
 GENERATE=0
 FAUCET_URL=https://api.testnet-conway.faucet.respeer.ai/api/faucet
 CLUSTER=testnet-conway
+COMPILE=0
 
-options="f:z:g:"
+options="f:z:g:c:"
 
 while getopts $options opt; do
   case ${opt} in
     f) FAUCET_URL=${OPTARG} ;;
     z) CLUSTER=${OPTARG} ;;
     g) GENERATE=${OPTARG} ;;
+    c) COMPILE=${OPTARG} ;;
   esac
 done
 
@@ -54,7 +56,9 @@ cd "$ROOT_DIR"
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
-docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+if [ $COMPILE -eq 1 ]; then
+  docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+fi
 
 export PATH=$RESPEER_BIN_DIR:$PATH
 
