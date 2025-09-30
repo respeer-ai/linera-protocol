@@ -4,6 +4,7 @@ services:
     container_name: rpc
     ports:
       - "30080:30080"
+      - "30082:30082"
     command: [ "./rpc-entrypoint.sh" ]
     volumes:
       - ../output/local/wallet/rpc:/wallet

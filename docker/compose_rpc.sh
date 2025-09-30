@@ -1,13 +1,13 @@
 #!/bin/bash
 
 ####
-## E.g. ./compose_rpc.sh -f https://faucet.testnet-conway.linera.net -g 0
+## E.g. ./compose_rpc.sh -f https://api.testnet-conway.faucet.respeer.ai/api/faucet -g 0 -c 0
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
 GENERATE=0
-FAUCET_URL=https://api.testnet-conway.faucet.respeer.ai/api/faucet
+FAUCET_URL=http://api.testnet-conway.faucet.respeer.ai/api/faucet
 CLUSTER=testnet-conway
 COMPILE=0
 
@@ -73,7 +73,7 @@ if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
 fi
 
 if [ "x$GENERATE" == "x1" ]; then
-  linera --wallet $RPC_DIR/wallet.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet $FAUCET_URL
+  linera --wallet $RPC_DIR/wallet.json --keystore $RPC_DIR/keystore.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet $FAUCET_URL
 fi
 
 cd $SCRIPT_DIR

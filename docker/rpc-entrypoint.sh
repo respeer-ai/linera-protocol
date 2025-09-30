@@ -8,4 +8,5 @@ exec ./linera \
   --recv-timeout-ms 30000 \
   service \
   --listener-skip-process-inbox \
-  --port 30080
+  --port 30080 \
+  --metrics-port 30082
