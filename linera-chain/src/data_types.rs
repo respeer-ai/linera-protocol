@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, SimpleObject};
 use custom_debug_derive::Debug;
 use linera_base::{
     bcs,
@@ -16,7 +16,9 @@ use linera_base::{
     doc_scalar, ensure, hex, hex_debug,
     identifiers::{Account, AccountOwner, ApplicationId, BlobId, ChainId, StreamId},
 };
-use linera_execution::{committee::Committee, Message, MessageKind, Operation, OutgoingMessage};
+use linera_execution::{
+    committee::Committee, Message, MessageKind, Operation, OutgoingMessage, SystemOperation,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -39,8 +41,10 @@ mod data_types_tests;
 /// * When a block is proposed to a validator, all cross-chain messages must have been
 ///   received ahead of time in the inbox of the chain.
 /// * This constraint does not apply to the execution of confirmed blocks.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(complex)]
+#[graphql(input_name = "InputProposedBlock")]
+#[serde(rename_all = "camelCase")]
 pub struct ProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -49,7 +53,12 @@ pub struct ProposedBlock {
     /// The transactions to execute in this block. Each transaction can be either
     /// incoming messages or an operation.
     #[debug(skip_if = Vec::is_empty)]
-    #[graphql(skip)]
+    #[graphql(skip_output)]
+    #[serde(
+        rename = "transaction_metadata",
+        alias = "transactionMetadata",
+        deserialize_with = "deserialize_transactions"
+    )]
     pub transactions: Vec<Transaction>,
     /// The block height.
     pub height: BlockHeight,
@@ -65,6 +74,14 @@ pub struct ProposedBlock {
     /// Certified hash (see `Certificate` below) of the previous block in the
     /// chain, if any.
     pub previous_block_hash: Option<CryptoHash>,
+}
+
+pub fn deserialize_transactions<'de, D>(deserializer: D) -> Result<Vec<Transaction>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let metas: Vec<TransactionMetadata> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(metas.into_iter().map(Transaction::from).collect())
 }
 
 impl ProposedBlock {
@@ -155,8 +172,84 @@ pub enum Transaction {
 
 impl BcsHashable<'_> for Transaction {}
 
+doc_scalar!(Transaction, "A transaction in a block.");
+
+impl From<TransactionMetadata> for Transaction {
+    fn from(metadata: TransactionMetadata) -> Self {
+        match metadata.transaction_type.as_str() {
+            "ReceiveMessages" => {
+                let incoming_bundle = metadata.incoming_bundle.unwrap();
+
+                let bundle = IncomingBundle {
+                    origin: incoming_bundle.origin,
+                    bundle: MessageBundle {
+                        height: incoming_bundle.bundle.height,
+                        timestamp: incoming_bundle.bundle.timestamp,
+                        certificate_hash: incoming_bundle.bundle.certificate_hash,
+                        transaction_index: incoming_bundle.bundle.transaction_index as u32,
+                        messages: incoming_bundle
+                            .bundle
+                            .messages
+                            .into_iter()
+                            .map(|msg| PostedMessage {
+                                authenticated_signer: msg.authenticated_signer,
+                                grant: msg.grant,
+                                refund_grant_to: msg.refund_grant_to,
+                                kind: msg.kind,
+                                index: msg.index as u32,
+                                message: msg.message,
+                            })
+                            .collect(),
+                    },
+                    action: incoming_bundle.action,
+                };
+
+                Transaction::ReceiveMessages(bundle)
+            }
+            "ExecuteOperation" => {
+                let graphql_operation = metadata.operation.unwrap();
+
+                let operation = match graphql_operation.operation_type.as_str() {
+                    "System" => {
+                        let bytes_hex = graphql_operation.system_bytes_hex.unwrap();
+
+                        // Convert hex string to bytes
+                        let bytes = hex::decode(bytes_hex).unwrap();
+
+                        // Deserialize the system operation from BCS bytes
+                        let system_operation: SystemOperation =
+                            linera_base::bcs::from_bytes(&bytes).unwrap();
+
+                        Operation::System(Box::new(system_operation))
+                    }
+                    "User" => {
+                        let application_id = graphql_operation.application_id.unwrap();
+
+                        let bytes_hex = graphql_operation.user_bytes_hex.unwrap();
+
+                        // Convert hex string to bytes
+                        let bytes = hex::decode(bytes_hex).unwrap();
+
+                        Operation::User {
+                            application_id,
+                            bytes,
+                        }
+                    }
+                    _ => {
+                        panic!("Unknown operation type");
+                    }
+                };
+
+                Transaction::ExecuteOperation(operation)
+            }
+            _ => panic!("Unknown transaction type"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
 #[graphql(name = "Operation")]
+#[serde(rename_all = "camelCase")]
 pub struct OperationMetadata {
     /// The type of operation: "System" or "User"
     pub operation_type: String,
@@ -194,6 +287,7 @@ impl From<&Operation> for OperationMetadata {
 
 /// GraphQL-compatible metadata about a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactionMetadata {
     /// The type of transaction: "ReceiveMessages" or "ExecuteOperation"
     pub transaction_type: String,
@@ -258,6 +352,7 @@ pub enum MessageAction {
 
 /// A set of messages from a single block, for a single destination.
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageBundle {
     /// The block height.
     pub height: BlockHeight,
@@ -283,6 +378,8 @@ pub enum OriginalProposal {
     },
 }
 
+doc_scalar!(OriginalProposal, "Exists proposal of new block.");
+
 /// An authenticated proposal for a new block.
 // TODO(#456): the signature of the block owner is currently lost but it would be useful
 // to have it for auditing purposes.
@@ -297,6 +394,7 @@ pub struct BlockProposal {
 
 /// A message together with kind, authentication and grant information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
@@ -358,8 +456,10 @@ doc_scalar!(
 );
 
 /// The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(with_testing, derive(Default))]
+#[graphql(input_name = "InputBlockExecutionOutcome")]
 pub struct BlockExecutionOutcome {
     /// The list of outgoing messages for each transaction.
     pub messages: Vec<Vec<OutgoingMessage>>,
@@ -535,7 +635,9 @@ impl BlockExecutionOutcome {
 }
 
 /// The data a block proposer signs.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, SimpleObject, InputObject)]
+#[graphql(input_name = "InputProposalContent")]
+#[serde(rename_all = "camelCase")]
 pub struct ProposalContent {
     /// The proposed block.
     pub block: ProposedBlock,
@@ -858,4 +960,12 @@ mod signing {
         };
         assert_eq!(block_proposal.owner(), public_key.into(),);
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateBlockMaterial {
+    pub incoming_bundles: Vec<IncomingBundle>,
+    pub local_time: Timestamp,
+    pub round: Round,
 }
