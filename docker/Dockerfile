@@ -27,6 +27,7 @@ ARG build_flag=--release
 ARG build_folder=release
 ARG build_features=scylladb,metrics,memory-profiling,tempo
 ARG rustflags="-C force-frame-pointers=yes"
+ARG all_proxy
 
 FROM rust:1.74-slim-bookworm AS builder
 ARG git_commit
@@ -35,8 +36,10 @@ ARG build_flag
 ARG build_folder
 ARG build_features
 ARG rustflags
+ARG all_proxy
 
 RUN apt-get update && apt-get install -y \
+    git \
     pkg-config \
     protobuf-compiler \
     clang \
@@ -74,12 +77,15 @@ COPY rust-toolchain* Cargo.* ./
 ENV GIT_COMMIT=${git_commit}
 ENV RUSTFLAGS=${rustflags}
 
-RUN cargo build ${build_flag:+"$build_flag"} \
+RUN CARGO_NET_GIT_FETCH_WITH_CLI=true \
+    all_proxy=$all_proxy \
+    cargo build ${build_flag:+"$build_flag"} \
     --target "$target" \
     --bin linera \
     --bin linera-proxy \
     --bin linera-server \
-    --features $build_features
+    --features $build_features \
+    -j 2
 
 RUN mv \
     target/"$target"/"$build_folder"/linera \
@@ -109,7 +115,10 @@ LABEL build_date=$build_date
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    openssl
+    openssl \
+    jq \
+    curl \
+    uuid
 RUN update-ca-certificates
 
 ARG target
@@ -128,4 +137,8 @@ COPY --chmod=755 \
     docker/compose-server-entrypoint.sh \
     docker/compose-proxy-entrypoint.sh \
     docker/compose-server-init.sh \
+    docker/faucet-entrypoint.sh \
+    docker/faucet-shard-entrypoint.sh \
+    docker/rpc-entrypoint.sh \
+    docker/wallet-entrypoint.sh \
     ./
