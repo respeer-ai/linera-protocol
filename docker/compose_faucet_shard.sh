@@ -38,26 +38,44 @@ mkdir -p $WALLET_DIR/faucet-depositor
 CONFIG_DIR=$OUTPUT_DIR/config
 mkdir -p $CONFIG_DIR
 
-RESPEER_BIN_DIR=$OUTPUT_DIR/respeer/bin
-mkdir -p $RESPEER_BIN_DIR
+OFFICIAL_BIN_DIR=$OUTPUT_DIR/official/bin
+mkdir -p $OFFICIAL_BIN_DIR
+
+SOURCE_DIR="$OUTPUT_DIR/source"
+mkdir -p $SOURCE_DIR
 
 # Cleanup before building
 docker stop faucet
 docker rm faucet
-docker rmi linera-respeer
+docker rmi linera
 
 ROOT_DIR=$SCRIPT_DIR/..
 
 NGINX_TEMPLATE_FILE=$ROOT_DIR/configuration/template/nginx.conf.j2
 
-# Run faucet service
-cd "$ROOT_DIR"
+cd $SOURCE_DIR
+rm -rf linera-protocol
+git clone https://github.com/linera-io/linera-protocol.git
+
+cd linera-protocol
+git checkout testnet_conway
+
+cp $SCRIPT_DIR/Dockerfile $SOURCE_DIR/linera-protocol/docker
+
+cp -v \
+  $SCRIPT_DIR/Dockerfile \
+  $SCRIPT_DIR/faucet-entrypoint.sh \
+  $SCRIPT_DIR/faucet-shard-entrypoint.sh \
+  $SCRIPT_DIR/docker-compose-faucet.yml \
+  $SCRIPT_DIR/rpc-entrypoint.sh \
+  $SCRIPT_DIR/wallet-entrypoint.sh \
+  $SOURCE_DIR/linera-protocol/docker
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
-docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera || exit 1
 
-export PATH=$RESPEER_BIN_DIR:$PATH
+export PATH=$OFFICIAL_BIN_DIR:$PATH
 
 LATEST_COMMIT=`git rev-parse HEAD`
 LATEST_COMMIT=${LATEST_COMMIT:0:10}
@@ -66,7 +84,7 @@ INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}' | awk '
 # Compile official for local linera toolchain
 if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
   cargo build --release -j 4
-  mv $PWD/target/release/linera $RESPEER_BIN_DIR
+  mv $PWD/target/release/linera $OFFICIAL_BIN_DIR
 fi
 
 if [ "x$GENERATE" == "x1" ]; then
@@ -75,7 +93,7 @@ fi
 
 cd $SCRIPT_DIR
 # Compose up faucet
-LINERA_IMAGE=linera-respeer docker compose -f docker-compose-faucet-shard.yml up --wait
+LINERA_IMAGE=linera docker compose -f docker-compose-faucet-shard.yml up --wait
 
 function generate_nginx_conf() {
   port_base=$1

@@ -56,6 +56,7 @@ cp -v \
   server-entrypoint.sh \
   server-init.sh \
   faucet-entrypoint.sh \
+  faucet-shard-entrypoint.sh \
   docker-compose-faucet.yml \
   rpc-entrypoint.sh \
   wallet-entrypoint.sh \
