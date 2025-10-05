@@ -80,7 +80,11 @@ pub fn deserialize_transactions<'de, D>(deserializer: D) -> Result<Vec<Transacti
 where
     D: serde::Deserializer<'de>,
 {
-    let metas: Vec<TransactionMetadata> = serde::Deserialize::deserialize(deserializer)?;
+    let raw_json: String = serde::Deserialize::deserialize(deserializer)?;
+    println!("Incoming transactions data: {}", raw_json);
+    let metas: Vec<TransactionMetadata> = serde_json::from_str(&raw_json)
+        .map_err(|e| serde::de::Error::custom(format!("Failed to parse JSON: {}", e)))?;
+    // let metas: Vec<TransactionMetadata> = serde::Deserialize::deserialize(deserializer)?;
     Ok(metas.into_iter().map(Transaction::from).collect())
 }
 
