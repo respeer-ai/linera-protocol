@@ -800,11 +800,6 @@ input InputProposedBlock {
 	"""
 	epoch: Epoch!
 	"""
-	The transactions to execute in this block. Each transaction can be either
-	incoming messages or an operation.
-	"""
-	transactions: [Transaction!]!
-	"""
 	The block height.
 	"""
 	height: BlockHeight!
@@ -1466,11 +1461,6 @@ type TimestampedBundleInInbox {
 	"""
 	seen: Timestamp!
 }
-
-"""
-A transaction in a block.
-"""
-scalar Transaction
 
 """
 GraphQL-compatible metadata about a transaction.
