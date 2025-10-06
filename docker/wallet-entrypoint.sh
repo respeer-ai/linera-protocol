@@ -5,4 +5,5 @@ exec ./linera \
   --keystore /keystore/keystore.json \
   --storage rocksdb:/wallet/client.db \
   service \
-  --port 8080
+  --port 8080 \
+  --metrics-port 8082
