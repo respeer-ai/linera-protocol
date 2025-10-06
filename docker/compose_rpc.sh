@@ -68,7 +68,7 @@ INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}' | awk '
 
 # Compile official for local linera toolchain
 if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
-  cargo build --release -j 4
+  cargo build --release -j 2
   mv $PWD/target/release/linera $RESPEER_BIN_DIR
 fi
 
