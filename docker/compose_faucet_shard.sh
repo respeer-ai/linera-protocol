@@ -73,7 +73,7 @@ cp -v \
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
-docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg features="scylladb,metrics,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera || exit 1
+docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,tempo" -f docker/Dockerfile . -t linera || exit 1
 
 export PATH=$OFFICIAL_BIN_DIR:$PATH
 
