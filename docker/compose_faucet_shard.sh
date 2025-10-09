@@ -26,12 +26,13 @@ OUTPUT_DIR="$SCRIPT_DIR"/../output
 mkdir -p $OUTPUT_DIR
 
 WALLET_DIR=$OUTPUT_DIR/wallet
-if [ "x$GENERATE" == "x1" ]; then
-  sudo rm $WALLET_DIR -rf
-fi
 mkdir -p $WALLET_DIR
 
 FAUCET_DIR=$WALLET_DIR/faucet
+if [ "x$GENERATE" == "x1" ]; then
+  sudo rm $FAUCET_DIR -rf
+  sudo rm $WALLET_DIR/faucet-depositor -rf
+fi
 mkdir -p $FAUCET_DIR
 mkdir -p $WALLET_DIR/faucet-depositor
 

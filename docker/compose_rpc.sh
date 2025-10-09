@@ -28,12 +28,12 @@ OUTPUT_DIR="$SCRIPT_DIR"/../output
 mkdir -p $OUTPUT_DIR
 
 WALLET_DIR=$OUTPUT_DIR/wallet
-if [ "x$GENERATE" == "x1" ]; then
-  rm $WALLET_DIR -rf
-fi
 mkdir -p $WALLET_DIR
 
 RPC_DIR=$WALLET_DIR/rpc
+if [ "x$GENERATE" == "x1" ]; then
+  rm $RPC_DIR -rf
+fi
 mkdir -p $RPC_DIR
 
 CONFIG_DIR=$OUTPUT_DIR/config
@@ -45,7 +45,6 @@ mkdir -p $RESPEER_BIN_DIR
 # Cleanup before building
 docker stop rpc
 docker rm rpc
-docker rmi linera-respeer
 
 ROOT_DIR=$SCRIPT_DIR/..
 
@@ -57,6 +56,7 @@ cd "$ROOT_DIR"
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
 if [ $COMPILE -eq 1 ]; then
+  docker rmi linera-respeer
   docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,tempo,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
 fi
 
