@@ -7,4 +7,4 @@ services:
       - "30082:30082"
     command: [ "./rpc-entrypoint.sh" ]
     volumes:
-      - ../output/local/wallet/rpc:/wallet
+      - ../output/wallet/rpc:/wallet

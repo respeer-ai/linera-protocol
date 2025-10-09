@@ -6,5 +6,5 @@ services:
       - "31080:31080"
     command: [ "./faucet-shard-entrypoint.sh" ]
     volumes:
-      - ../output/local/wallet/faucet:/wallet
-      - ../output/local/wallet/faucet-depositor:/depositor
+      - ../output/wallet/faucet:/wallet
+      - ../output/wallet/faucet-depositor:/depositor

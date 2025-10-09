@@ -343,7 +343,8 @@ where
                     continue;
                 }
                 Ok(Some(existing_chain_id)) => {
-                    if !self.config.without_cache {
+                    if self.config.without_cache {
+                        batch_requests.push(request);
                         continue;
                     }
                     // Retrieve the chain description from local storage.
