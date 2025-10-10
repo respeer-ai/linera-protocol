@@ -4241,7 +4241,7 @@ impl<Env: Environment> ChainClient<Env> {
         // Make sure every incoming message succeeds and otherwise remove them.
         // Also, compute the final certified hash while we're at it.
 
-        let info = self.chain_info().await?;
+        let info = self.chain_info_with_committees().await?;
         // Use the round number assuming there are oracle responses.
         // Using the round number during execution counts as an oracle.
         // Accessing the round number in single-leader rounds where we are not the leader
@@ -4292,8 +4292,8 @@ impl<Env: Environment> ChainClient<Env> {
         let mutex = self.client_mutex();
         let _guard = mutex.lock_owned().await;
 
-        let info = self.prepare_chain().await?;
-        // let info = self.request_leader_timeout_if_needed().await?;
+        let _ = self.prepare_chain().await?;
+        let info = self.request_leader_timeout_if_needed().await?;
 
         // If there is a validated block in the current round, finalize it.
         if info.manager.has_locking_block_in_current_round()

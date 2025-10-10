@@ -5,10 +5,10 @@
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
-FAUCET_URL=http://api.faucet.respeer.ai/api/faucet
+FAUCET_URL=https://faucet.testnet-conway.linera.net
 COMPILE=1
 CREATE_WALLET=1
-CLUSTER=
+CLUSTER=testnet-conway
 
 options="f:c:C:W:z:"
 
@@ -44,7 +44,7 @@ export PATH=$BIN_DIR:$PATH
 cd $SCRIPT_DIR/..
 
 if [ "x$COMPILE" = "x1" ]; then
-    cargo build --release --features storage-service,disable-native-rpc,enable-wallet-rpc
+    cargo build --release --features storage-service,disable-native-rpc,enable-wallet-rpc -j 4
     mv $PWD/target/release/linera $BIN_DIR
     mv $PWD/target/release/linera-server $BIN_DIR
     mv $PWD/target/release/linera-storage-server $BIN_DIR
@@ -128,7 +128,8 @@ function run_faucet_service() {
         --storage rocksdb://$WALLET_DIR/faucet/client.db \
         faucet \
         --amount 10 \
-        --port 30090 &
+        --port 30090 \
+        --storage-path $WALLET_DIR/faucet/faucet.sqlite &
 }
 
 run_faucet_service
