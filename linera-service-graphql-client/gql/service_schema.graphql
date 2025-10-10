@@ -763,14 +763,17 @@ input InputOutgoingMessage {
 	message: Message!
 }
 
-"""
-The data a block proposer signs.
-"""
-input InputProposalContent {
+input InputUnsignedBlockProposal {
+	content: InputWrapperProposalContent!
+	outcome: InputBlockExecutionOutcome!
+	originalProposal: OriginalProposal
+}
+
+input InputWrapperProposalContent {
 	"""
 	The proposed block.
 	"""
-	block: InputProposedBlock!
+	block: InputWrapperProposedBlock!
 	"""
 	The consensus round in which this proposal is made.
 	"""
@@ -781,16 +784,7 @@ input InputProposalContent {
 	outcome: InputBlockExecutionOutcome
 }
 
-"""
-A block containing operations to apply on a given chain, as well as the
-acknowledgment of a number of incoming messages from other chains.
-* Incoming messages must be selected in the order they were
-produced by the sending chain, but can be skipped.
-* When a block is proposed to a validator, all cross-chain messages must have been
-received ahead of time in the inbox of the chain.
-* This constraint does not apply to the execution of confirmed blocks.
-"""
-input InputProposedBlock {
+input InputWrapperProposedBlock {
 	"""
 	The chain to which this block belongs.
 	"""
@@ -799,6 +793,11 @@ input InputProposedBlock {
 	The number identifying the current configuration.
 	"""
 	epoch: Epoch!
+	"""
+	The transactions to execute in this block. Each transaction can be either
+	incoming messages or an operation.
+	"""
+	transactions: [Transaction!]!
 	"""
 	The block height.
 	"""
@@ -820,12 +819,6 @@ input InputProposedBlock {
 	chain, if any.
 	"""
 	previousBlockHash: CryptoHash
-}
-
-input InputUnsignedBlockProposal {
-	content: InputProposalContent!
-	outcome: InputBlockExecutionOutcome!
-	originalProposal: OriginalProposal
 }
 
 """
@@ -1239,69 +1232,6 @@ type PostedMessage {
 	message: Message!
 }
 
-"""
-The data a block proposer signs.
-"""
-type ProposalContent {
-	"""
-	The proposed block.
-	"""
-	block: ProposedBlock!
-	"""
-	The consensus round in which this proposal is made.
-	"""
-	round: Round!
-	"""
-	If this is a retry from an earlier round, the execution outcome.
-	"""
-	outcome: BlockExecutionOutcome
-}
-
-"""
-A block containing operations to apply on a given chain, as well as the
-acknowledgment of a number of incoming messages from other chains.
-* Incoming messages must be selected in the order they were
-produced by the sending chain, but can be skipped.
-* When a block is proposed to a validator, all cross-chain messages must have been
-received ahead of time in the inbox of the chain.
-* This constraint does not apply to the execution of confirmed blocks.
-"""
-type ProposedBlock {
-	"""
-	The chain to which this block belongs.
-	"""
-	chainId: ChainId!
-	"""
-	The number identifying the current configuration.
-	"""
-	epoch: Epoch!
-	"""
-	The block height.
-	"""
-	height: BlockHeight!
-	"""
-	The timestamp when this block was created. This must be later than all messages received
-	in this block, but no later than the current time.
-	"""
-	timestamp: Timestamp!
-	"""
-	The user signing for the operations in the block and paying for their execution
-	fees. If set, this must be the `owner` in the block proposal. `None` means that
-	the default account of the chain is used. This value is also used as recipient of
-	potential refunds for the message grants created by the operations.
-	"""
-	authenticatedSigner: AccountOwner
-	"""
-	Certified hash (see `Certificate` below) of the previous block in the
-	chain, if any.
-	"""
-	previousBlockHash: CryptoHash
-	"""
-	Metadata about the transactions in this block.
-	"""
-	transactionMetadata: [TransactionMetadata!]!
-}
-
 type QueryRoot {
 	chain(chainId: ChainId!): ChainStateExtendedView!
 	applications(chainId: ChainId!): [ApplicationOverview!]!
@@ -1463,6 +1393,11 @@ type TimestampedBundleInInbox {
 }
 
 """
+A transaction in a block.
+"""
+scalar Transaction
+
+"""
 GraphQL-compatible metadata about a transaction.
 """
 type TransactionMetadata {
@@ -1481,7 +1416,7 @@ type TransactionMetadata {
 }
 
 type UnsignedBlockProposal {
-	content: ProposalContent!
+	content: WrapperProposalContent!
 	outcome: BlockExecutionOutcome!
 	originalProposal: OriginalProposal
 }
@@ -1489,6 +1424,58 @@ type UnsignedBlockProposal {
 scalar VersionInfo
 
 scalar VmRuntime
+
+type WrapperProposalContent {
+	"""
+	The proposed block.
+	"""
+	block: WrapperProposedBlock!
+	"""
+	The consensus round in which this proposal is made.
+	"""
+	round: Round!
+	"""
+	If this is a retry from an earlier round, the execution outcome.
+	"""
+	outcome: BlockExecutionOutcome
+}
+
+type WrapperProposedBlock {
+	"""
+	The chain to which this block belongs.
+	"""
+	chainId: ChainId!
+	"""
+	The number identifying the current configuration.
+	"""
+	epoch: Epoch!
+	"""
+	The transactions to execute in this block. Each transaction can be either
+	incoming messages or an operation.
+	"""
+	transactions: [Transaction!]!
+	"""
+	The block height.
+	"""
+	height: BlockHeight!
+	"""
+	The timestamp when this block was created. This must be later than all messages received
+	in this block, but no later than the current time.
+	"""
+	timestamp: Timestamp!
+	"""
+	The user signing for the operations in the block and paying for their execution
+	fees. If set, this must be the `owner` in the block proposal. `None` means that
+	the default account of the chain is used. This value is also used as recipient of
+	potential refunds for the message grants created by the operations.
+	"""
+	authenticatedSigner: AccountOwner
+	"""
+	Certified hash (see `Certificate` below) of the previous block in the
+	chain, if any.
+	"""
+	previousBlockHash: CryptoHash
+}
 
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.

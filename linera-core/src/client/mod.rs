@@ -4110,7 +4110,7 @@ impl<Env: Environment> ChainClient<Env> {
             return Err(ChainClientError::WaitFinalizingBlock);
         }
 
-        let proposed_block = unsigned_block_proposal.clone().content.block;
+        let proposed_block = unsigned_block_proposal.clone().content.block.into();
         let round = unsigned_block_proposal.content.round;
         let outcome = unsigned_block_proposal.outcome;
 
@@ -4131,7 +4131,7 @@ impl<Env: Environment> ChainClient<Env> {
         }
 
         let proposal = Box::new(BlockProposal {
-            content: unsigned_block_proposal.content,
+            content: unsigned_block_proposal.content.into(),
             signature,
             original_proposal: unsigned_block_proposal.original_proposal,
         });

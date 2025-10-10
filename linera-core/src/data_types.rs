@@ -17,10 +17,11 @@ use linera_base::{
 use linera_chain::{
     data_types::{
         BlockExecutionOutcome, BlockProposal, ChainAndHeight, IncomingBundle, MessageBundle,
-        OriginalProposal, ProposalContent, ProposedBlock,
+        OriginalProposal, ProposedBlock,
     },
     manager::ChainManagerInfo,
     types::ValidatedBlockCertificate,
+    wrapper_block::{WrapperProposalContent, WrapperProposedBlock},
     ChainStateView,
 };
 use linera_execution::{committee::Committee, ExecutionRuntimeContext};
@@ -400,7 +401,7 @@ impl<T> ClientOutcome<T> {
 #[cfg_attr(with_testing, derive(Eq, PartialEq))]
 #[graphql(input_name = "InputUnsignedBlockProposal")]
 pub struct UnsignedBlockProposal {
-    pub content: ProposalContent,
+    pub content: WrapperProposalContent,
     pub outcome: BlockExecutionOutcome,
     #[debug(skip_if = Option::is_none)]
     pub original_proposal: Option<OriginalProposal>,
@@ -410,9 +411,9 @@ pub struct UnsignedBlockProposal {
 
 impl UnsignedBlockProposal {
     pub fn new_initial(round: Round, block: ProposedBlock, outcome: BlockExecutionOutcome) -> Self {
-        let content = ProposalContent {
+        let content = WrapperProposalContent {
             round,
-            block,
+            block: WrapperProposedBlock::from(block),
             outcome: None,
         };
 
@@ -428,9 +429,9 @@ impl UnsignedBlockProposal {
         old_proposal: BlockProposal,
         outcome: BlockExecutionOutcome,
     ) -> Self {
-        let content = ProposalContent {
+        let content = WrapperProposalContent {
             round,
-            block: old_proposal.content.block,
+            block: WrapperProposedBlock::from(old_proposal.content.block),
             outcome: None,
         };
 
@@ -449,8 +450,8 @@ impl UnsignedBlockProposal {
         let certificate = validated_block_certificate.lite_certificate().cloned();
         let block = validated_block_certificate.into_inner().into_inner();
         let (block, outcome) = block.into_proposal();
-        let content = ProposalContent {
-            block,
+        let content = WrapperProposalContent {
+            block: WrapperProposedBlock::from(block),
             round,
             outcome: Some(outcome),
         };
