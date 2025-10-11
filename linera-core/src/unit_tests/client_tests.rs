@@ -376,7 +376,10 @@ where
         BlockHeight::from(1)
     );
     assert!(sender.pending_proposal().is_none());
-    assert_eq!(sender.identity(false).await?, sender.preferred_owner.unwrap());
+    assert_eq!(
+        sender.identity(false).await?,
+        sender.preferred_owner.unwrap()
+    );
     assert_eq!(
         builder
             .check_that_validators_have_certificate(sender.chain_id, BlockHeight::ZERO, 3)
@@ -502,7 +505,10 @@ where
         BlockHeight::from(1)
     );
     assert!(sender.pending_proposal().is_none());
-    assert_eq!(sender.identity(false).await?, sender.preferred_owner.unwrap());
+    assert_eq!(
+        sender.identity(false).await?,
+        sender.preferred_owner.unwrap()
+    );
     // Make a client to try the new chain.
     let mut client = builder.make_client(new_id, None, BlockHeight::ZERO).await?;
     client.set_preferred_owner(new_public_key.into());
@@ -581,7 +587,10 @@ where
         BlockHeight::from(1)
     );
     assert!(sender.pending_proposal().is_none());
-    assert_eq!(sender.identity(false).await?, sender.preferred_owner.unwrap());
+    assert_eq!(
+        sender.identity(false).await?,
+        sender.preferred_owner.unwrap()
+    );
     assert_matches!(
         &certificate.block().body.transactions[0],
         Transaction::ExecuteOperation(Operation::System(system_op)) if matches!(**system_op, SystemOperation::OpenChain(_)),
@@ -664,7 +673,10 @@ where
         BlockHeight::from(2)
     );
     assert!(sender.pending_proposal().is_none());
-    assert_eq!(sender.identity(false).await?, sender.preferred_owner.unwrap());
+    assert_eq!(
+        sender.identity(false).await?,
+        sender.preferred_owner.unwrap()
+    );
     // Make a client to try the new chain.
     let mut client = builder.make_client(new_id, None, BlockHeight::ZERO).await?;
     client.set_preferred_owner(new_public_key.into());
