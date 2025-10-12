@@ -45,6 +45,8 @@ mkdir -p $RESPEER_BIN_DIR
 # Cleanup before building
 docker stop faucet rpc
 docker rm faucet rpc
+docker stop `docker ps -a | grep linera-respeer | awk '{print $NF}'`
+docker rm `docker ps -a | grep linera-respeer | awk '{print $NF}'`
 docker rmi linera-respeer
 
 ROOT_DIR=$SCRIPT_DIR/..
