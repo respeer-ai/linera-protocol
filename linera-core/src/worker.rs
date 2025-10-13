@@ -11,7 +11,9 @@ use std::{
 use futures::future::Either;
 use linera_base::{
     crypto::{CryptoError, CryptoHash, ValidatorPublicKey, ValidatorSecretKey},
-    data_types::{ApplicationDescription, ArithmeticError, Blob, BlockHeight, Epoch, Round},
+    data_types::{
+        ApplicationDescription, ArithmeticError, Blob, BlockHeight, Epoch, Round, Timestamp,
+    },
     doc_scalar,
     hashed::Hashed,
     identifiers::{AccountOwner, ApplicationId, BlobId, ChainId, EventId, StreamId},
@@ -578,14 +580,16 @@ where
         round: Option<u32>,
         published_blobs: Vec<Blob>,
     ) -> Result<(Block, ChainInfoResponse), WorkerError> {
-        self.query_chain_worker(block.chain_id, move |callback| {
-            ChainWorkerRequest::StageBlockExecution {
+        self.query_chain_worker(
+            block.chain_id,
+            move |callback| ChainWorkerRequest::StageBlockExecution {
                 block,
                 round,
                 published_blobs,
                 callback,
-            }
-        })
+            },
+            None,
+        )
         .await
     }
 
@@ -600,9 +604,11 @@ where
         chain_id: ChainId,
         query: Query,
     ) -> Result<QueryOutcome, WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::QueryApplication { query, callback }
-        })
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::QueryApplication { query, callback },
+            None,
+        )
         .await
     }
 
@@ -616,12 +622,14 @@ where
         chain_id: ChainId,
         application_id: ApplicationId,
     ) -> Result<ApplicationDescription, WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::DescribeApplication {
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::DescribeApplication {
                 application_id,
                 callback,
-            }
-        })
+            },
+            None,
+        )
         .await
     }
 
@@ -642,13 +650,15 @@ where
         notify_when_messages_are_delivered: Option<oneshot::Sender<()>>,
     ) -> Result<(ChainInfoResponse, NetworkActions, BlockOutcome), WorkerError> {
         let chain_id = certificate.block().header.chain_id;
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::ProcessConfirmedBlock {
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::ProcessConfirmedBlock {
                 certificate,
                 notify_when_messages_are_delivered,
                 callback,
-            }
-        })
+            },
+            None,
+        )
         .await
     }
 
@@ -663,12 +673,14 @@ where
         certificate: ValidatedBlockCertificate,
     ) -> Result<(ChainInfoResponse, NetworkActions, BlockOutcome), WorkerError> {
         let chain_id = certificate.block().header.chain_id;
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::ProcessValidatedBlock {
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::ProcessValidatedBlock {
                 certificate,
                 callback,
-            }
-        })
+            },
+            None,
+        )
         .await
     }
 
@@ -683,12 +695,14 @@ where
         certificate: TimeoutCertificate,
     ) -> Result<(ChainInfoResponse, NetworkActions), WorkerError> {
         let chain_id = certificate.value().chain_id();
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::ProcessTimeout {
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::ProcessTimeout {
                 certificate,
                 callback,
-            }
-        })
+            },
+            None,
+        )
         .await
     }
 
@@ -704,13 +718,15 @@ where
         recipient: ChainId,
         bundles: Vec<(Epoch, MessageBundle)>,
     ) -> Result<Option<BlockHeight>, WorkerError> {
-        self.query_chain_worker(recipient, move |callback| {
-            ChainWorkerRequest::ProcessCrossChainUpdate {
+        self.query_chain_worker(
+            recipient,
+            move |callback| ChainWorkerRequest::ProcessCrossChainUpdate {
                 origin,
                 bundles,
                 callback,
-            }
-        })
+            },
+            None,
+        )
         .await
     }
 
@@ -726,9 +742,11 @@ where
         chain_id: ChainId,
         height: BlockHeight,
     ) -> Result<Option<ConfirmedBlockCertificate>, WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::ReadCertificate { height, callback }
-        })
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::ReadCertificate { height, callback },
+            None,
+        )
         .await
     }
 
@@ -745,9 +763,11 @@ where
         &self,
         chain_id: ChainId,
     ) -> Result<OwnedRwLockReadGuard<ChainStateView<StorageClient::Context>>, WorkerError> {
-        self.query_chain_worker(chain_id, |callback| ChainWorkerRequest::GetChainStateView {
-            callback,
-        })
+        self.query_chain_worker(
+            chain_id,
+            |callback| ChainWorkerRequest::GetChainStateView { callback },
+            None,
+        )
         .await
     }
 
@@ -762,6 +782,7 @@ where
         request_builder: impl FnOnce(
             oneshot::Sender<Result<Response, WorkerError>>,
         ) -> ChainWorkerRequest<StorageClient::Context>,
+        local_time: Option<Timestamp>,
     ) -> Result<Response, WorkerError> {
         // Build the request.
         let (callback, response) = oneshot::channel();
@@ -795,6 +816,7 @@ where
                 chain_id,
                 receiver,
                 is_tracked,
+                local_time,
             );
 
             self.chain_worker_tasks
@@ -868,9 +890,11 @@ where
         #[cfg(with_metrics)]
         let round = proposal.content.round;
         let response = self
-            .query_chain_worker(proposal.content.block.chain_id, move |callback| {
-                ChainWorkerRequest::HandleBlockProposal { proposal, callback }
-            })
+            .query_chain_worker(
+                proposal.content.block.chain_id,
+                move |callback| ChainWorkerRequest::HandleBlockProposal { proposal, callback },
+                None,
+            )
             .await?;
         #[cfg(with_metrics)]
         metrics::NUM_ROUNDS_IN_BLOCK_PROPOSAL
@@ -1018,9 +1042,11 @@ where
         #[cfg(with_metrics)]
         metrics::CHAIN_INFO_QUERIES.inc();
         let result = self
-            .query_chain_worker(query.chain_id, move |callback| {
-                ChainWorkerRequest::HandleChainInfoQuery { query, callback }
-            })
+            .query_chain_worker(
+                query.chain_id,
+                move |callback| ChainWorkerRequest::HandleChainInfoQuery { query, callback },
+                None,
+            )
             .await;
         trace!("{} --> {:?}", self.nickname, result);
         result
@@ -1040,9 +1066,11 @@ where
             self.nickname
         );
         let result = self
-            .query_chain_worker(chain_id, move |callback| {
-                ChainWorkerRequest::DownloadPendingBlob { blob_id, callback }
-            })
+            .query_chain_worker(
+                chain_id,
+                move |callback| ChainWorkerRequest::DownloadPendingBlob { blob_id, callback },
+                None,
+            )
             .await;
         trace!(
             "{} --> {:?}",
@@ -1067,9 +1095,11 @@ where
             self.nickname
         );
         let result = self
-            .query_chain_worker(chain_id, move |callback| {
-                ChainWorkerRequest::HandlePendingBlob { blob, callback }
-            })
+            .query_chain_worker(
+                chain_id,
+                move |callback| ChainWorkerRequest::HandlePendingBlob { blob, callback },
+                None,
+            )
             .await;
         trace!(
             "{} --> {:?}",
@@ -1120,13 +1150,15 @@ where
                 recipient,
                 latest_height,
             } => {
-                self.query_chain_worker(sender, move |callback| {
-                    ChainWorkerRequest::ConfirmUpdatedRecipient {
+                self.query_chain_worker(
+                    sender,
+                    move |callback| ChainWorkerRequest::ConfirmUpdatedRecipient {
                         recipient,
                         latest_height,
                         callback,
-                    }
-                })
+                    },
+                    None,
+                )
                 .await?;
                 Ok(NetworkActions::default())
             }
@@ -1144,12 +1176,37 @@ where
         chain_id: ChainId,
         new_trackers: BTreeMap<ValidatorPublicKey, u64>,
     ) -> Result<(), WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::UpdateReceivedCertificateTrackers {
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::UpdateReceivedCertificateTrackers {
                 new_trackers,
                 callback,
-            }
-        })
+            },
+            None,
+        )
+        .await
+    }
+
+    /// Tries to execute a block proposal without any verification other than block execution.
+    #[tracing::instrument(level = "trace", skip(self, block))]
+    pub async fn stage_block_execution_with_local_time(
+        &self,
+        block: ProposedBlock,
+        round: Option<u32>,
+        published_blobs: Vec<Blob>,
+        local_time: Timestamp,
+    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
+        self.query_chain_worker(
+            block.chain_id,
+            move |callback| ChainWorkerRequest::StageBlockExecutionWithLocalTime {
+                block,
+                round,
+                published_blobs,
+                local_time,
+                callback,
+            },
+            Some(local_time),
+        )
         .await
     }
 }
