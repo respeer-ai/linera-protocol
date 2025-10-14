@@ -1,0 +1,12 @@
+services:
+  rpc:
+    image: "${LINERA_IMAGE:-linera}"
+    container_name: rpc
+    ports:
+      - "30080:30080"
+      - "30082:30082"
+    command: [ "./rpc-entrypoint.sh" ]
+    volumes:
+      - ../output/wallet/rpc:/wallet
+    environment:
+      RUST_LOG: warn

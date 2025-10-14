@@ -9,6 +9,11 @@ A unique identifier for a user or an application.
 scalar AccountOwner
 
 """
+A crypto signature.
+"""
+scalar AccountSignature
+
+"""
 A non-negative amount of tokens.
 """
 scalar Amount
@@ -130,6 +135,44 @@ type BlockBody {
 }
 
 """
+The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
+"""
+type BlockExecutionOutcome {
+	"""
+	The list of outgoing messages for each transaction.
+	"""
+	messages: [[OutgoingMessage!]!]!
+	"""
+	The hashes and heights of previous blocks that sent messages to the same recipients.
+	"""
+	previousMessageBlocks: JSONObject!
+	"""
+	The hashes and heights of previous blocks that published events to the same channels.
+	"""
+	previousEventBlocks: JSONObject!
+	"""
+	The hash of the chain's execution state after this block.
+	"""
+	stateHash: CryptoHash!
+	"""
+	The record of oracle responses for each transaction.
+	"""
+	oracleResponses: [[OracleResponse!]!]!
+	"""
+	The list of events produced by each transaction.
+	"""
+	events: [[Event!]!]!
+	"""
+	The list of blobs created by each transaction.
+	"""
+	blobs: [[Blob!]!]!
+	"""
+	The execution result for each operation.
+	"""
+	operationResults: [OperationResult!]!
+}
+
+"""
 Succinct representation of a block.
 Contains all the metadata to follow the chain of blocks or verifying
 inclusion (event, message, oracle response, etc.) in the block's body.
@@ -205,6 +248,11 @@ A block height to identify blocks in a chain
 """
 scalar BlockHeight
 
+"""
+Materials of a new block.
+"""
+scalar BlockMaterial
+
 type BucketQueueView_BlockHeight_e824a938 {
 	count: Int!
 	entries(count: Int): [BlockHeight!]!
@@ -233,6 +281,12 @@ type BundleInInbox {
 A WebAssembly module's bytecode
 """
 scalar Bytecode
+
+type CandidateBlockMaterial {
+	incomingBundles: [IncomingBundle!]!
+	localTime: Timestamp!
+	round: Round!
+}
 
 """
 A chain ID with a block height.
@@ -289,6 +343,11 @@ type ChainManager {
 	round to become current, unless a higher one already is.
 	"""
 	currentRound: Round!
+}
+
+input ChainOwners {
+	chainId: ChainId!
+	owners: [AccountOwner!]!
 }
 
 """
@@ -619,6 +678,150 @@ type IndexAndEvent {
 }
 
 """
+The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
+"""
+input InputBlockExecutionOutcome {
+	"""
+	The list of outgoing messages for each transaction.
+	"""
+	messages: [[InputOutgoingMessage!]!]!
+	"""
+	The hashes and heights of previous blocks that sent messages to the same recipients.
+	"""
+	previousMessageBlocks: JSONObject!
+	"""
+	The hashes and heights of previous blocks that published events to the same channels.
+	"""
+	previousEventBlocks: JSONObject!
+	"""
+	The hash of the chain's execution state after this block.
+	"""
+	stateHash: CryptoHash!
+	"""
+	The record of oracle responses for each transaction.
+	"""
+	oracleResponses: [[OracleResponse!]!]!
+	"""
+	The list of events produced by each transaction.
+	"""
+	events: [[InputEvent!]!]!
+	"""
+	The list of blobs created by each transaction.
+	"""
+	blobs: [[Blob!]!]!
+	"""
+	The execution result for each operation.
+	"""
+	operationResults: [OperationResult!]!
+}
+
+"""
+An event recorded in a block.
+"""
+input InputEvent {
+	"""
+	The ID of the stream this event belongs to.
+	"""
+	streamId: StreamIdInput!
+	"""
+	The event index, i.e. the number of events in the stream before this one.
+	"""
+	index: Int!
+	"""
+	The payload data.
+	"""
+	value: [Int!]!
+}
+
+"""
+A posted message together with routing information.
+"""
+input InputOutgoingMessage {
+	"""
+	The destination of the message.
+	"""
+	destination: ChainId!
+	"""
+	The user authentication carried by the message, if any.
+	"""
+	authenticatedSigner: AccountOwner
+	"""
+	A grant to pay for the message execution.
+	"""
+	grant: Amount!
+	"""
+	Where to send a refund for the unused part of the grant after execution, if any.
+	"""
+	refundGrantTo: Account
+	"""
+	The kind of message being sent.
+	"""
+	kind: MessageKind!
+	"""
+	The message itself.
+	"""
+	message: Message!
+}
+
+input InputUnsignedBlockProposal {
+	content: InputWrapperProposalContent!
+	outcome: InputBlockExecutionOutcome!
+	originalProposal: OriginalProposal
+}
+
+input InputWrapperProposalContent {
+	"""
+	The proposed block.
+	"""
+	block: InputWrapperProposedBlock!
+	"""
+	The consensus round in which this proposal is made.
+	"""
+	round: Round!
+	"""
+	If this is a retry from an earlier round, the execution outcome.
+	"""
+	outcome: InputBlockExecutionOutcome
+}
+
+input InputWrapperProposedBlock {
+	"""
+	The chain to which this block belongs.
+	"""
+	chainId: ChainId!
+	"""
+	The number identifying the current configuration.
+	"""
+	epoch: Epoch!
+	"""
+	The transactions to execute in this block. Each transaction can be either
+	incoming messages or an operation.
+	"""
+	transactions: [Transaction!]!
+	"""
+	The block height.
+	"""
+	height: BlockHeight!
+	"""
+	The timestamp when this block was created. This must be later than all messages received
+	in this block, but no later than the current time.
+	"""
+	timestamp: Timestamp!
+	"""
+	The user signing for the operations in the block and paying for their execution
+	fees. If set, this must be the `owner` in the block proposal. `None` means that
+	the default account of the chain is used. This value is also used as recipient of
+	potential refunds for the message grants created by the operations.
+	"""
+	authenticatedSigner: AccountOwner
+	"""
+	Certified hash (see `Certificate` below) of the previous block in the
+	chain, if any.
+	"""
+	previousBlockHash: CryptoHash
+}
+
+"""
 A scalar that can represent any JSON Object value.
 """
 scalar JSONObject
@@ -880,6 +1083,22 @@ type MutationRoot {
 	Creates a new application.
 	"""
 	createApplication(chainId: ChainId!, moduleId: ModuleId!, parameters: String!, instantiationArgument: String!, requiredApplicationIds: [ApplicationId!]!): ApplicationId!
+	"""
+	ResPeer::CheCko::Initialize offline wallet
+	"""
+	importChain(owner: AccountOwner!, chainId: ChainId!, signature: AccountSignature!, creatorChainId: ChainId!): ChainId!
+	"""
+	Submit block proposal with signature
+	"""
+	submitSignedBlock(chainId: ChainId!, block: SignedBlock!): CryptoHash!
+	"""
+	Submit block proposal with signature
+	"""
+	submitSignedBlockBcs(chainId: ChainId!, block: SignedBlockBcs!): CryptoHash!
+	"""
+	Calculate block execution state hash
+	"""
+	simulateExecuteBlock(chainId: ChainId!, blockMaterial: BlockMaterial!): SimulatedBlockMaterial
 }
 
 """
@@ -915,6 +1134,11 @@ scalar OperationResult
 A record of a single oracle response.
 """
 scalar OracleResponse
+
+"""
+Exists proposal of new block.
+"""
+scalar OriginalProposal
 
 """
 The state of an outbox
@@ -1030,6 +1254,26 @@ type QueryRoot {
 	Returns the version information on this node service.
 	"""
 	version: VersionInfo!
+	"""
+	Returns the pending message of the chain
+	"""
+	pendingMessages(chainId: ChainId!): [IncomingBundle!]!
+	"""
+	Returns block material of the chain
+	"""
+	blockMaterial(chainId: ChainId!, maxPendingMessages: Int!): CandidateBlockMaterial!
+	"""
+	Returns the balance of given owner
+	"""
+	balance(chainId: ChainId!, owner: AccountOwner): Amount!
+	"""
+	Returns the balances of given owners
+	"""
+	balances(chainOwners: [ChainOwners!]!): JSONObject!
+	"""
+	Returns the maintained chains of given owner
+	"""
+	ownerChains(owner: AccountOwner!): Chains!
 }
 
 type QueueView_MessageBundle_f4399f0b {
@@ -1071,6 +1315,22 @@ scalar Round
 type SetView_BundleInInbox_092a4377 {
 	elements(count: Int): [BundleInInbox!]!
 	count: Int!
+}
+
+input SignedBlock {
+	unsignedBlockProposal: InputUnsignedBlockProposal!
+	signature: AccountSignature!
+	blobBytes: [[Int!]!]!
+}
+
+"""
+A signed block which will be submitted to blockchain with its signature.
+"""
+scalar SignedBlockBcs
+
+type SimulatedBlockMaterial {
+	blockProposal: UnsignedBlockProposal!
+	blobBytes: [[Int!]!]!
 }
 
 """
@@ -1144,6 +1404,11 @@ type TimestampedBundleInInbox {
 }
 
 """
+A transaction in a block.
+"""
+scalar Transaction
+
+"""
 GraphQL-compatible metadata about a transaction.
 """
 type TransactionMetadata {
@@ -1161,9 +1426,67 @@ type TransactionMetadata {
 	operation: Operation
 }
 
+type UnsignedBlockProposal {
+	content: WrapperProposalContent!
+	outcome: BlockExecutionOutcome!
+	originalProposal: OriginalProposal
+}
+
 scalar VersionInfo
 
 scalar VmRuntime
+
+type WrapperProposalContent {
+	"""
+	The proposed block.
+	"""
+	block: WrapperProposedBlock!
+	"""
+	The consensus round in which this proposal is made.
+	"""
+	round: Round!
+	"""
+	If this is a retry from an earlier round, the execution outcome.
+	"""
+	outcome: BlockExecutionOutcome
+}
+
+type WrapperProposedBlock {
+	"""
+	The chain to which this block belongs.
+	"""
+	chainId: ChainId!
+	"""
+	The number identifying the current configuration.
+	"""
+	epoch: Epoch!
+	"""
+	The transactions to execute in this block. Each transaction can be either
+	incoming messages or an operation.
+	"""
+	transactions: [Transaction!]!
+	"""
+	The block height.
+	"""
+	height: BlockHeight!
+	"""
+	The timestamp when this block was created. This must be later than all messages received
+	in this block, but no later than the current time.
+	"""
+	timestamp: Timestamp!
+	"""
+	The user signing for the operations in the block and paying for their execution
+	fees. If set, this must be the `owner` in the block proposal. `None` means that
+	the default account of the chain is used. This value is also used as recipient of
+	potential refunds for the message grants created by the operations.
+	"""
+	authenticatedSigner: AccountOwner
+	"""
+	Certified hash (see `Certificate` below) of the previous block in the
+	chain, if any.
+	"""
+	previousBlockHash: CryptoHash
+}
 
 """
 Directs the executor to include this field or fragment only when the `if` argument is true.

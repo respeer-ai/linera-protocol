@@ -315,6 +315,33 @@ impl ActiveChain {
     }
 
     /// Processes all new events from streams this chain subscribes to.
+    /// Receives all queued messages in all inboxes of this microchain.
+    ///
+    /// Adds a block to this microchain that receives all queued messages in the microchains
+    /// inboxes.
+    pub async fn handle_received_messages_ext(&self) -> Option<ConfirmedBlockCertificate> {
+        let chain_id = self.id();
+        let (information, _) = self
+            .validator
+            .worker()
+            .handle_chain_info_query(ChainInfoQuery::new(chain_id).with_pending_message_bundles())
+            .await
+            .expect("Failed to query chain's pending messages");
+        let messages = information.info.requested_pending_message_bundles;
+        // Empty blocks are not allowed.
+        // Return early if there are no messages to process and we'd end up with an empty proposal.
+        if messages.is_empty() {
+            return None;
+        }
+        Some(
+            self.add_block(|block| {
+                block.with_incoming_bundles(messages);
+            })
+            .await,
+        )
+    }
+
+    /// Processes all new events from streams this chain subscribes to.
     ///
     /// Adds a block to this microchain that processes the new events.
     pub async fn handle_new_events(&self) {
