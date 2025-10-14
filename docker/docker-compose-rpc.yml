@@ -8,3 +8,5 @@ services:
     command: [ "./rpc-entrypoint.sh" ]
     volumes:
       - ../output/wallet/rpc:/wallet
+    environment:
+      RUST_LOG: warn

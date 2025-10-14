@@ -42,7 +42,7 @@ deposit_faucet() {
 try_deposit_faucet() {
   # Check balance
   balance=`query_faucet_balance`
-  if [ "$balance" -gt 100 ]; then
+  if [ -z "$balance" -o "$balance" -gt 100 ]; then
     return
   fi
   for i in `seq 1 100`; do

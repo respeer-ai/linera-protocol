@@ -8,3 +8,5 @@ services:
     volumes:
       - ../output/wallet/faucet:/wallet
       - ../output/wallet/faucet-depositor:/depositor
+    environment:
+      RUST_LOG: warn
