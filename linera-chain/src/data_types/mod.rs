@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, SimpleObject};
 use custom_debug_derive::Debug;
 use linera_base::{
     bcs,
@@ -43,8 +43,10 @@ mod data_types_tests;
 /// * When a block is proposed to a validator, all cross-chain messages must have been
 ///   received ahead of time in the inbox of the chain.
 /// * This constraint does not apply to the execution of confirmed blocks.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(complex)]
+#[graphql(input_name = "InputProposedBlock")]
+#[serde(rename_all = "camelCase")]
 pub struct ProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -159,8 +161,11 @@ pub enum Transaction {
 
 impl BcsHashable<'_> for Transaction {}
 
+doc_scalar!(Transaction, "A transaction in a block.");
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
 #[graphql(name = "Operation")]
+#[serde(rename_all = "camelCase")]
 pub struct OperationMetadata {
     /// The type of operation: "System" or "User"
     pub operation_type: String,
@@ -196,6 +201,7 @@ impl From<&Operation> for OperationMetadata {
 
 /// GraphQL-compatible metadata about a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactionMetadata {
     /// The type of transaction: "ReceiveMessages" or "ExecuteOperation"
     pub transaction_type: String,
@@ -262,6 +268,7 @@ pub enum MessageAction {
 
 /// A set of messages from a single block, for a single destination.
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageBundle {
     /// The block height.
     pub height: BlockHeight,
@@ -287,6 +294,8 @@ pub enum OriginalProposal {
     },
 }
 
+doc_scalar!(OriginalProposal, "Exists proposal of new block.");
+
 /// An authenticated proposal for a new block.
 // TODO(#456): the signature of the block owner is currently lost but it would be useful
 // to have it for auditing purposes.
@@ -302,6 +311,7 @@ pub struct BlockProposal {
 /// A message together with kind, authentication and grant information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 #[graphql(complex)]
+#[serde(rename_all = "camelCase")]
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
@@ -371,8 +381,10 @@ doc_scalar!(
 );
 
 /// The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(with_testing, derive(Default))]
+#[graphql(input_name = "InputBlockExecutionOutcome")]
 pub struct BlockExecutionOutcome {
     /// The list of outgoing messages for each transaction.
     pub messages: Vec<Vec<OutgoingMessage>>,
@@ -548,7 +560,9 @@ impl BlockExecutionOutcome {
 }
 
 /// The data a block proposer signs.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, SimpleObject, InputObject)]
+#[graphql(input_name = "InputProposalContent")]
+#[serde(rename_all = "camelCase")]
 pub struct ProposalContent {
     /// The proposed block.
     pub block: ProposedBlock,
@@ -871,4 +885,12 @@ mod signing {
         };
         assert_eq!(block_proposal.owner(), public_key.into(),);
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateBlockMaterial {
+    pub incoming_bundles: Vec<IncomingBundle>,
+    pub local_time: Timestamp,
+    pub round: Round,
 }

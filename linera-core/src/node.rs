@@ -226,8 +226,8 @@ pub enum NodeError {
     #[error("The chain {0} is not active in validator")]
     InactiveChain(ChainId),
 
-    #[error("Round number should be {0:?}")]
-    WrongRound(Round),
+    #[error("Round number should be {0:?} got {1:?}")]
+    WrongRound(Round, Round),
 
     #[error(
         "Chain is expecting a next block at height {expected_block_height} but the given block \
@@ -392,7 +392,7 @@ impl From<ChainError> for NodeError {
                 expected_block_height,
                 found_block_height,
             },
-            ChainError::WrongRound(round) => Self::WrongRound(round),
+            ChainError::WrongRound(round, round1) => Self::WrongRound(round, round1),
             error => Self::ChainError {
                 error: error.to_string(),
             },
