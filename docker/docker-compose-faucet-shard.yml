@@ -10,3 +10,4 @@ services:
       - ../output/wallet/faucet-depositor:/depositor
     environment:
       RUST_LOG: warn
+    restart: always

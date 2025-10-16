@@ -10,3 +10,4 @@ services:
       - ../output/wallet/rpc:/wallet
     environment:
       RUST_LOG: warn
+    restart: always
