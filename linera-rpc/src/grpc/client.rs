@@ -99,7 +99,7 @@ impl Drop for RequestGuard {
 
         let request_elapsed = self.first_request_at.elapsed().as_millis();
         let lock_wait = self.try_lock_at.elapsed().as_millis() - request_elapsed;
-        info!(
+        debug!(
             "{} remote request {} to {} took {}ms lock wait {}ms with {} retries {}(requests)-{}(responses)-{}(canceleds)={} in flights {} lock waits",
             if success { "SUCCESS" } else { "FAILED" },
             self.handler,
@@ -272,7 +272,7 @@ fn client_print_if_needed(address: String) {
         return;
     }
 
-    info!(
+    debug!(
         "{} requests {} errors {} average rtt {}ms average success rtt {}ms average error rtt {}ms chains {} reconnects {}/{} elapsed {}ms/{}ms",
         address,
         metrics.requests,
