@@ -2,7 +2,7 @@
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
-SERVICES="faucet"
+SERVICES="faucet rpc"
 
 # Cleanup before building
 # GIT_COMMIT=$(git rev-parse --short HEAD)
@@ -26,6 +26,12 @@ SERVICES="faucet"
 for service in $SERVICES; do
   kubectl delete -f $service/02-deployment.yaml
   kubectl delete -f $service/03-ingress.yaml
+
+  count=1
+  while [ $count -eq 1 ]; do
+    count=`kubectl get pods -n kube-system | grep "${service}-service" | wc -l`
+    sleep 30
+  done
 
   kubectl apply -f $service/01-pvc.yaml
   kubectl apply -f $service/02-deployment.yaml
