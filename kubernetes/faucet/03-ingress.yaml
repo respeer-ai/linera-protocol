@@ -23,7 +23,7 @@ spec:
     - host: api.testnet-conway.faucet.respeer.ai
       http:
         paths:
-          - path: /
+          - path: /api/faucet
             backend:
               serviceName: faucet-service
               servicePort: 31080
