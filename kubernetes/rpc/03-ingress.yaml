@@ -11,6 +11,7 @@ metadata:
     traefik.ingress.kubernetes.io/router.middlewares:
       kube-system-http-redirect-https@kubernetescrd,
       kube-system-http-redirect-https-testing@kubernetescrd,
+      kube-system-strip-rpc-prefix@kubernetescrd,
       kube-system-common-headers@kubernetescrd
 
 spec:
@@ -23,7 +24,7 @@ spec:
     - host: api.testnet-conway.rpc.respeer.ai
       http:
         paths:
-          - path: /api/rpc
+          - path: /
             backend:
               serviceName: rpc-service
               servicePort: 30080
