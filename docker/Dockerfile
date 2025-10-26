@@ -38,7 +38,10 @@ ARG build_features
 ARG rustflags
 ARG all_proxy
 
-RUN apt-get update && apt-get install -y \
+RUN all_proxy=$all_proxy \
+    apt-get update && \
+    all_proxy=$all_proxy \
+    apt-get install -y \
     git \
     pkg-config \
     protobuf-compiler \
@@ -107,13 +110,18 @@ FROM builder$copy AS binaries
 # Setup running environment for container
 FROM debian:latest
 
+ARG all_proxy
+
 ARG git_commit
 LABEL git_commit=$git_commit
 
 ARG build_date
 LABEL build_date=$build_date
 
-RUN apt-get update && apt-get install -y \
+RUN all_proxy=$all_proxy \
+    apt-get update && \
+    all_proxy=$all_proxy \
+    apt-get install -y \
     ca-certificates \
     openssl \
     jq \
