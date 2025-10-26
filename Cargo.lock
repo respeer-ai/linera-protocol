@@ -5674,6 +5674,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "insta",
+ "lazy_static",
  "linera-base",
  "linera-chain",
  "linera-core",

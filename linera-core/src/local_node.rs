@@ -10,7 +10,7 @@ use std::{
 use futures::{stream::FuturesUnordered, TryStreamExt as _};
 use linera_base::{
     crypto::ValidatorPublicKey,
-    data_types::{ArithmeticError, Blob, BlockHeight, Epoch},
+    data_types::{ArithmeticError, Blob, BlockHeight, Epoch, Timestamp},
     identifiers::{BlobId, ChainId},
 };
 use linera_chain::{
@@ -211,6 +211,22 @@ where
             self.node.state.handle_pending_blob(chain_id, blob).await?;
         }
         Ok(())
+    }
+
+    #[instrument(level = "trace", skip_all)]
+    pub async fn stage_block_execution_with_local_time(
+        &self,
+        block: ProposedBlock,
+        round: Option<u32>,
+        published_blobs: Vec<Blob>,
+        local_time: Timestamp,
+    ) -> Result<(Block, ChainInfoResponse), LocalNodeError> {
+        let (executed_block, info) = self
+            .node
+            .state
+            .stage_block_execution_with_local_time(block, round, published_blobs, local_time)
+            .await?;
+        Ok((executed_block, info))
     }
 
     /// Returns a read-only view of the [`ChainStateView`] of a chain referenced by its
