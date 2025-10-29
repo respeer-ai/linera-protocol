@@ -1330,7 +1330,7 @@ impl<Env: Environment> Client<Env> {
                     // TODO(#1420): This is potentially a bit heavy-handed for
                     // retryable errors.
                     info!(
-                        %error, origin = ?message.origin,
+                        %error, origin = ?message.origin, chain_id = ?block.chain_id, index,
                         "Message failed to execute locally and will be rejected."
                     );
                     message.action = MessageAction::Reject;
@@ -1947,7 +1947,7 @@ impl<Env: Environment> ChainClient<Env> {
             );
         }
 
-        Ok(info
+        let bundles: Vec<_> = info
             .requested_pending_message_bundles
             .into_iter()
             .filter_map(|mut bundle| {
@@ -1956,8 +1956,31 @@ impl<Env: Environment> ChainClient<Env> {
                     .must_handle(&mut bundle)
                     .then_some(bundle)
             })
+            .collect();
+
+        let filtered: Vec<_> = bundles
+            .iter()
+            .cloned()
+            .filter(|bundle| {
+                bundle.bundle.messages.iter().all(|msg| {
+                    matches!(
+                        msg.message,
+                        linera_execution::Message::System(
+                            linera_execution::SystemMessage::Credit { .. }
+                        )
+                    )
+                })
+            })
             .take(self.options.max_pending_message_bundles)
-            .collect())
+            .collect();
+        Ok(if !filtered.is_empty() {
+            filtered
+        } else {
+            bundles
+                .into_iter()
+                .take(self.options.max_pending_message_bundles)
+                .collect()
+        })
     }
 
     /// Returns an `UpdateStreams` operation that updates this client's chain about new events
