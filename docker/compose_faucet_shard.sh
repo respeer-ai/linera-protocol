@@ -47,7 +47,7 @@ docker stop faucet rpc
 docker rm faucet rpc
 docker stop `docker ps -a | grep linera-respeer | awk '{print $NF}'`
 docker rm `docker ps -a | grep linera-respeer | awk '{print $NF}'`
-docker rmi linera-respeer
+docker rmi linera-respeer npool/linera-respeer
 
 ROOT_DIR=$SCRIPT_DIR/..
 
@@ -58,6 +58,7 @@ NGINX_TEMPLATE_FILE=$ROOT_DIR/configuration/template/nginx.conf.j2
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
 docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,tempo,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+docker tag linera-respeer:latest docker.io/npool/linera-respeer:latest
 
 export PATH=$RESPEER_BIN_DIR:$PATH
 
