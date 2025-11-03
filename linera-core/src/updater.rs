@@ -319,7 +319,7 @@ where
             .await
         {
             Ok(info) => return Ok(info),
-            Err(NodeError::WrongRound(validator_round)) => {
+            Err(NodeError::WrongRound(validator_round, round)) => {
                 tracing::info!(
                     validator = ?self.remote_node.public_key, %chain_id, %validator_round, %round,
                     "Failed to request timeout from validator: it is not in the same round.",
@@ -359,7 +359,7 @@ where
                 .await
             {
                 Ok(info) => return Ok(info),
-                Err(NodeError::WrongRound(_round)) => {
+                Err(NodeError::WrongRound(_round, _round1)) => {
                     // The proposal is for a different round, so we need to update the validator.
                     // TODO: this should probably be more specific as to which rounds are retried.
                     tracing::debug!(
