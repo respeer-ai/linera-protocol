@@ -101,6 +101,9 @@ impl Network {
     }
 
     pub fn localhost(&self) -> &'static str {
+        if let Ok(host) = std::env::var("LOCALHOST_HOST") {
+            return Box::leak(host.into_boxed_str());
+        }
         match self {
             Network::Grpc | Network::Grpcs => "localhost",
             Network::Tcp | Network::Udp => "127.0.0.1",
