@@ -23,6 +23,9 @@ SERVICES="faucet rpc"
 #     -t linera-respeer || exit 1
 # fi
 
+export FAUCET_URL=https://faucet.testnet-conway.linera.net
+export FAUCET_URL=http://local-genesis-service:8080
+
 for service in $SERVICES; do
   kubectl delete -f $service/02-deployment.yaml
   kubectl delete -f $service/03-ingress.yaml
@@ -35,6 +38,6 @@ for service in $SERVICES; do
 
   kubectl apply -f $service/00-strip-prefix.yaml
   kubectl apply -f $service/01-pvc.yaml
-  kubectl apply -f $service/02-deployment.yaml
+  envsubst '$FAUCET_URL' < $service/02-deployment.yaml | kubectl apply -f -
   kubectl apply -f $service/03-ingress.yaml
 done
