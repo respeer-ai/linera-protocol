@@ -146,5 +146,4 @@ COPY --chmod=755 \
     docker/faucet-shard-entrypoint.sh \
     docker/rpc-entrypoint.sh \
     docker/wallet-entrypoint.sh \
-    docker/local-genesis-entrypoint.sh \
     ./
