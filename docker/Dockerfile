@@ -87,6 +87,7 @@ RUN CARGO_NET_GIT_FETCH_WITH_CLI=true \
     --bin linera \
     --bin linera-proxy \
     --bin linera-server \
+    --bin linera-storage-server \
     --features $build_features \
     -j 1
 
@@ -94,6 +95,7 @@ RUN mv \
     target/"$target"/"$build_folder"/linera \
     target/"$target"/"$build_folder"/linera-proxy \
     target/"$target"/"$build_folder"/linera-server \
+    target/"$target"/"$build_folder"/linera-storage-server \
     ./
 
 # Optionally copy binaries instead of using the build images above
@@ -103,6 +105,7 @@ COPY \
     "$binaries"/linera \
     "$binaries"/linera-server \
     "$binaries"/linera-proxy \
+    "$binaries"/linera-storage-server \
     ./
 
 FROM builder$copy AS binaries
@@ -135,6 +138,7 @@ COPY --from=binaries \
     linera \
     linera-server \
     linera-proxy \
+    linera-storage-server \
     ./
 
 COPY --chmod=755 \
@@ -142,4 +146,5 @@ COPY --chmod=755 \
     docker/faucet-shard-entrypoint.sh \
     docker/rpc-entrypoint.sh \
     docker/wallet-entrypoint.sh \
+    docker/local-genesis-entrypoint.sh \
     ./
