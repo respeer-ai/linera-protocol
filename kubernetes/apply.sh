@@ -24,18 +24,35 @@ SERVICES="faucet rpc"
 # fi
 
 export FAUCET_URL=https://faucet.testnet-conway.linera.net
-export FAUCET_URL=http://local-genesis-service:8080
+# export FAUCET_URL=http://local-genesis-service:8080
+
+######
+## If contine deploy with testnet faucet, it should be 0
+######
+RE_GENERATE=1
 
 for service in $SERVICES; do
+  if [ $RE_GENERATE -eq 1 ]; then
+    pod_name=$(kubectl get pods -A | grep ${service}-service | awk '{print $2}')
+    if [ ! -z "$pod_name" ]; then
+      now=$(date -u | sed 's/ //g')
+      kubectl exec -it $pod_name -n kube-system -- mkdir -p /wallet/backup/$now
+      kubectl exec -it $pod_name -n kube-system -- cp -vrf /wallet/wallet.json /wallet/keystore.json /wallet/backup/$now
+      kubectl exec -it $pod_name -n kube-system -- rm -vrf /wallet/wallet.json /wallet/keystore.json /wallet/client.db
+    fi
+  fi
+
   kubectl delete -f $service/02-deployment.yaml
   kubectl delete -f $service/03-ingress.yaml
 
   count=1
   while [ $count -eq 1 ]; do
-    count=`kubectl get pods -n kube-system | grep "${service}-service" | wc -l`
+    count=$(kubectl get pods -n kube-system | grep "${service}-service" | wc -l)
     sleep 30
   done
+done
 
+for service in $SERVICES; do
   kubectl apply -f $service/00-strip-prefix.yaml
   kubectl apply -f $service/01-pvc.yaml
   envsubst '$FAUCET_URL' < $service/02-deployment.yaml | kubectl apply -f -
