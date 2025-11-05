@@ -3276,7 +3276,7 @@ impl<Env: Environment> ChainClient<Env> {
                 if comm_error.errors().any(|err| {
                     matches!(
                         err,
-                        NodeError::WrongRound(round) if *round > info.manager.current_round
+                        NodeError::WrongRound(round, _) if *round > info.manager.current_round
                     )
                 }) =>
             {
