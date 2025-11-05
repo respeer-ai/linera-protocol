@@ -29,7 +29,7 @@ export FAUCET_URL=https://faucet.testnet-conway.linera.net
 ######
 ## If contine deploy with testnet faucet, it should be 0
 ######
-RE_GENERATE=1
+RE_GENERATE=0
 
 for service in $SERVICES; do
   if [ $RE_GENERATE -eq 1 ]; then
