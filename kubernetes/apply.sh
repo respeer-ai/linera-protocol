@@ -24,12 +24,27 @@ SERVICES="faucet rpc"
 # fi
 
 export FAUCET_URL=https://faucet.testnet-conway.linera.net
-# export FAUCET_URL=http://local-genesis-service:8080
+export FAUCET_URL=http://local-genesis-service:8080
 
 ######
 ## If contine deploy with testnet faucet, it should be 0
 ######
-RE_GENERATE=0
+RE_GENERATE=1
+
+wait_pods() {
+  pod_name=$1
+  replicas=$2
+  status=$3
+
+  while true; do
+    count=$(kubectl get pods -A | grep $pod_name | grep "$status" | wc -l)
+    if [ $count -eq $replicas ]; then
+      break
+    fi
+    echo "Waiting for $pod_name be $status"
+    sleep 10
+  done
+}
 
 for service in $SERVICES; do
   if [ $RE_GENERATE -eq 1 ]; then
@@ -45,11 +60,7 @@ for service in $SERVICES; do
   kubectl delete -f $service/02-deployment.yaml
   kubectl delete -f $service/03-ingress.yaml
 
-  count=1
-  while [ $count -eq 1 ]; do
-    count=$(kubectl get pods -n kube-system | grep "${service}-service" | wc -l)
-    sleep 30
-  done
+  wait_pods m${service}-service 0 ""
 done
 
 for service in $SERVICES; do
@@ -57,4 +68,6 @@ for service in $SERVICES; do
   kubectl apply -f $service/01-pvc.yaml
   envsubst '$FAUCET_URL' < $service/02-deployment.yaml | kubectl apply -f -
   kubectl apply -f $service/03-ingress.yaml
+
+  wait_pods m${service}-service 1 Running
 done
