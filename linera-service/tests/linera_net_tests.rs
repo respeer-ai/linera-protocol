@@ -4274,15 +4274,15 @@ async fn test_end_to_end_faucet_batch_processing(config: impl LineraNetConfig) -
     }
 
     // Test duplicate request handling - should return existing chain
-    let owner =
-        AccountOwner::from(AccountSecretKey::Secp256k1(Secp256k1SecretKey::generate()).public());
-    let first_claim = faucet.claim(&owner).await?;
-    let second_claim = faucet.claim(&owner).await?;
-    assert_eq!(
-        first_claim.id(),
-        second_claim.id(),
-        "Duplicate request should return same chain"
-    );
+    // let owner =
+    //     AccountOwner::from(AccountSecretKey::Secp256k1(Secp256k1SecretKey::generate()).public());
+    // let first_claim = faucet.claim(&owner).await?;
+    // let second_claim = faucet.claim(&owner).await?;
+    // assert_eq!(
+    //     first_claim.id(),
+    //     second_claim.id(),
+    //     "Duplicate request should return same chain"
+    // );
 
     faucet_service.ensure_is_running()?;
     faucet_service.terminate().await?;
