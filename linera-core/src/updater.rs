@@ -347,7 +347,7 @@ where
     ) -> Result<(), ChainClientError> {
         let validator = &self.remote_node.address();
         match error {
-            NodeError::WrongRound(validator_round) if *validator_round > round => {
+            NodeError::WrongRound(validator_round, _) if *validator_round > round => {
                 tracing::debug!(
                     validator, %chain_id, %validator_round, %round,
                     "validator is at a higher round; synchronizing",
@@ -371,7 +371,7 @@ where
                     .synchronize_chain_state_from(&self.remote_node, chain_id)
                     .await?;
             }
-            NodeError::WrongRound(validator_round) if *validator_round < round => {
+            NodeError::WrongRound(validator_round, _) if *validator_round < round => {
                 tracing::debug!(
                     validator, %chain_id, %validator_round, %round,
                     "validator is at a lower round; sending chain info",
@@ -434,7 +434,7 @@ where
                 .await
             {
                 Ok(info) => return Ok(info),
-                Err(NodeError::WrongRound(_round)) => {
+                Err(NodeError::WrongRound(_round, _round1)) => {
                     // The proposal is for a different round, so we need to update the validator.
                     // TODO: this should probably be more specific as to which rounds are retried.
                     tracing::debug!(

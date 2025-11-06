@@ -20,6 +20,8 @@ mod pending_blobs;
 #[cfg(with_testing)]
 pub mod test;
 
+pub mod wrapper_block;
+
 pub use chain::ChainStateView;
 use data_types::{MessageBundle, PostedMessage};
 use linera_base::{
@@ -125,8 +127,8 @@ pub enum ChainError {
     InsufficientRound(Round),
     #[error("Round number should be greater than {0:?}")]
     InsufficientRoundStrict(Round),
-    #[error("Round number should be {0:?}")]
-    WrongRound(Round),
+    #[error("Round number should be {0:?} got {1:?}")]
+    WrongRound(Round, Round),
     #[error("Already voted to confirm a different block for height {0:?} at round number {1:?}")]
     HasIncompatibleConfirmedVote(BlockHeight, Round),
     #[error("Proposal for height {0:?} is not newer than locking block in round {1:?}")]
@@ -180,7 +182,7 @@ impl ChainError {
             | ChainError::InvalidBlockTimestamp { .. }
             | ChainError::InsufficientRound(_)
             | ChainError::InsufficientRoundStrict(_)
-            | ChainError::WrongRound(_)
+            | ChainError::WrongRound(_, _)
             | ChainError::HasIncompatibleConfirmedVote(..)
             | ChainError::MustBeNewerThanLockingBlock(..)
             | ChainError::MissingEarlierBlocks { .. }
