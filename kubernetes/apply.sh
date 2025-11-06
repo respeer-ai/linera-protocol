@@ -23,8 +23,14 @@ SERVICES="faucet rpc"
 #     -t linera-respeer || exit 1
 # fi
 
+# Modify flannel MTU to 1432 for Linera validators
+# kubectl -n kube-system edit ds kube-flannel-ds-amd64 -o yaml
+# ip link delete flannel.1
+# kubectl -n kube-system rollout restart daemonset kube-flannel-ds-amd64
+# kubectl -n kube-system edit configmap kube-flannel-cfg
+
 export FAUCET_URL=https://faucet.testnet-conway.linera.net
-export FAUCET_URL=http://local-genesis-service:8080
+# export FAUCET_URL=http://local-genesis-service:8080
 
 ######
 ## If contine deploy with testnet faucet, it should be 0
@@ -60,7 +66,7 @@ for service in $SERVICES; do
   kubectl delete -f $service/02-deployment.yaml
   kubectl delete -f $service/03-ingress.yaml
 
-  wait_pods m${service}-service 0 ""
+  wait_pods ${service}-service 0 ""
 done
 
 for service in $SERVICES; do
@@ -69,5 +75,5 @@ for service in $SERVICES; do
   envsubst '$FAUCET_URL' < $service/02-deployment.yaml | kubectl apply -f -
   kubectl apply -f $service/03-ingress.yaml
 
-  wait_pods m${service}-service 1 Running
+  wait_pods ${service}-service 1 Running
 done
