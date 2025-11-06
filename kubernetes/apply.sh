@@ -25,9 +25,9 @@ SERVICES="faucet rpc"
 
 # Modify flannel MTU to 1432 for Linera validators
 # kubectl -n kube-system edit ds kube-flannel-ds-amd64 -o yaml
+# kubectl -n kube-system edit configmap kube-flannel-cfg
 # ip link delete flannel.1
 # kubectl -n kube-system rollout restart daemonset kube-flannel-ds-amd64
-# kubectl -n kube-system edit configmap kube-flannel-cfg
 
 export FAUCET_URL=https://faucet.testnet-conway.linera.net
 # export FAUCET_URL=http://local-genesis-service:8080
