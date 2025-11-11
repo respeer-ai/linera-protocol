@@ -10,7 +10,7 @@ A GraphQL client for the node service.
 
 To generate the linera service GraphQL schema, a binary `linera-export-schema` is available:
 ```bash
-cargo run --bin linera-schema-export > linera-service-graphql-client/gql/service_schema.graphql
+cargo run --bin linera-schema-export --features fake-chain-listener > linera-service-graphql-client/gql/service_schema.graphql
 ```
 
 ## Contributing
