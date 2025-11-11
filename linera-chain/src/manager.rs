@@ -307,7 +307,7 @@ where
                 // a later round by making a proposal.
                 ensure!(
                     self.is_super(&proposal.owner()) || !current_round.is_fast(),
-                    ChainError::WrongRound(current_round, new_round)
+                    ChainError::WrongRound(current_round)
                 );
                 // After the fast round, proposals older than the current round are obsolete.
                 ensure!(
@@ -319,7 +319,7 @@ where
                 // After the first single-leader round, only proposals from the current round are relevant.
                 ensure!(
                     new_round == current_round,
-                    ChainError::WrongRound(current_round, new_round)
+                    ChainError::WrongRound(current_round)
                 );
             }
         }
@@ -371,7 +371,7 @@ where
         };
         ensure!(
             round == self.current_round(),
-            ChainError::WrongRound(self.current_round(), round)
+            ChainError::WrongRound(self.current_round())
         );
         let Some(round_timeout) = *self.round_timeout.get() else {
             return Err(ChainError::RoundDoesNotTimeOut);
