@@ -300,7 +300,6 @@ impl<'de> Deserialize<'de> for Block {
 /// Contains all the metadata to follow the chain of blocks or verifying
 /// inclusion (event, message, oracle response, etc.) in the block's body.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
-#[serde(rename_all = "camelCase")]
 pub struct BlockHeader {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,

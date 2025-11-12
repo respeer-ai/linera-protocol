@@ -46,7 +46,6 @@ mod data_types_tests;
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(complex)]
 #[graphql(input_name = "InputProposedBlock")]
-#[serde(rename_all = "camelCase")]
 pub struct ProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -174,7 +173,6 @@ doc_scalar!(Transaction, "A transaction in a block.");
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
 #[graphql(name = "Operation")]
-#[serde(rename_all = "camelCase")]
 pub struct OperationMetadata {
     /// The type of operation: "System" or "User"
     pub operation_type: String,
@@ -210,7 +208,6 @@ impl From<&Operation> for OperationMetadata {
 
 /// GraphQL-compatible metadata about a transaction.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
-#[serde(rename_all = "camelCase")]
 pub struct TransactionMetadata {
     /// The type of transaction: "ReceiveMessages" or "ExecuteOperation"
     pub transaction_type: String,
@@ -277,7 +274,6 @@ pub enum MessageAction {
 
 /// A set of messages from a single block, for a single destination.
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Serialize, Deserialize, SimpleObject)]
-#[serde(rename_all = "camelCase")]
 pub struct MessageBundle {
     /// The block height.
     pub height: BlockHeight,
@@ -320,7 +316,6 @@ pub struct BlockProposal {
 /// A message together with kind, authentication and grant information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
 #[graphql(complex)]
-#[serde(rename_all = "camelCase")]
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
@@ -391,7 +386,6 @@ doc_scalar!(
 
 /// The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
-#[serde(rename_all = "camelCase")]
 #[cfg_attr(with_testing, derive(Default))]
 #[graphql(input_name = "InputBlockExecutionOutcome")]
 pub struct BlockExecutionOutcome {
@@ -571,7 +565,6 @@ impl BlockExecutionOutcome {
 /// The data a block proposer signs.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(input_name = "InputProposalContent")]
-#[serde(rename_all = "camelCase")]
 pub struct ProposalContent {
     /// The proposed block.
     pub block: ProposedBlock,
@@ -897,7 +890,6 @@ mod signing {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
-#[serde(rename_all = "camelCase")]
 pub struct CandidateBlockMaterial {
     pub incoming_bundles: Vec<IncomingBundle>,
     pub local_time: Timestamp,
