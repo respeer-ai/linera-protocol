@@ -890,6 +890,7 @@ mod signing {
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct CandidateBlockMaterial {
     pub incoming_bundles: Vec<IncomingBundle>,
     pub local_time: Timestamp,

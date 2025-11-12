@@ -86,6 +86,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BlockMaterial {
     operations: Vec<Operation>,
     blob_bytes: Vec<Vec<u8>>,
@@ -95,24 +96,28 @@ pub struct BlockMaterial {
 doc_scalar!(BlockMaterial, "Materials of a new block.");
 
 #[derive(Debug, Clone, Serialize, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
 pub struct ChainOwners {
     chain_id: ChainId,
     owners: Vec<AccountOwner>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct Balances {
     chain_balance: Amount,
     owner_balances: HashMap<AccountOwner, Amount>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct SimulatedBlockMaterial {
     block_proposal: UnsignedBlockProposal,
     blob_bytes: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, InputObject)]
+#[serde(rename_all = "camelCase")]
 pub struct SignedBlock {
     unsigned_block_proposal: UnsignedBlockProposal,
     signature: AccountSignature,
@@ -126,6 +131,7 @@ pub struct SignedBlock {
 // );
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SignedBlockBcs {
     unsigned_block_proposal: UnsignedBlockProposal,
     signature: AccountSignature,
@@ -139,6 +145,7 @@ bcs_scalar!(
 );
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WalletInitializer {
     owner: AccountOwner,
     signature: AccountSignature,
