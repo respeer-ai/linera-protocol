@@ -280,8 +280,10 @@ pub struct MessageBundle {
     /// The block's timestamp.
     pub timestamp: Timestamp,
     /// The confirmed block certificate hash.
+    #[serde(alias = "certificate_hash", alias = "certificateHash")]
     pub certificate_hash: CryptoHash,
     /// The index of the transaction in the block that is sending this bundle.
+    #[serde(alias = "transaction_index", alias = "transactionIndex")]
     pub transaction_index: u32,
     /// The relevant messages.
     pub messages: Vec<PostedMessage>,
