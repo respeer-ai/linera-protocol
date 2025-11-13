@@ -11,10 +11,10 @@ use crate::data_types::{BlockExecutionOutcome, ProposalContent, ProposedBlock, T
 
 #[serde_alias(CamelCase, SnakeCase, PascalCase)]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
+#[serde(rename_all = "camelCase")]
 #[graphql(input_name = "InputWrapperProposedBlock")]
 pub struct WrapperProposedBlock {
     /// The chain to which this block belongs.
-    #[serde(alias = "chain_id", alias = "chainId")]
     pub chain_id: ChainId,
     /// The number identifying the current configuration.
     pub epoch: Epoch,
