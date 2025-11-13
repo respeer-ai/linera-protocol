@@ -5,9 +5,11 @@ use linera_base::{
     identifiers::{AccountOwner, ChainId},
 };
 use serde::{Deserialize, Serialize};
+use serde_alias::serde_alias;
 
 use crate::data_types::{BlockExecutionOutcome, ProposalContent, ProposedBlock, Transaction};
 
+#[serde_alias]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(input_name = "InputWrapperProposedBlock")]
 pub struct WrapperProposedBlock {

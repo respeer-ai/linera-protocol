@@ -88,7 +88,7 @@ impl From<CryptoHash> for AccountOwner {
 }
 
 /// A system account.
-#[serde_alias(CamelCase, SnakeCase, PascalCase)]
+#[serde_alias]
 #[derive(
     Debug, PartialEq, Eq, Hash, Copy, Clone, Serialize, Deserialize, WitLoad, WitStore, WitType,
 )]
