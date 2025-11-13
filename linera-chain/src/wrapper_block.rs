@@ -9,7 +9,7 @@ use serde_alias::serde_alias;
 
 use crate::data_types::{BlockExecutionOutcome, ProposalContent, ProposedBlock, Transaction};
 
-#[serde_alias]
+#[serde_alias(CamelCase, SnakeCase, PascalCase)]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(input_name = "InputWrapperProposedBlock")]
 pub struct WrapperProposedBlock {
