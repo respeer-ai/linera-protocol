@@ -900,6 +900,7 @@ pub enum Operation {
     System(Box<SystemOperation>),
     /// A user operation (in serialized form).
     User {
+        #[serde(alias = "application_id", alias = "applicationId")]
         application_id: ApplicationId,
         #[serde(with = "serde_bytes")]
         #[debug(with = "hex_debug")]
