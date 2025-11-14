@@ -110,6 +110,7 @@ pub struct Balances {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
 pub struct SimulatedBlockMaterial {
     block_proposal: UnsignedBlockProposal,
     blob_bytes: Vec<Vec<u8>>,

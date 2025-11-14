@@ -110,10 +110,11 @@ echo -e "   $LAN_IP ${SUB_DOMAIN}faucet.respeer.ai"
 echo -e "   http://${SUB_DOMAIN}faucet.respeer.ai/api/faucet\n\n"
 
 function run_faucet_service() {
-    chain_id=`linera --wallet $WALLET_DIR/faucet/wallet.json \
+    chain_id=$(linera --wallet $WALLET_DIR/faucet/wallet.json \
         --keystore $WALLET_DIR/faucet/keystore.json \
         --storage rocksdb://$WALLET_DIR/faucet/client.db \
-        wallet show | grep AccountOwner | awk '{print $2}'`
+        wallet show \
+        | awk '/^Chain ID:/ {chain=$3} /^Default owner:/ {if ($3 != "No") print chain}')
 
     echo 'Query balance ===================================================================='
     echo "Chain: $chain_id"

@@ -899,8 +899,8 @@ pub enum Operation {
     /// A system operation.
     System(Box<SystemOperation>),
     /// A user operation (in serialized form).
-    #[serde(rename_all = "camelCase")]
     User {
+        #[serde(alias = "application_id", alias = "applicationId")]
         application_id: ApplicationId,
         #[serde(with = "serde_bytes")]
         #[debug(with = "hex_debug")]
@@ -1014,7 +1014,6 @@ impl Display for MessageKind {
 
 /// A posted message together with routing information.
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
-#[serde(rename_all = "camelCase")]
 #[graphql(input_name = "InputOutgoingMessage")]
 pub struct OutgoingMessage {
     /// The destination of the message.

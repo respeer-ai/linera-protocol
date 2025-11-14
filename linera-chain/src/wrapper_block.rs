@@ -5,12 +5,14 @@ use linera_base::{
     identifiers::{AccountOwner, ChainId},
 };
 use serde::{Deserialize, Serialize};
+use serde_alias::serde_alias;
 
 use crate::data_types::{BlockExecutionOutcome, ProposalContent, ProposedBlock, Transaction};
 
+#[serde_alias(CamelCase, SnakeCase, PascalCase)]
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, InputObject)]
-#[graphql(input_name = "InputWrapperProposedBlock")]
 #[serde(rename_all = "camelCase")]
+#[graphql(input_name = "InputWrapperProposedBlock")]
 pub struct WrapperProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -84,7 +86,6 @@ impl Into<ProposedBlock> for WrapperProposedBlock {
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, SimpleObject, InputObject)]
 #[graphql(input_name = "InputWrapperProposalContent")]
-#[serde(rename_all = "camelCase")]
 pub struct WrapperProposalContent {
     /// The proposed block.
     pub block: WrapperProposedBlock,

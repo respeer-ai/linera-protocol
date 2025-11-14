@@ -3,7 +3,6 @@ use std::{
     fs::File,
     io::{BufRead, BufReader},
 };
-
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
