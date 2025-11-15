@@ -20,6 +20,8 @@ mod pending_blobs;
 #[cfg(with_testing)]
 pub mod test;
 
+pub mod wrapper_block;
+
 pub use chain::ChainStateView;
 use data_types::{MessageBundle, PostedMessage};
 use linera_base::{
