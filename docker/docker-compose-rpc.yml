@@ -9,5 +9,5 @@ services:
     volumes:
       - ../output/wallet/rpc:/wallet
     environment:
-      RUST_LOG: warn
+      RUST_LOG: info
     restart: always

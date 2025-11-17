@@ -5,7 +5,7 @@
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )
-FAUCET_URL=http://api.faucet.respeer.ai/api/faucet
+FAUCET_URL=http://faucet.testnet-conway.linera.net
 COMPILE=1
 
 options="f:C:"
@@ -51,8 +51,10 @@ FUND_WALLET=$WALLET_DIR/fund
 
 mkdir -p $FUND_WALLET
 
-FAUCET_CHAIN_ID=`cat $WALLET_DIR/faucet/wallet.json | jq -r '.chains | keys[]'`
+FAUCET_CHAIN_ID=`cat $WALLET_DIR/faucet/wallet.json | jq -r '.chains[] | select(.owner != null) | .chain_id'`
 FUND_CHAINS=100
+
+echo $FAUCET_CHAIN_ID
 
 function fund_faucet_one() {
     if [ ! -f $WALLET_DIR/fund/keystore.json ]; then
