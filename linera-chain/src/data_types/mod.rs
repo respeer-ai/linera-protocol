@@ -334,7 +334,7 @@ pub struct BlockProposal {
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
-    #[serde(alias = "authenticated_signer", alias = "autheiticatedSigner")]
+    #[serde(alias = "authenticated_signer", alias = "authenticatedSigner")]
     pub authenticated_signer: Option<AccountOwner>,
     /// A grant to pay for the message execution.
     #[debug(skip_if = Amount::is_zero)]

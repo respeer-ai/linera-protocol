@@ -44,7 +44,7 @@ export PATH=$BIN_DIR:$PATH
 cd $SCRIPT_DIR/..
 
 if [ "x$COMPILE" = "x1" ]; then
-    cargo build --release --features storage-service,disable-native-rpc,enable-wallet-rpc -j 4
+    cargo build --release --features storage-service,disable-native-rpc,enable-wallet-rpc -j 1
     mv $PWD/target/release/linera $BIN_DIR
     mv $PWD/target/release/linera-server $BIN_DIR
     mv $PWD/target/release/linera-storage-server $BIN_DIR
