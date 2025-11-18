@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ####
-## E.g. ./run_rpc_service.sh -f http://api.testnet-conway.faucet.respeer.ai/api/rpc -C 0 -W 0 -z testnet-conway
+## E.g. ./run_rpc_service.sh -f http://api.testnet-conway.faucet.respeer.ai/api/faucet -C 0 -W 0 -z testnet-conway
 ####
 
 LAN_IP=$( hostname -I | awk '{print $1}' )

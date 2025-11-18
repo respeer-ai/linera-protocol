@@ -334,12 +334,14 @@ pub struct BlockProposal {
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
+    #[serde(alias = "authenticated_signer", alias = "autheiticatedSigner")]
     pub authenticated_signer: Option<AccountOwner>,
     /// A grant to pay for the message execution.
     #[debug(skip_if = Amount::is_zero)]
     pub grant: Amount,
     /// Where to send a refund for the unused part of the grant after execution, if any.
     #[debug(skip_if = Option::is_none)]
+    #[serde(alias = "refund_grant_to", alias = "refundGrantTo")]
     pub refund_grant_to: Option<Account>,
     /// The kind of message being sent.
     pub kind: MessageKind,
