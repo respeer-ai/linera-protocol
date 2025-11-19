@@ -37,7 +37,7 @@ spec:
         command: ["/bin/sh", "-c", "./rpc-entrypoint.sh"]
         env:
         - name: RUST_LOG
-          value: warn
+          value: info
         volumeMounts:
         - name: rpc
           mountPath: /wallet
