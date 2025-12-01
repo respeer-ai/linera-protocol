@@ -300,6 +300,11 @@ where
 
         chain_id.ok_or(Error::new("This user has no chain yet"))
     }
+
+    /// Returns the balance of faucet
+    async fn balance(&self) -> Result<Amount, Error> {
+        Ok(self.client.query_balance().await?)
+    }
 }
 
 #[async_graphql::Object(cache_control(no_cache))]
