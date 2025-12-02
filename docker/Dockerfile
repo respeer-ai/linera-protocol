@@ -130,7 +130,7 @@ RUN all_proxy=$all_proxy \
     jq \
     curl \
     uuid
-RUN update-ca-certificates
+RUN all_proxy=$all_proxy update-ca-certificates
 
 ARG target
 
