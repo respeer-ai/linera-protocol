@@ -996,6 +996,7 @@ where
     /// Returns the pending message of the chain
     async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id);
+        client.prepare_chain().await?;
         Ok(client.pending_message_bundles().await?)
     }
 
@@ -1007,6 +1008,7 @@ where
     ) -> Result<CandidateBlockMaterial, Error> {
         let client = self.context.lock().await.make_chain_client(chain_id);
 
+        client.prepare_chain().await?;
         let incoming_bundles = client.pending_message_bundles().await?;
         let transactions = incoming_bundles
             .clone()
