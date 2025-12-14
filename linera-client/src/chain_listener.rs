@@ -121,6 +121,18 @@ pub trait ClientContext {
     ) -> Result<(), Error>;
 
     async fn update_wallet(&mut self, client: &ContextChainClient<Self>) -> Result<(), Error>;
+
+    async fn assign_new_chain_to_owner(
+        &mut self,
+        chain_id: ChainId,
+        owner: AccountOwner,
+    ) -> Result<(), Error>;
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -149,7 +161,7 @@ struct ListeningClient<C: ClientContext> {
     /// The abort handle for the task that listens to the validators.
     abort_handle: AbortOnDrop,
     /// The listening task's join handle.
-    join_handle: NonBlockingFuture<()>,
+    join_handle: Arc<Mutex<Option<NonBlockingFuture<()>>>>,
     /// The stream of notifications from the local node.
     notification_stream: Arc<Mutex<NotificationStream>>,
     /// This is only `< u64::MAX` when the client is waiting for a timeout to process the inbox.
@@ -157,6 +169,19 @@ struct ListeningClient<C: ClientContext> {
     /// The mode of listening to this chain.
     #[allow(dead_code)]
     listening_mode: ListeningMode,
+}
+
+impl<C: ClientContext> Clone for ListeningClient<C> {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            abort_handle: self.abort_handle.clone(),
+            join_handle: self.join_handle.clone(),
+            notification_stream: self.notification_stream.clone(),
+            timeout: self.timeout,
+            listening_mode: self.listening_mode.clone(),
+        }
+    }
 }
 
 impl<C: ClientContext> ListeningClient<C> {
@@ -170,7 +195,7 @@ impl<C: ClientContext> ListeningClient<C> {
         Self {
             client,
             abort_handle,
-            join_handle,
+            join_handle: Arc::new(Mutex::new(Some(join_handle))),
             #[allow(clippy::arc_with_non_send_sync)] // Only `Send` with `futures-util/alloc`.
             notification_stream: Arc::new(Mutex::new(notification_stream)),
             timeout: Timestamp::from(u64::MAX),
@@ -181,7 +206,7 @@ impl<C: ClientContext> ListeningClient<C> {
     async fn stop(self) {
         // TODO(#4965): this is unnecessary: the join handle now also acts as an abort handle
         drop(self.abort_handle);
-        self.join_handle.await;
+        self.join_handle.lock().await.take().unwrap().await;
     }
 }
 
@@ -205,7 +230,21 @@ pub struct ChainListener<C: ClientContext> {
     event_subscribers: BTreeMap<ChainId, BTreeSet<ChainId>>,
     cancellation_token: CancellationToken,
     /// The channel through which the listener can receive commands.
-    command_receiver: UnboundedReceiver<ListenerCommand>,
+    command_receiver: Arc<Mutex<UnboundedReceiver<ListenerCommand>>>,
+}
+
+impl<C: ClientContext + 'static> Clone for ChainListener<C> {
+    fn clone(&self) -> Self {
+        Self {
+            context: self.context.clone(),
+            storage: self.storage.clone(),
+            config: self.config.clone(),
+            listening: self.listening.clone(),
+            event_subscribers: self.event_subscribers.clone(),
+            cancellation_token: self.cancellation_token.clone(),
+            command_receiver: self.command_receiver.clone(),
+        }
+    }
 }
 
 impl<C: ClientContext + 'static> ChainListener<C> {
@@ -224,7 +263,7 @@ impl<C: ClientContext + 'static> ChainListener<C> {
             listening: Default::default(),
             event_subscribers: Default::default(),
             cancellation_token,
-            command_receiver,
+            command_receiver: Arc::new(Mutex::new(command_receiver)),
         }
     }
 
@@ -298,6 +337,20 @@ impl<C: ClientContext + 'static> ChainListener<C> {
             join_all(self.listening.into_values().map(|client| client.stop())).await;
             Ok(())
         })
+    }
+
+    #[instrument(skip(self))]
+    pub async fn run_with_chain_id(mut self, chain_id: ChainId) -> Result<(), Error> {
+        let chain_ids = {
+            let guard = self.context.lock().await;
+            let admin_chain_id = guard.wallet().genesis_admin_chain();
+            guard
+                .make_chain_client(admin_chain_id)
+                .synchronize_from_validators()
+                .await?;
+            BTreeSet::from_iter([chain_id].into_iter().chain([admin_chain_id]))
+        };
+        self.listen_recursively(chain_ids).await
     }
 
     /// Processes a notification, updating local chains and validators as needed.
@@ -515,7 +568,7 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                 () = self.storage.clock().sleep_until(timeout).fuse() => {
                     return Ok(Action::ProcessInbox(timeout_chain_id));
                 }
-                command = self.command_receiver.recv().then(async |maybe_command| {
+                command = self.command_receiver.lock().await.recv().then(async |maybe_command| {
                     if let Some(command) = maybe_command {
                         command
                     } else {

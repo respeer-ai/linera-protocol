@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use allocative::Allocative;
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, SimpleObject};
 use custom_debug_derive::Debug;
 use linera_base::{
     bcs,
@@ -44,8 +44,11 @@ mod data_types_tests;
 /// * When a block is proposed to a validator, all cross-chain messages must have been
 ///   received ahead of time in the inbox of the chain.
 /// * This constraint does not apply to the execution of confirmed blocks.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, Allocative)]
+#[derive(
+    Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, Allocative, InputObject,
+)]
 #[graphql(complex)]
+#[graphql(input_name = "InputProposedBlock")]
 pub struct ProposedBlock {
     /// The chain to which this block belongs.
     pub chain_id: ChainId,
@@ -169,6 +172,8 @@ impl Transaction {
     }
 }
 
+doc_scalar!(Transaction, "A transaction in a block.");
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, SimpleObject)]
 #[graphql(name = "Operation")]
 pub struct OperationMetadata {
@@ -288,8 +293,10 @@ pub struct MessageBundle {
     /// The block's timestamp.
     pub timestamp: Timestamp,
     /// The confirmed block certificate hash.
+    #[serde(alias = "certificate_hash", alias = "certificateHash")]
     pub certificate_hash: CryptoHash,
     /// The index of the transaction in the block that is sending this bundle.
+    #[serde(alias = "transaction_index", alias = "transactionIndex")]
     pub transaction_index: u32,
     /// The relevant messages.
     pub messages: Vec<PostedMessage>,
@@ -306,6 +313,8 @@ pub enum OriginalProposal {
         certificate: LiteCertificate<'static>,
     },
 }
+
+doc_scalar!(OriginalProposal, "Exists proposal of new block.");
 
 /// An authenticated proposal for a new block.
 // TODO(#456): the signature of the block owner is currently lost but it would be useful
@@ -325,12 +334,14 @@ pub struct BlockProposal {
 pub struct PostedMessage {
     /// The user authentication carried by the message, if any.
     #[debug(skip_if = Option::is_none)]
+    #[serde(alias = "authenticated_signer", alias = "authenticatedSigner")]
     pub authenticated_signer: Option<AccountOwner>,
     /// A grant to pay for the message execution.
     #[debug(skip_if = Amount::is_zero)]
     pub grant: Amount,
     /// Where to send a refund for the unused part of the grant after execution, if any.
     #[debug(skip_if = Option::is_none)]
+    #[serde(alias = "refund_grant_to", alias = "refundGrantTo")]
     pub refund_grant_to: Option<Account>,
     /// The kind of message being sent.
     pub kind: MessageKind,
@@ -391,8 +402,11 @@ doc_scalar!(
 );
 
 /// The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, Allocative)]
+#[derive(
+    Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, Allocative, InputObject,
+)]
 #[cfg_attr(with_testing, derive(Default))]
+#[graphql(input_name = "InputBlockExecutionOutcome")]
 pub struct BlockExecutionOutcome {
     /// The list of outgoing messages for each transaction.
     pub messages: Vec<Vec<OutgoingMessage>>,
@@ -568,7 +582,10 @@ impl BlockExecutionOutcome {
 }
 
 /// The data a block proposer signs.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Allocative)]
+#[derive(
+    Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Allocative, SimpleObject, InputObject,
+)]
+#[graphql(input_name = "InputProposalContent")]
 pub struct ProposalContent {
     /// The proposed block.
     pub block: ProposedBlock,
@@ -891,4 +908,12 @@ mod signing {
         };
         assert_eq!(block_proposal.owner(), public_key.into(),);
     }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateBlockMaterial {
+    pub incoming_bundles: Vec<IncomingBundle>,
+    pub local_time: Timestamp,
+    pub round: Round,
 }

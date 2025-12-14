@@ -88,6 +88,12 @@ pub trait Wallet {
         self.items()
             .try_filter_map(|(id, chain)| async move { Ok(chain.owner.map(|_| id)) })
     }
+
+    async fn set_owner_default_chain(
+        &self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Self::Error>;
 }
 
 impl<W: Deref<Target: Wallet> + linera_base::util::traits::AutoTraits> Wallet for W {
@@ -119,5 +125,13 @@ impl<W: Deref<Target: Wallet> + linera_base::util::traits::AutoTraits> Wallet fo
 
     fn owned_chain_ids(&self) -> impl Stream<Item = Result<ChainId, Self::Error>> {
         self.deref().owned_chain_ids()
+    }
+
+    async fn set_owner_default_chain(
+        &self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Self::Error> {
+        self.deref().set_owner_default_chain(owner, chain_id).await
     }
 }

@@ -2491,6 +2491,12 @@ checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "convert_case"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
+
+[[package]]
+name = "convert_case"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec182b0ca2f35d8fc196cf3404988fd8b8c739a4d270ff118a398feb0cbec1ca"
@@ -5328,6 +5334,7 @@ dependencies = [
  "ruzstd",
  "serde",
  "serde-name",
+ "serde_alias",
  "serde_bytes",
  "serde_json",
  "serde_with",
@@ -5372,6 +5379,7 @@ dependencies = [
  "rand_chacha 0.3.1",
  "rand_distr",
  "serde",
+ "serde_alias",
  "serde_bytes",
  "serde_json",
  "test-case",
@@ -5817,6 +5825,7 @@ dependencies = [
  "ed25519-dalek",
  "futures",
  "insta",
+ "lazy_static",
  "linera-base",
  "linera-chain",
  "linera-core",
@@ -5881,7 +5890,7 @@ dependencies = [
 name = "linera-sdk-derive"
 version = "0.15.7"
 dependencies = [
- "convert_case",
+ "convert_case 0.6.0",
  "proc-macro2",
  "syn 2.0.105",
 ]
@@ -5914,7 +5923,7 @@ dependencies = [
  "clap_complete",
  "clio",
  "colored",
- "convert_case",
+ "convert_case 0.6.0",
  "counter",
  "counter-no-graphql",
  "criterion",
@@ -6119,7 +6128,7 @@ dependencies = [
  "aws-smithy-types",
  "bcs",
  "cfg_aliases",
- "convert_case",
+ "convert_case 0.6.0",
  "criterion",
  "derive_more 1.0.0",
  "futures",
@@ -9165,6 +9174,19 @@ dependencies = [
  "js-sys",
  "serde",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "serde_alias"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2be4d78e3674912678d7c86b8c507fa72ebff66a8dd3359dc54ec97164b68474"
+dependencies = [
+ "convert_case 0.4.0",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]

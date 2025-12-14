@@ -295,6 +295,8 @@ web-thread-select = "0.2.0"
 web-time = "1.1.0"
 wit-bindgen = "0.24.0"
 zstd = "0.13.2"
+lazy_static = "1.5.0"
+serde_alias = "0.0.2"
 
 linera-base = { version = "0.15.7", path = "./linera-base" }
 linera-chain = { version = "0.15.7", path = "./linera-chain" }
@@ -394,3 +396,5 @@ range_minus_one = "deny"
 range_plus_one = "deny"
 ref_option_ref = "deny"
 str_split_at_newline = "deny"
+
+

@@ -252,6 +252,15 @@ where
         #[debug(skip)]
         callback: oneshot::Sender<Result<u64, WorkerError>>,
     },
+
+    /// Execute a block but discard any changes to the chain state.
+    StageBlockExecutionWithLocalTime {
+        block: ProposedBlock,
+        round: Option<u32>,
+        published_blobs: Vec<Blob>,
+        local_time: Timestamp,
+        callback: oneshot::Sender<Result<(Block, ChainInfoResponse), WorkerError>>,
+    },
 }
 
 /// The actor worker type.
@@ -278,7 +287,7 @@ impl ServiceRuntimeActor {
     /// Spawns a blocking task to execute the service runtime actor.
     ///
     /// Returns the task handle and the endpoints to interact with the actor.
-    async fn spawn(chain_id: ChainId, thread_pool: &linera_execution::ThreadPool) -> Self {
+    async fn spawn(chain_id: ChainId, thread_pool: &linera_execution::ThreadPool, local_time: Option<Timestamp>) -> Self {
         let (execution_state_sender, incoming_execution_requests) =
             futures::channel::mpsc::unbounded();
         let (runtime_request_sender, runtime_request_receiver) = std::sync::mpsc::channel();
@@ -295,7 +304,7 @@ impl ServiceRuntimeActor {
                         QueryContext {
                             chain_id,
                             next_block_height: BlockHeight(0),
-                            local_time: Timestamp::from(0),
+                            local_time: local_time.unwrap_or(Timestamp::from(0)),
                         },
                     )
                     .run(runtime_request_receiver)
@@ -326,6 +335,7 @@ where
             Instant,
         )>,
         is_tracked: bool,
+        local_time: Option<Timestamp>,
     ) {
         let actor = ChainWorkerActor {
             config,
@@ -337,7 +347,7 @@ where
             chain_id,
             is_tracked,
         };
-        if let Err(err) = actor.handle_requests(incoming_requests).await {
+        if let Err(err) = actor.handle_requests(incoming_requests, local_time).await {
             tracing::error!("Chain actor error: {err}");
         }
     }
@@ -367,6 +377,7 @@ where
             tracing::Span,
             Instant,
         )>,
+        local_time: Option<Timestamp>,
     ) -> Result<(), WorkerError> {
         trace!("Starting `ChainWorkerActor`");
 
@@ -381,7 +392,7 @@ where
             let (service_runtime_task, service_runtime_endpoint) =
                 if self.config.long_lived_services {
                     let actor =
-                        ServiceRuntimeActor::spawn(self.chain_id, self.storage.thread_pool()).await;
+                        ServiceRuntimeActor::spawn(self.chain_id, self.storage.thread_pool(), local_time).await;
                     (Some(actor.task), Some(actor.endpoint))
                 } else {
                     (None, None)

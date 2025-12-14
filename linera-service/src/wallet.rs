@@ -20,6 +20,8 @@ struct Data {
     pub chains: wallet::Memory,
     default: Arc<RwLock<Option<ChainId>>>,
     genesis_config: GenesisConfig,
+
+    defaults: Arc<RwLock<HashMap<AccountOwner, ChainId>>
 }
 
 struct ChainDetails {
@@ -129,6 +131,16 @@ impl linera_core::Wallet for Wallet {
         self.save()?;
         Ok(chain)
     }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Self::Error> {
+        self.set_owner_default_chain(owner, chain_id).await?;
+        self.save()?;
+        Ok(())
+    }
 }
 
 impl Extend<(ChainId, wallet::Chain)> for Wallet {
@@ -206,6 +218,8 @@ impl Wallet {
                 chains: wallet::Memory::default(),
                 default: Arc::new(RwLock::new(None)),
                 genesis_config,
+
+                defaults: Arc::new(RwLock::new(HashMap:;())),
             },
         )?))
     }
@@ -303,5 +317,22 @@ impl Wallet {
     /// Returns the list of all chain IDs for which we have a secret key.
     pub fn owned_chain_ids(&self) -> Vec<ChainId> {
         self.0.chains.owned_chain_ids()
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.0.defaults.get(&owner).copied()
+    }
+
+    pub fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        ensure!(
+            self.0.chains.contains_key(&chain_id),
+            error::Inner::NonexistentChain(chain_id)
+        );
+        self.0.defaults.insert(owner, chain_id);
+        self.0.save()
     }
 }

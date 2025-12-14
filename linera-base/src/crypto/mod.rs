@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 pub use signer::*;
 use thiserror::Error;
 
-use crate::{hex_debug, identifiers::AccountOwner, visit_allocative_simple};
+use crate::{doc_scalar, hex_debug, identifiers::AccountOwner, visit_allocative_simple};
 
 /// The public key of a validator.
 pub type ValidatorPublicKey = secp256k1::Secp256k1PublicKey;
@@ -118,6 +118,9 @@ pub enum AccountSignature {
         address: [u8; 20],
     },
 }
+
+doc_scalar!(AccountSignature, "A crypto signature.");
+doc_scalar!(AccountPublicKey, "A crypto public key.");
 
 impl AccountSecretKey {
     /// Returns the public key corresponding to this secret key.

@@ -18,6 +18,7 @@ use custom_debug_derive::Debug;
 use derive_more::{Display, FromStr};
 use linera_witty::{WitLoad, WitStore, WitType};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_alias::serde_alias;
 
 use crate::{
     bcs_scalar,
@@ -90,6 +91,7 @@ impl From<CryptoHash> for AccountOwner {
 }
 
 /// A system account.
+#[serde_alias(CamelCase, SnakeCase, PascalCase)]
 #[derive(
     Allocative,
     Debug,

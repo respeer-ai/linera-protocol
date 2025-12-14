@@ -1124,6 +1124,7 @@ impl Runnable for Job {
                     tokio::spawn(controller.run());
                 }
 
+                let cancellation_token = CancellationToken::new();
                 let service = NodeService::new(
                     config,
                     port,
@@ -1131,7 +1132,10 @@ impl Runnable for Job {
                     metrics_port,
                     Some(chain_id),
                     context,
-                );
+                    cancellation_token.clone(),
+                )
+                .await;
+                tokio::spawn(listen_for_shutdown_signals(cancellation_token.clone()));
                 service.run(cancellation_token, command_receiver).await?;
             }
 
@@ -1174,6 +1178,7 @@ impl Runnable for Job {
                     chain_listener_config: config,
                     storage_path,
                     max_batch_size,
+                    without_cache: true,
                 };
                 let faucet = FaucetService::new(config, context).await?;
                 let cancellation_token = CancellationToken::new();

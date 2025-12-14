@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rpc-service
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rpc-service
+  template:
+    metadata:
+      labels:
+        app: rpc-service
+    spec:
+      initContainers:
+      - name: init-wallet
+        image: npool/linera-respeer:latest
+        imagePullPolicy: Always
+        command:
+        - /bin/sh
+        - -c
+        - |
+          if [ ! -f /wallet/wallet.json ]; then
+            echo "No wallet found, creating..."
+            ./linera --wallet /wallet/wallet.json --keystore /wallet/keystore.json --storage rocksdb:/wallet/client.db wallet init --faucet http://faucet-service:31080
+          else
+            echo "Wallet already exists, skipping init."
+          fi
+        volumeMounts:
+        - name: rpc
+          mountPath: /wallet
+      containers:
+      - name: rpc-service
+        image: npool/linera-respeer:latest
+        imagePullPolicy: Always
+        command: ["/bin/sh", "-c", "./rpc-entrypoint.sh"]
+        env:
+        - name: RUST_LOG
+          value: info
+        volumeMounts:
+        - name: rpc
+          mountPath: /wallet
+      volumes:
+      - name: rpc
+        persistentVolumeClaim:
+          claimName: rpc-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rpc-service
+  namespace: kube-system
+spec:
+  ports:
+    - name: rpc-service
+      port: 30080
+      targetPort: 30080
+    - name: rpc-metrics
+      port: 30082
+      targetPort: 30082
+  selector:
+    app: rpc-service
