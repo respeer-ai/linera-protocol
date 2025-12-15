@@ -257,12 +257,14 @@ impl<Env: Environment> chain_listener::ClientContext for ClientContext<Env> {
         self.update_wallet_from_client(client).make_sync().await
     }
 
-    async fn assign_new_chain_to_owner(
+    async fn assign_new_chain_to_key(
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
     ) -> Result<(), Error> {
-        self.assign_new_chain_to_owner(chain_id, owner).await
+        self.assign_new_chain_to_key(chain_id, owner)
+            .make_sync()
+            .await
     }
 
     async fn set_owner_default_chain(
@@ -270,7 +272,13 @@ impl<Env: Environment> chain_listener::ClientContext for ClientContext<Env> {
         owner: AccountOwner,
         chain_id: ChainId,
     ) -> Result<(), Error> {
-        self.set_owner_default_chain(owner, chain_id).await
+        self.set_owner_default_chain(owner, chain_id)
+            .make_sync()
+            .await
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.owner_default_chain(owner)
     }
 }
 
@@ -485,7 +493,7 @@ impl<Env: Environment> ClientContext<Env> {
         }
     }
 
-    pub async fn assign_new_chain_to_owner(
+    pub async fn assign_new_chain_to_key(
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
@@ -759,9 +767,14 @@ impl<Env: Environment> ClientContext<Env> {
         chain_id: ChainId,
     ) -> Result<(), Error> {
         self.wallet()
-            .set_owner_default_chain(owner, chain_id).await
+            .set_owner_default_chain(owner, chain_id)
+            .await
             .map_err(error::Inner::wallet)?;
         Ok(())
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.wallet().owner_default_chain(owner)
     }
 }
 

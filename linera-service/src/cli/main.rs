@@ -727,7 +727,7 @@ impl Runnable for Job {
                         shared_context.clone(),
                         storage.clone(),
                         shutdown_notifier.clone(),
-                        mpsc::unbounded_channel().1,
+                        Arc::new(Mutex::new(mpsc::unbounded_channel().1)),
                     );
                     linera_client::benchmark::Benchmark::run_benchmark(
                         num_chains,
@@ -1106,6 +1106,7 @@ impl Runnable for Job {
                 let context = Arc::new(Mutex::new(context));
 
                 let (command_sender, command_receiver) = mpsc::unbounded_channel();
+                let command_receiver = Arc::new(Mutex::new(command_receiver));
 
                 if let Some(controller_id) = controller_application_id {
                     // For the controller case, we share the context via Arc so the
@@ -1133,6 +1134,7 @@ impl Runnable for Job {
                     Some(chain_id),
                     context,
                     cancellation_token.clone(),
+                    command_receiver.clone(),
                 )
                 .await;
                 tokio::spawn(listen_for_shutdown_signals(cancellation_token.clone()));

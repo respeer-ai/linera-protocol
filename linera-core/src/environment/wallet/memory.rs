@@ -115,4 +115,16 @@ impl Wallet for Memory {
     ) -> Result<(), Self::Error> {
         Ok(())
     }
+
+    fn genesis_admin_chain(&self) -> ChainId {
+        unimplemented!()
+    }
+
+    fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error> {
+        Ok(self.get(chain_id).is_some())
+    }
+
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
+        None
+    }
 }

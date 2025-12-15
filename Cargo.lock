@@ -5792,6 +5792,7 @@ checksum = "c9198100e9ce61acd3c714a2e61eb19fc5b8e2178dd645e2d9061e61e6e1feef"
 name = "linera-persistent"
 version = "0.15.7"
 dependencies = [
+ "anyhow",
  "cfg-if",
  "cfg_aliases",
  "derive_more 1.0.0",

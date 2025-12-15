@@ -287,7 +287,11 @@ impl ServiceRuntimeActor {
     /// Spawns a blocking task to execute the service runtime actor.
     ///
     /// Returns the task handle and the endpoints to interact with the actor.
-    async fn spawn(chain_id: ChainId, thread_pool: &linera_execution::ThreadPool, local_time: Option<Timestamp>) -> Self {
+    async fn spawn(
+        chain_id: ChainId,
+        thread_pool: &linera_execution::ThreadPool,
+        local_time: Option<Timestamp>,
+    ) -> Self {
         let (execution_state_sender, incoming_execution_requests) =
             futures::channel::mpsc::unbounded();
         let (runtime_request_sender, runtime_request_receiver) = std::sync::mpsc::channel();
@@ -391,8 +395,12 @@ where
 
             let (service_runtime_task, service_runtime_endpoint) =
                 if self.config.long_lived_services {
-                    let actor =
-                        ServiceRuntimeActor::spawn(self.chain_id, self.storage.thread_pool(), local_time).await;
+                    let actor = ServiceRuntimeActor::spawn(
+                        self.chain_id,
+                        self.storage.thread_pool(),
+                        local_time,
+                    )
+                    .await;
                     (Some(actor.task), Some(actor.endpoint))
                 } else {
                     (None, None)

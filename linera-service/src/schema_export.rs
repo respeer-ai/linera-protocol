@@ -226,10 +226,6 @@ impl ClientContext for DummyContext {
         Ok(())
     }
 
-    async fn save_wallet(&mut self) -> Result<(), Error> {
-        unimplemented!()
-    }
-
     async fn set_owner_default_chain(
         &mut self,
         _owner: AccountOwner,
@@ -245,11 +241,16 @@ impl ClientContext for DummyContext {
     ) -> Result<(), Error> {
         unimplemented!()
     }
+
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
+        unimplemented!()
+    }
 }
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let _options = <Options as clap::Parser>::parse();
+    let (_, command_receiver) = tokio::sync::mpsc::unbounded_channel();
     let service = NodeService::new(
         ChainListenerConfig::default(),
         std::num::NonZeroU16::new(8080).unwrap(),
@@ -258,6 +259,7 @@ async fn main() -> std::io::Result<()> {
         None,
         Arc::new(Mutex::new(DummyContext)),
         tokio_util::sync::CancellationToken::new(),
+        command_receiver,
     )
     .await;
     let schema = service.schema().sdl();

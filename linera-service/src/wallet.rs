@@ -9,6 +9,7 @@ use std::{
 use futures::{stream, Stream};
 use linera_base::{
     data_types::{ChainDescription, ChainOrigin},
+    ensure,
     identifiers::{AccountOwner, ChainId},
 };
 use linera_client::config::GenesisConfig;
@@ -21,7 +22,7 @@ struct Data {
     default: Arc<RwLock<Option<ChainId>>>,
     genesis_config: GenesisConfig,
 
-    defaults: Arc<RwLock<HashMap<AccountOwner, ChainId>>
+    pub defaults: papaya::HashMap<AccountOwner, ChainId>,
 }
 
 struct ChainDetails {
@@ -133,13 +134,24 @@ impl linera_core::Wallet for Wallet {
     }
 
     async fn set_owner_default_chain(
-        &mut self,
+        &self,
         owner: AccountOwner,
         chain_id: ChainId,
     ) -> Result<(), Self::Error> {
-        self.set_owner_default_chain(owner, chain_id).await?;
-        self.save()?;
-        Ok(())
+        self.set_owner_default_chain(owner, chain_id)?;
+        self.save()
+    }
+
+    fn genesis_admin_chain(&self) -> ChainId {
+        self.genesis_admin_chain()
+    }
+
+    fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error> {
+        Ok(self.chain_ids().contains(&chain_id))
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.owner_default_chain(owner)
     }
 }
 
@@ -219,7 +231,7 @@ impl Wallet {
                 default: Arc::new(RwLock::new(None)),
                 genesis_config,
 
-                defaults: Arc::new(RwLock::new(HashMap:;())),
+                defaults: papaya::HashMap::new(),
             },
         )?))
     }
@@ -320,19 +332,22 @@ impl Wallet {
     }
 
     pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
-        self.0.defaults.get(&owner).copied()
+        self.0.defaults.pin().get(&owner).cloned()
     }
 
     pub fn set_owner_default_chain(
-        &mut self,
+        &self,
         owner: AccountOwner,
         chain_id: ChainId,
-    ) -> Result<(), Error> {
+    ) -> anyhow::Result<()> {
         ensure!(
-            self.0.chains.contains_key(&chain_id),
-            error::Inner::NonexistentChain(chain_id)
+            self.0.chains.chain_ids().contains(&chain_id),
+            anyhow::anyhow!("nonexistent chain `{chain_id}`")
         );
-        self.0.defaults.insert(owner, chain_id);
-        self.0.save()
+
+        self.0.defaults.pin().insert(owner, chain_id);
+
+        self.0.save()?;
+        Ok(())
     }
 }

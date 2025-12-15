@@ -122,7 +122,7 @@ pub trait ClientContext {
 
     async fn update_wallet(&mut self, client: &ContextChainClient<Self>) -> Result<(), Error>;
 
-    async fn assign_new_chain_to_owner(
+    async fn assign_new_chain_to_key(
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
@@ -133,6 +133,8 @@ pub trait ClientContext {
         owner: AccountOwner,
         chain_id: ChainId,
     ) -> Result<(), Error>;
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -254,7 +256,7 @@ impl<C: ClientContext + 'static> ChainListener<C> {
         context: Arc<Mutex<C>>,
         storage: <C::Environment as Environment>::Storage,
         cancellation_token: CancellationToken,
-        command_receiver: UnboundedReceiver<ListenerCommand>,
+        command_receiver: Arc<Mutex<UnboundedReceiver<ListenerCommand>>>,
     ) -> Self {
         Self {
             storage,
@@ -263,7 +265,7 @@ impl<C: ClientContext + 'static> ChainListener<C> {
             listening: Default::default(),
             event_subscribers: Default::default(),
             cancellation_token,
-            command_receiver: Arc::new(Mutex::new(command_receiver)),
+            command_receiver: command_receiver.clone(),
         }
     }
 
@@ -346,9 +348,14 @@ impl<C: ClientContext + 'static> ChainListener<C> {
             let admin_chain_id = guard.wallet().genesis_admin_chain();
             guard
                 .make_chain_client(admin_chain_id)
+                .await?
                 .synchronize_from_validators()
                 .await?;
-            BTreeSet::from_iter([chain_id].into_iter().chain([admin_chain_id]))
+            [chain_id]
+                .into_iter()
+                .chain([admin_chain_id])
+                .map(|_chain_id| (_chain_id, ListeningMode::FullChain))
+                .collect::<BTreeMap<_, _>>()
         };
         self.listen_recursively(chain_ids).await
     }
@@ -561,6 +568,9 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                     Box::pin(async move { stream.lock().await.next().await })
                 })
                 .collect::<Vec<_>>();
+
+            let mut receiver = self.command_receiver.lock().await;
+
             futures::select! {
                 () = self.cancellation_token.cancelled().fuse() => {
                     return Ok(Action::Stop);
@@ -568,13 +578,16 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                 () = self.storage.clock().sleep_until(timeout).fuse() => {
                     return Ok(Action::ProcessInbox(timeout_chain_id));
                 }
-                command = self.command_receiver.lock().await.recv().then(async |maybe_command| {
+                command = receiver.recv().then(async |maybe_command| {
                     if let Some(command) = maybe_command {
                         command
                     } else {
                         std::future::pending().await
                     }
                 }).fuse() => {
+                    // TODO: optimize work around in future
+                    drop(receiver);
+
                     match command {
                         ListenerCommand::Listen(new_chains) => {
                             debug!(?new_chains, "received command to listen to new chains");

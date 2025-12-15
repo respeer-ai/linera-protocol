@@ -1355,9 +1355,11 @@ where
         chain_id: ChainId,
         heights: Vec<BlockHeight>,
     ) -> Result<Vec<CryptoHash>, WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::GetBlockHashes { heights, callback }
-        }, None)
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::GetBlockHashes { heights, callback },
+            None,
+        )
         .await
     }
 
@@ -1367,9 +1369,11 @@ where
         chain_id: ChainId,
         blob_ids: Vec<BlobId>,
     ) -> Result<Vec<Blob>, WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::GetProposedBlobs { blob_ids, callback }
-        }, None)
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::GetProposedBlobs { blob_ids, callback },
+            None,
+        )
         .await
     }
 
@@ -1378,9 +1382,11 @@ where
         &self,
         chain_id: ChainId,
     ) -> Result<EventSubscriptionsResult, WorkerError> {
-        self.query_chain_worker(chain_id, |callback| {
-            ChainWorkerRequest::GetEventSubscriptions { callback }
-        }, None)
+        self.query_chain_worker(
+            chain_id,
+            |callback| ChainWorkerRequest::GetEventSubscriptions { callback },
+            None,
+        )
         .await
     }
 
@@ -1392,7 +1398,10 @@ where
     ) -> Result<Option<u32>, WorkerError> {
         self.query_chain_worker(
             chain_id,
-            move |callback| ChainWorkerRequest::GetStreamEventCount { stream_id, callback},
+            move |callback| ChainWorkerRequest::GetStreamEventCount {
+                stream_id,
+                callback,
+            },
             None,
         )
         .await
@@ -1403,9 +1412,11 @@ where
         &self,
         chain_id: ChainId,
     ) -> Result<HashMap<ValidatorPublicKey, u64>, WorkerError> {
-        self.query_chain_worker(chain_id, |callback| {
-            ChainWorkerRequest::GetReceivedCertificateTrackers { callback }
-        }, None)
+        self.query_chain_worker(
+            chain_id,
+            |callback| ChainWorkerRequest::GetReceivedCertificateTrackers { callback },
+            None,
+        )
         .await
     }
 
@@ -1415,12 +1426,14 @@ where
         chain_id: ChainId,
         receiver_id: ChainId,
     ) -> Result<(BlockHeight, Option<BlockHeight>), WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::GetTipStateAndOutboxInfo {
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::GetTipStateAndOutboxInfo {
                 receiver_id,
                 callback,
-            }
-        }, None)
+            },
+            None,
+        )
         .await
     }
 
@@ -1429,17 +1442,21 @@ where
         &self,
         chain_id: ChainId,
     ) -> Result<BlockHeight, WorkerError> {
-        self.query_chain_worker(chain_id, |callback| {
-            ChainWorkerRequest::GetNextHeightToPreprocess { callback }
-        }, None)
+        self.query_chain_worker(
+            chain_id,
+            |callback| ChainWorkerRequest::GetNextHeightToPreprocess { callback },
+            None,
+        )
         .await
     }
 
     /// Gets the chain manager's seed for leader election.
     pub async fn get_manager_seed(&self, chain_id: ChainId) -> Result<u64, WorkerError> {
-        self.query_chain_worker(chain_id, |callback| ChainWorkerRequest::GetManagerSeed {
-            callback,
-        }, None)
+        self.query_chain_worker(
+            chain_id,
+            |callback| ChainWorkerRequest::GetManagerSeed { callback },
+            None,
+        )
         .await
     }
 }

@@ -268,7 +268,12 @@ where
         chain_id: ChainId,
         creator_chain_id: ChainId,
     ) -> Result<(), Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id);
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
         client.track_chain(chain_id);
         client.track_chain(creator_chain_id);
         client.retry_pending_outgoing_messages().await?;
@@ -767,7 +772,7 @@ where
         self.context
             .lock()
             .await
-            .assign_new_chain_to_owner(chain_id, owner)
+            .assign_new_chain_to_key(chain_id, owner)
             .await?;
 
         tracing::info!("Setting default chain with public key ...");
@@ -776,7 +781,6 @@ where
             .await
             .set_owner_default_chain(owner, chain_id)
             .await?;
-        self.context.lock().await.save_wallet().await?;
 
         tracing::info!("Running chain {}", chain_id);
         self.chain_listener
@@ -807,7 +811,12 @@ where
     ) -> Result<CryptoHash, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
-        let client = self.context.lock().await.make_chain_client(chain_id);
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
 
         let SignedBlock {
             unsigned_block_proposal,
@@ -840,7 +849,12 @@ where
     ) -> Result<CryptoHash, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
-        let client = self.context.lock().await.make_chain_client(chain_id);
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
 
         let SignedBlockBcs {
             unsigned_block_proposal,
@@ -884,7 +898,12 @@ where
             ..
         } = candidate;
 
-        let client = self.context.lock().await.make_chain_client(chain_id);
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
 
         let bundles: Vec<_> = incoming_bundles
             .iter()
@@ -1048,7 +1067,12 @@ where
 
     /// Returns the pending message of the chain
     async fn pending_messages(&self, chain_id: ChainId) -> Result<Vec<IncomingBundle>, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id);
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
         Ok(client.pending_message_bundles().await?)
     }
 
@@ -1058,7 +1082,12 @@ where
         chain_id: ChainId,
         max_pending_messages: usize,
     ) -> Result<CandidateBlockMaterial, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id);
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
 
         let incoming_bundles = client.pending_message_bundles().await?;
         let transactions = incoming_bundles
@@ -1088,7 +1117,12 @@ where
         chain_id: ChainId,
         owner: Option<AccountOwner>,
     ) -> Result<Amount, Error> {
-        let client = self.context.lock().await.make_chain_client(chain_id);
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
         Ok(match owner {
             Some(owner) => client.query_owner_balance(owner).await?,
             _ => client.query_balance().await?,
@@ -1104,7 +1138,12 @@ where
 
         let mut chain_balances = HashMap::new();
         for chain in chain_owners {
-            let client = self.context.lock().await.make_chain_client(chain.chain_id);
+            let client = self
+                .context
+                .lock()
+                .await
+                .make_chain_client(chain.chain_id)
+                .await?;
             let mut owner_balances = HashMap::new();
             for owner in chain.owners {
                 owner_balances.insert(owner, client.query_owner_balance(owner).await?);
@@ -1122,7 +1161,14 @@ where
 
     /// Returns the maintained chains of given owner
     async fn owner_chains(&self, owner: AccountOwner) -> Result<Chains, Error> {
-        let chain_ids = self.context.lock().await.wallet().owner_chain_ids(owner);
+        let chain_ids = self
+            .context
+            .lock()
+            .await
+            .wallet()
+            .owner_chain_ids(owner)
+            .try_collect()
+            .await?;
         let default_chain = self
             .context
             .lock()
@@ -1281,6 +1327,12 @@ where
         context: Arc<Mutex<C>>,
         #[cfg(not(feature = "fake-chain-listener"))] cancellation_token: CancellationToken,
         #[cfg(feature = "fake-chain-listener")] _cancellation_token: CancellationToken,
+        #[cfg(not(feature = "fake-chain-listener"))] command_receiver: Arc<
+            Mutex<UnboundedReceiver<ListenerCommand>>,
+        >,
+        #[cfg(feature = "fake-chain-listener")] _command_receiver: Arc<
+            Mutex<UnboundedReceiver<ListenerCommand>>,
+        >,
     ) -> Self {
         #[cfg(not(feature = "fake-chain-listener"))]
         let storage = context.lock().await.storage().clone();
@@ -1291,14 +1343,15 @@ where
             #[cfg(with_metrics)]
             metrics_port,
             default_chain,
-            context,
+            context: context.clone(),
 
             #[cfg(not(feature = "fake-chain-listener"))]
             chain_listener: Arc::new(Mutex::new(Some(ChainListener::new(
                 config,
-                Arc::clone(&context),
+                context,
                 storage,
                 cancellation_token,
+                command_receiver.clone(),
             )))),
             #[cfg(feature = "fake-chain-listener")]
             chain_listener: Arc::new(Mutex::new(None)),
@@ -1334,7 +1387,7 @@ where
     pub async fn run(
         self,
         cancellation_token: CancellationToken,
-        command_receiver: UnboundedReceiver<ListenerCommand>,
+        _command_receiver: Arc<Mutex<UnboundedReceiver<ListenerCommand>>>,
     ) -> Result<(), anyhow::Error> {
         let port = self.port.get();
         let index_handler = axum::routing::get(util::graphiql).post(Self::index_handler);
@@ -1378,7 +1431,7 @@ where
 
         info!("GraphiQL IDE: http://localhost:{}", port);
 
-        let listener = self
+        let chain_listener = self
             .chain_listener
             .lock()
             .await
@@ -1388,15 +1441,6 @@ where
             .run(true)
             .await?;
 
-        let chain_listener = ChainListener::new(
-            self.config,
-            self.context,
-            storage,
-            cancellation_token.clone(),
-            command_receiver,
-        )
-        .run(true)
-        .await?;
         let mut chain_listener = Box::pin(chain_listener).fuse();
         let tcp_listener =
             tokio::net::TcpListener::bind(SocketAddr::from(([0, 0, 0, 0], port))).await?;
