@@ -234,7 +234,7 @@ impl ClientContext for DummyContext {
         unimplemented!()
     }
 
-    async fn assign_new_chain_to_owner(
+    async fn assign_new_chain_to_key(
         &mut self,
         _chain_id: ChainId,
         _owner: AccountOwner,
@@ -259,7 +259,7 @@ async fn main() -> std::io::Result<()> {
         None,
         Arc::new(Mutex::new(DummyContext)),
         tokio_util::sync::CancellationToken::new(),
-        command_receiver,
+        Arc::new(Mutex::new(command_receiver)),
     )
     .await;
     let schema = service.schema().sdl();
