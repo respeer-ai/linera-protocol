@@ -76,6 +76,26 @@ impl chain_listener::ClientContext for ClientContext {
         self.update_calls += 1;
         Ok(())
     }
+
+    async fn assign_new_chain_to_owner(
+        &mut self,
+        _chain_id: ChainId,
+        _owner: AccountOwner,
+    ) -> Result<(), linera_client::Error> {
+        Ok(())
+    }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        _owner: AccountOwner,
+        _chain_id: ChainId,
+    ) -> Result<(), linera_client::Error> {
+        Ok(())
+    }
+
+    async fn save_wallet(&mut self) -> Result<(), linera_client::Error> {
+        Ok(())
+    }
 }
 
 #[tokio::test]
@@ -111,6 +131,7 @@ async fn test_faucet_rate_limiting() {
         pending_requests: Arc::clone(&pending_requests),
         request_notifier: Arc::clone(&request_notifier),
         storage: client.storage_client().clone(),
+        without_cache: false,
     };
 
     // Create the BatchProcessor configuration and instance
@@ -120,6 +141,7 @@ async fn test_faucet_rate_limiting() {
         start_timestamp: Timestamp::from(0),
         start_balance: Amount::from_tokens(6),
         max_batch_size: 1,
+        without_cache: false,
     };
 
     let batch_processor = super::BatchProcessor::new(
@@ -241,6 +263,7 @@ async fn test_batch_size_reduction_on_limit_errors() {
         start_timestamp: Timestamp::from(0),
         end_timestamp: Timestamp::from(0), // All tokens are unlocked: no rate limiting.
         max_batch_size: initial_batch_size,
+        without_cache: false,
     };
 
     let mut batch_processor = super::BatchProcessor::new(
@@ -319,6 +342,7 @@ async fn test_faucet_persistence() {
         pending_requests: Arc::clone(&pending_requests),
         request_notifier: Arc::clone(&request_notifier),
         storage: client.storage_client().clone(),
+        without_cache: false,
     };
 
     // Create the BatchProcessor configuration
@@ -328,6 +352,7 @@ async fn test_faucet_persistence() {
         start_timestamp: Timestamp::from(0),
         start_balance: Amount::from_tokens(6),
         max_batch_size: 1,
+        without_cache: false,
     };
 
     let batch_processor = super::BatchProcessor::new(
@@ -443,6 +468,7 @@ async fn test_faucet_persistence() {
         pending_requests: Arc::clone(&pending_requests_2),
         request_notifier: Arc::clone(&request_notifier_2),
         storage: client.storage_client().clone(),
+        without_cache: false,
     };
 
     // Create new batch processor for the second instance
@@ -452,6 +478,7 @@ async fn test_faucet_persistence() {
         start_timestamp: Timestamp::from(0),
         start_balance: Amount::from_tokens(6),
         max_batch_size: 1,
+        without_cache: false,
     };
     let batch_processor_2 = super::BatchProcessor::new(
         batch_config_2,
@@ -551,6 +578,7 @@ async fn test_blockchain_sync_after_database_deletion() {
         pending_requests: Arc::clone(&pending_requests),
         request_notifier: Arc::clone(&request_notifier),
         storage: client.storage_client().clone(),
+        without_cache: false,
     };
 
     // Create the BatchProcessor configuration
@@ -560,6 +588,7 @@ async fn test_blockchain_sync_after_database_deletion() {
         start_timestamp: Timestamp::from(0),
         start_balance: Amount::from_tokens(6),
         max_batch_size: 1,
+        without_cache: false,
     };
     let batch_processor = super::BatchProcessor::new(
         batch_config,
@@ -639,6 +668,7 @@ async fn test_blockchain_sync_after_database_deletion() {
         pending_requests: Arc::clone(&pending_requests_2),
         request_notifier: Arc::clone(&request_notifier_2),
         storage: client.storage_client().clone(),
+        without_cache: false,
     };
 
     // Create new batch processor for the second instance
@@ -648,6 +678,7 @@ async fn test_blockchain_sync_after_database_deletion() {
         start_timestamp: Timestamp::from(0),
         start_balance: Amount::from_tokens(6),
         max_batch_size: 1,
+        without_cache: false,
     };
     let batch_processor_2 = super::BatchProcessor::new(
         batch_config_2,

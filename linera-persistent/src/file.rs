@@ -20,6 +20,8 @@ enum ErrorInner {
     IoError(#[from] std::io::Error),
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+    #[error("{0}")]
+    Anyhow(#[from] anyhow::Error),
 }
 
 thiserror_context::impl_context!(Error(ErrorInner));
