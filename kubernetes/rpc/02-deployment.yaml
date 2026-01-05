@@ -28,6 +28,7 @@ spec:
           if [ $chains -eq 0 ]; then
             rm /wallet/wallet.json /wallet/client.db /wallet/keystore.json -rf
           fi
+          echo "Found $chains chains"
           if [ ! -f /wallet/wallet.json ]; then
             echo "No wallet found, creating..."
             ./linera --wallet /wallet/wallet.json --keystore /wallet/keystore.json --storage rocksdb:/wallet/client.db wallet init --faucet http://faucet-service:31080
