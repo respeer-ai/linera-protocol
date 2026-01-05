@@ -24,8 +24,9 @@ spec:
           chains=0
           if [ -f /wallet/wallet.json ]; then
             chains=$(cat /wallet/wallet.json | jq '.chains | length')
+            default_chain=$(cat /wallet/wallet.json | jq '.default')
           fi
-          if [ $chains -eq 0 ]; then
+          if [ $chains -eq 0 -o -z "$default_chain" ]; then
             rm /wallet/wallet.json /wallet/client.db /wallet/keystore.json -rf
           fi
           echo "Found $chains chains"
