@@ -35,7 +35,7 @@ export FAUCET_URL=https://faucet.testnet-conway.linera.net
 ######
 ## If contine deploy with testnet faucet, it should be 0
 ######
-RE_GENERATE=0
+export RE_GENERATE=${RE_GENERATE:-0}
 
 wait_pods() {
   pod_name=$1
