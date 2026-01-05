@@ -26,10 +26,10 @@ spec:
             chains=$(cat /wallet/wallet.json | jq '.chains | length')
             default_chain=$(cat /wallet/wallet.json | jq '.default')
           fi
-          if [ $chains -eq 0 -o -z "$default_chain" ]; then
+          if [ $chains -eq 0 -o -z "$default_chain" -o "$default_chain" == "null" ]; then
             rm /wallet/wallet.json /wallet/client.db /wallet/keystore.json -rf
           fi
-          echo "Found $chains chains"
+          echo "Found $chains chains, default chain $default_chain"
           if [ ! -f /wallet/wallet.json ]; then
             echo "No wallet found, creating..."
             ./linera --wallet /wallet/wallet.json --keystore /wallet/keystore.json --storage rocksdb:/wallet/client.db wallet init --faucet http://faucet-service:31080
