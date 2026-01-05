@@ -9,7 +9,7 @@ spec:
   # storageClassName: ebs-storageclass // when multi storageclass exist,you can sepcify
   resources:
     requests:
-      storage: 4Gi
+      storage: 20Gi
 
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -22,4 +22,4 @@ spec:
   # storageClassName: ebs-storageclass // when multi storageclass exist,you can sepcify
   resources:
     requests:
-      storage: 4Gi
+      storage: 20Gi
