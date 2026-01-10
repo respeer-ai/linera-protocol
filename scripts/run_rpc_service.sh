@@ -69,6 +69,11 @@ function create_rpc_wallet() {
            --storage rocksdb://$WALLET_DIR/rpc/client.db \
            wallet init \
            --faucet $FAUCET_URL
+    linera --wallet $WALLET_DIR/rpc/wallet.json \
+           --keystore $WALLET_DIR/rpc/keystore.json \
+           --storage rocksdb://$WALLET_DIR/rpc/client.db \
+           wallet request-chain \
+           --faucet $FAUCET_URL
 }
 
 # Create rpc wallet

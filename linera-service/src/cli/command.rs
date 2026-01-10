@@ -957,6 +957,11 @@ pub enum ClientCommand {
         #[arg(value_enum)]
         shell: clap_complete::Shell,
     },
+
+    /// Miner for meme tokens
+    MemeMiner {
+        meme_proxy_application_id: ApplicationId,
+    },
 }
 
 impl ClientCommand {
@@ -1003,6 +1008,7 @@ impl ClientCommand {
             ClientCommand::HelpMarkdown
             | ClientCommand::ExtractScriptFromMarkdown { .. }
             | ClientCommand::Completion { .. } => "tool".into(),
+            ClientCommand::MemeMiner { .. } => "meme-miner".into(),
         }
     }
 }

@@ -30,6 +30,8 @@ members = [
     "linera-witty/test-modules",
 
     "web/@linera/client",
+
+    "linera-meme-miner",
 ]
 default-members = [
     "linera-base",
@@ -60,6 +62,8 @@ default-members = [
     "linera-witty",
     "linera-witty-macros",
     "linera-witty/test-modules",
+
+    "linera-meme-miner",
 ]
 exclude = ["examples", "scripts"]
 resolver = "2"
@@ -327,6 +331,7 @@ linera-views = { version = "0.15.8", path = "./linera-views", default-features =
 linera-views-derive = { version = "0.15.8", path = "./linera-views-derive" }
 linera-witty = { version = "0.15.8", path = "./linera-witty" }
 linera-witty-macros = { version = "0.15.8", path = "./linera-witty-macros" }
+linera-meme-miner = { version = "0.15.8", path = "./linera-meme-miner" }
 
 amm = { path = "./examples/amm" }
 call-evm-counter = { path = "./examples/call-evm-counter" }

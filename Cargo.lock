@@ -5729,6 +5729,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "linera-meme-miner"
+version = "0.15.8"
+dependencies = [
+ "anyhow",
+ "async-graphql",
+ "async-graphql-axum",
+ "async-trait",
+ "axum",
+ "cfg_aliases",
+ "derive_more 1.0.0",
+ "futures",
+ "linera-base",
+ "linera-chain",
+ "linera-client",
+ "linera-core",
+ "linera-execution",
+ "linera-metrics",
+ "linera-storage",
+ "linera-version",
+ "linera-views",
+ "prometheus",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tempfile",
+ "test-log",
+ "tokio",
+ "tokio-util",
+ "tower-http 0.6.6",
+ "tracing",
+]
+
+[[package]]
 name = "linera-metrics"
 version = "0.15.8"
 dependencies = [
@@ -5910,6 +5943,7 @@ dependencies = [
  "linera-execution",
  "linera-faucet-client",
  "linera-faucet-server",
+ "linera-meme-miner",
  "linera-metrics",
  "linera-persistent",
  "linera-rpc",
