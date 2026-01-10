@@ -94,6 +94,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn, Instrument as _};
+use linera_meme_miner::MemeMiner as MemeMinerService;
 
 struct Job(Options);
 
@@ -1620,7 +1621,7 @@ impl Runnable for Job {
                 let context = options
                     .create_client_context(storage, wallet, signer.into_value())
                     .await?;
-                let miner = MemeMiner::new(meme_proxy_application_id, context);
+                let miner = MemeMinerService::new(meme_proxy_application_id, context);
 
                 let cancellation_token = CancellationToken::new();
                 tokio::spawn(listen_for_shutdown_signals(cancellation_token.clone()));
