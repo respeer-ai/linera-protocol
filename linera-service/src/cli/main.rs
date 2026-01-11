@@ -61,6 +61,7 @@ use linera_core::{
 };
 use linera_execution::committee::Committee;
 use linera_faucet_server::{FaucetConfig, FaucetService};
+use linera_meme_miner::MemeMiner as MemeMinerService;
 #[cfg(with_metrics)]
 use linera_metrics::monitoring_server;
 use linera_persistent::{self as persistent, Persist, PersistExt as _};
@@ -94,7 +95,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn, Instrument as _};
-use linera_meme_miner::MemeMiner as MemeMinerService;
 
 struct Job(Options);
 
@@ -1617,11 +1617,18 @@ impl Runnable for Job {
             }
             MemeMiner {
                 meme_proxy_application_id,
+                config,
             } => {
+                assert!(
+                    signer.keys().len() > 0,
+                    "run `linera wallet init` to initialize wallet."
+                );
+
                 let context = options
                     .create_client_context(storage, wallet, signer.into_value())
                     .await?;
-                let miner = MemeMinerService::new(meme_proxy_application_id, context);
+
+                let miner = MemeMinerService::new(meme_proxy_application_id, context, config).await;
 
                 let cancellation_token = CancellationToken::new();
                 tokio::spawn(listen_for_shutdown_signals(cancellation_token.clone()));

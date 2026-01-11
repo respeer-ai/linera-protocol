@@ -960,7 +960,13 @@ pub enum ClientCommand {
 
     /// Miner for meme tokens
     MemeMiner {
+        /// Meme proxy application id
+        #[arg(long)]
         meme_proxy_application_id: ApplicationId,
+
+        /// Configuration for the faucet chain listener.
+        #[command(flatten)]
+        config: ChainListenerConfig,
     },
 }
 
