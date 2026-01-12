@@ -40,16 +40,14 @@ linera-version.workspace = true
 prometheus = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
-sqlx = { workspace = true, features = [
-    "runtime-tokio-rustls",
-    "sqlite",
-    "migrate",
-] }
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tower-http = { workspace = true, features = ["cors"] }
 tracing.workspace = true
+thiserror.workspace = true
+# Hack: depend on meme application Abi
+abi = { git = "https://github.com/respeer-ai/linera-meme.git" }
 
 [dev-dependencies]
 async-trait.workspace = true

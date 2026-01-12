@@ -1627,8 +1627,15 @@ impl Runnable for Job {
                 let context = options
                     .create_client_context(storage, wallet, signer.into_value())
                     .await?;
+                let default_chain = context.default_chain();
 
-                let miner = MemeMinerService::new(meme_proxy_application_id, context, config).await;
+                let miner = MemeMinerService::new(
+                    meme_proxy_application_id,
+                    context,
+                    config,
+                    default_chain,
+                )
+                .await;
 
                 let cancellation_token = CancellationToken::new();
                 tokio::spawn(listen_for_shutdown_signals(cancellation_token.clone()));

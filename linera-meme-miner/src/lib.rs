@@ -1,9 +1,14 @@
+mod errors;
 use std::sync::Arc;
 
-use futures::{lock::Mutex, stream::StreamExt, FutureExt as _};
-use linera_base::identifiers::{ApplicationId, ChainId};
+use abi::proxy::ProxyAbi;
+use async_graphql::Request;
+use errors::MemeMinerError;
+use futures::{lock::Mutex, FutureExt as _};
+use linera_base::identifiers::{Account, ApplicationId, ChainId};
 use linera_client::chain_listener::{ChainListener, ChainListenerConfig, ClientContext};
 use linera_core::Wallet;
+use linera_execution::Query;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
@@ -14,10 +19,13 @@ where
     context: Arc<Mutex<C>>,
     storage: <C::Environment as linera_core::Environment>::Storage,
 
-    /// Meme proxy application id to register miner and get new meme chains
     meme_proxy_application_id: ApplicationId,
+
     new_block_notifier: Arc<Notify>,
     pub chain_listener_config: ChainListenerConfig,
+
+    default_chain: ChainId,
+    owner: Account,
 }
 
 impl<C> MemeMiner<C>
@@ -28,39 +36,63 @@ where
         meme_proxy_application_id: ApplicationId,
         context: C,
         mut chain_listener_config: ChainListenerConfig,
+        default_chain: ChainId,
     ) -> Self {
-        // Check chain and owner in wallet, if chain is not available, request chain
-        let owned_chain_ids: Vec<ChainId> = context
+        let chain = context
             .wallet()
-            .owned_chain_ids()
-            .map(|result| result.unwrap())
-            .collect()
-            .await;
+            .get(default_chain)
+            .await
+            .expect("failed get default chain")
+            .expect("invalid default chain");
+        let owner = chain.owner.unwrap();
 
-        // Signer keys is already checked
-        assert!(
-            owned_chain_ids.len() == 0,
-            "run `linera wallet request-chain` to create miner chain"
-        );
-
-        // We need to sync block, but we don't need to process message
+        // We don't need to process message
         chain_listener_config.skip_process_inbox = true;
 
         let storage = context.storage().clone();
-
-        // TODO: sync chain
-        // TODO: check if chain is miner, if not, register
-        // TODO: subscribe to block height and nonce
 
         Self {
             context: Arc::new(Mutex::new(context)),
             storage,
 
             meme_proxy_application_id,
+
             new_block_notifier: Arc::new(Notify::new()),
             chain_listener_config,
+
+            default_chain,
+            owner: Account {
+                chain_id: default_chain,
+                owner,
+            },
         }
     }
+
+    async fn _meme_proxy_creator_chain_id(&self) -> Result<ChainId, MemeMinerError> {
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(self.default_chain)
+            .await?;
+
+        let query = Request::new("{ creatorChainId }");
+        let query = Query::user(
+            self.meme_proxy_application_id.with_abi::<ProxyAbi>(),
+            &query,
+        )?;
+        let outcome = client.query_application(query, None).await?;
+
+        tracing::info!("{:?}", outcome);
+
+        Err(MemeMinerError::NotImplemented)
+    }
+
+    fn check_miner(&self) -> bool {
+        false
+    }
+
+    fn register_miner(&self) {}
 
     pub fn meme_proxy_application_id(&self) -> ApplicationId {
         self.meme_proxy_application_id
@@ -71,6 +103,7 @@ where
             tokio::select! {
                 _ = self.new_block_notifier.notified() => {
                     // TODO: get new chains
+                    // TODO: subscribe to block height and nonce
                     // TODO: assign new chains to owner
                     // TODO: if new block height or nonce got, stop previous mining and launch new one
                     // TODO: create Mine operation when hash got
@@ -84,6 +117,13 @@ where
     }
 
     pub async fn run(&self, cancellation_token: CancellationToken) -> anyhow::Result<()> {
+        // TODO: sync chain
+        // TODO: get meme proxy creator chain id
+        // TODO: check if chain is miner, if not, register with default chain (cli.query_user_application)
+        if !self.check_miner() {
+            self.register_miner();
+        }
+
         let chain_listener = ChainListener::new(
             self.chain_listener_config.clone(),
             self.context.clone(),
