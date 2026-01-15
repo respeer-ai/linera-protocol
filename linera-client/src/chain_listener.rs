@@ -26,7 +26,7 @@ use linera_core::{
     Environment, Wallet,
 };
 use linera_storage::{Clock as _, Storage as _};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{broadcast, mpsc::UnboundedReceiver};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn, Instrument as _};
 
@@ -236,6 +236,9 @@ pub struct ChainListener<C: ClientContext> {
     cancellation_token: CancellationToken,
     /// The channel through which the listener can receive commands.
     command_receiver: Arc<Mutex<UnboundedReceiver<ListenerCommand>>>,
+
+    /// New block broadcast publisher
+    new_block_sender: broadcast::Sender<ChainId>,
 }
 
 impl<C: ClientContext + 'static> Clone for ChainListener<C> {
@@ -248,6 +251,8 @@ impl<C: ClientContext + 'static> Clone for ChainListener<C> {
             event_subscribers: self.event_subscribers.clone(),
             cancellation_token: self.cancellation_token.clone(),
             command_receiver: self.command_receiver.clone(),
+
+            new_block_sender: self.new_block_sender.clone(),
         }
     }
 }
@@ -261,6 +266,8 @@ impl<C: ClientContext + 'static> ChainListener<C> {
         cancellation_token: CancellationToken,
         command_receiver: Arc<Mutex<UnboundedReceiver<ListenerCommand>>>,
     ) -> Self {
+        let (new_block_sender, _) = broadcast::channel(1024);
+
         Self {
             storage,
             context,
@@ -269,6 +276,8 @@ impl<C: ClientContext + 'static> ChainListener<C> {
             event_subscribers: Default::default(),
             cancellation_token,
             command_receiver: command_receiver.clone(),
+
+            new_block_sender,
         }
     }
 
@@ -375,6 +384,11 @@ impl<C: ClientContext + 'static> ChainListener<C> {
         self.listen_recursively(chain_ids).await
     }
 
+    /// Let client subscribe
+    pub fn subscribe_new_block(&self) -> broadcast::Receiver<ChainId> {
+        self.new_block_sender.subscribe()
+    }
+
     /// Processes a notification, updating local chains and validators as needed.
     async fn process_notification(
         &mut self,
@@ -409,6 +423,8 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                     }
                     self.process_new_events(notification.chain_id).await?;
                 }
+
+                let _ = self.new_block_sender.send(notification.chain_id);
             }
             Reason::BlockExecuted { .. } => {}
         }
