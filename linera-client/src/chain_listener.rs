@@ -26,7 +26,7 @@ use linera_core::{
     Environment, Wallet,
 };
 use linera_storage::{Clock as _, Storage as _};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::{broadcast, mpsc::UnboundedReceiver};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, warn, Instrument as _};
 
@@ -125,6 +125,20 @@ pub trait ClientContext {
     ) -> Result<(), Error>;
 
     async fn update_wallet(&mut self, client: &ContextChainClient<Self>) -> Result<(), Error>;
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        owner: AccountOwner,
+    ) -> Result<(), Error>;
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error>;
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -153,13 +167,26 @@ struct ListeningClient<C: ClientContext> {
     /// The abort handle for the task that listens to the validators.
     abort_handle: AbortOnDrop,
     /// The listening task's join handle.
-    join_handle: NonBlockingFuture<()>,
+    join_handle: Arc<Mutex<Option<NonBlockingFuture<()>>>>,
     /// The stream of notifications from the local node.
     notification_stream: Arc<Mutex<NotificationStream>>,
     /// This is only `< u64::MAX` when the client is waiting for a timeout to process the inbox.
     timeout: Timestamp,
     /// The cancellation token for the background sync process, if started.
     maybe_sync_cancellation_token: Option<CancellationToken>,
+}
+
+impl<C: ClientContext> Clone for ListeningClient<C> {
+    fn clone(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            abort_handle: self.abort_handle.clone(),
+            join_handle: self.join_handle.clone(),
+            notification_stream: self.notification_stream.clone(),
+            timeout: self.timeout,
+            maybe_sync_cancellation_token: self.maybe_sync_cancellation_token.clone(),
+        }
+    }
 }
 
 impl<C: ClientContext> ListeningClient<C> {
@@ -173,7 +200,7 @@ impl<C: ClientContext> ListeningClient<C> {
         Self {
             client,
             abort_handle,
-            join_handle,
+            join_handle: Arc::new(Mutex::new(Some(join_handle))),
             #[allow(clippy::arc_with_non_send_sync)] // Only `Send` with `futures-util/alloc`.
             notification_stream: Arc::new(Mutex::new(notification_stream)),
             timeout: Timestamp::from(u64::MAX),
@@ -187,7 +214,7 @@ impl<C: ClientContext> ListeningClient<C> {
         if let Some(cancellation_token) = self.maybe_sync_cancellation_token {
             cancellation_token.cancel();
         }
-        self.join_handle.await;
+        self.join_handle.lock().await.take().unwrap().await;
     }
 }
 
@@ -212,9 +239,29 @@ pub struct ChainListener<C: ClientContext> {
     event_subscribers: BTreeMap<ChainId, BTreeSet<ChainId>>,
     cancellation_token: CancellationToken,
     /// The channel through which the listener can receive commands.
-    command_receiver: UnboundedReceiver<ListenerCommand>,
+    command_receiver: Arc<Mutex<UnboundedReceiver<ListenerCommand>>>,
     /// Whether to fully sync chains in the background.
     enable_background_sync: bool,
+
+    /// New block broadcast publisher
+    new_block_sender: broadcast::Sender<ChainId>,
+}
+
+impl<C: ClientContext + 'static> Clone for ChainListener<C> {
+    fn clone(&self) -> Self {
+        Self {
+            context: self.context.clone(),
+            storage: self.storage.clone(),
+            config: self.config.clone(),
+            listening: self.listening.clone(),
+            event_subscribers: self.event_subscribers.clone(),
+            cancellation_token: self.cancellation_token.clone(),
+            command_receiver: self.command_receiver.clone(),
+            enable_background_sync: self.enable_background_sync,
+
+            new_block_sender: self.new_block_sender.clone(),
+        }
+    }
 }
 
 impl<C: ClientContext + 'static> ChainListener<C> {
@@ -224,9 +271,11 @@ impl<C: ClientContext + 'static> ChainListener<C> {
         context: Arc<Mutex<C>>,
         storage: <C::Environment as Environment>::Storage,
         cancellation_token: CancellationToken,
-        command_receiver: UnboundedReceiver<ListenerCommand>,
+        command_receiver: Arc<Mutex<UnboundedReceiver<ListenerCommand>>>,
         enable_background_sync: bool,
     ) -> Self {
+        let (new_block_sender, _) = broadcast::channel(1024);
+
         Self {
             storage,
             context,
@@ -234,8 +283,10 @@ impl<C: ClientContext + 'static> ChainListener<C> {
             listening: Default::default(),
             event_subscribers: Default::default(),
             cancellation_token,
-            command_receiver,
+            command_receiver: command_receiver.clone(),
             enable_background_sync,
+
+            new_block_sender,
         }
     }
 
@@ -295,6 +346,30 @@ impl<C: ClientContext + 'static> ChainListener<C> {
         })
     }
 
+    #[instrument(skip(self))]
+    pub async fn run_with_chain_id(mut self, chain_id: ChainId) -> Result<(), Error> {
+        let chain_ids = {
+            let guard = self.context.lock().await;
+            let admin_chain_id = guard.wallet().genesis_admin_chain();
+            guard
+                .make_chain_client(admin_chain_id)
+                .await?
+                .synchronize_from_validators()
+                .await?;
+            [chain_id]
+                .into_iter()
+                .chain([admin_chain_id])
+                .map(|_chain_id| (_chain_id, ListeningMode::FullChain))
+                .collect::<BTreeMap<_, _>>()
+        };
+        self.listen_recursively(chain_ids).await
+    }
+
+    /// Let client subscribe
+    pub fn subscribe_new_block(&self) -> broadcast::Receiver<ChainId> {
+        self.new_block_sender.subscribe()
+    }
+
     /// Processes a notification, updating local chains and validators as needed.
     async fn process_notification(&mut self, notification: Notification) -> Result<(), Error> {
         let Some(listening_client) = self.listening.get(&notification.chain_id) else {
@@ -340,6 +415,8 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                     }
                     self.process_new_events(notification.chain_id).await?;
                 }
+
+                let _ = self.new_block_sender.send(notification.chain_id);
             }
             Reason::BlockExecuted { .. } => {}
         }
@@ -571,6 +648,9 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                     Box::pin(async move { stream.lock().await.next().await })
                 })
                 .collect::<Vec<_>>();
+
+            let mut receiver = self.command_receiver.lock().await;
+
             futures::select! {
                 () = self.cancellation_token.cancelled().fuse() => {
                     return Ok(Action::Stop);
@@ -578,13 +658,16 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                 () = self.storage.clock().sleep_until(timeout).fuse() => {
                     return Ok(Action::ProcessInbox(timeout_chain_id));
                 }
-                command = self.command_receiver.recv().then(async |maybe_command| {
+                command = receiver.recv().then(async |maybe_command| {
                     if let Some(command) = maybe_command {
                         command
                     } else {
                         std::future::pending().await
                     }
                 }).fuse() => {
+                    // TODO: optimize work around in future
+                    drop(receiver);
+
                     match command {
                         ListenerCommand::Listen(new_chains) => {
                             debug!(?new_chains, "received command to listen to new chains");

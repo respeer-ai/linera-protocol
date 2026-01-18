@@ -35,8 +35,10 @@ services:
       SCYLLA_AUTO_CONF: 1
     command:
       - "--developer-mode"
-      - "0"
+      - "1"
       - "--overprovisioned"
+      - "1"
+      - "--smp"
       - "1"
     healthcheck:
       test: ["CMD-SHELL", "cqlsh -e 'describe cluster' || exit 1"]

@@ -256,6 +256,30 @@ impl<Env: Environment> chain_listener::ClientContext for ClientContext<Env> {
     async fn update_wallet(&mut self, client: &ChainClient<Env>) -> Result<(), Error> {
         self.update_wallet_from_client(client).make_sync().await
     }
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        owner: AccountOwner,
+    ) -> Result<(), Error> {
+        self.assign_new_chain_to_key(chain_id, owner)
+            .make_sync()
+            .await
+    }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.set_owner_default_chain(owner, chain_id)
+            .make_sync()
+            .await
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.owner_default_chain(owner)
+    }
 }
 
 impl<S, Si, W> ClientContext<linera_core::environment::Impl<S, NodeProvider, Si, W>>
@@ -754,6 +778,22 @@ impl<Env: Environment> ClientContext<Env> {
             genesis_config_hash,
             chain_info,
         })
+    }
+
+    pub async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.wallet()
+            .set_owner_default_chain(owner, chain_id)
+            .await
+            .map_err(error::Inner::wallet)?;
+        Ok(())
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.wallet().owner_default_chain(owner)
     }
 }
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use futures::{Stream, StreamExt as _};
-use linera_base::identifiers::ChainId;
+use linera_base::identifiers::{AccountOwner, ChainId};
 
 use super::{Chain, Wallet};
 
@@ -114,5 +114,25 @@ impl Wallet for Memory {
         f: impl FnMut(&mut Chain) + Send,
     ) -> Result<Option<()>, Self::Error> {
         Ok(self.mutate(id, f))
+    }
+
+    async fn set_owner_default_chain(
+        &self,
+        _owner: AccountOwner,
+        _chain_id: ChainId,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    fn genesis_admin_chain(&self) -> ChainId {
+        unimplemented!()
+    }
+
+    fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error> {
+        Ok(self.get(chain_id).is_some())
+    }
+
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
+        None
     }
 }

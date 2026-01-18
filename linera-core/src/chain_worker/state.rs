@@ -253,6 +253,23 @@ where
             ChainWorkerRequest::GetManagerSeed { callback } => {
                 callback.send(self.get_manager_seed().await).is_ok()
             }
+            ChainWorkerRequest::StageBlockExecutionWithLocalTime {
+                block,
+                round,
+                published_blobs,
+                local_time,
+                callback,
+            } => callback
+                .send(
+                    self.stage_block_execution_with_local_time(
+                        block,
+                        round,
+                        &published_blobs,
+                        local_time,
+                    )
+                    .await,
+                )
+                .is_ok(),
         };
 
         if !responded {
@@ -1402,6 +1419,38 @@ where
             .await?;
         let outcome =
             Box::pin(self.execute_block(&block, local_time, round, published_blobs)).await?;
+
+        // No need to sign: only used internally.
+        let mut response = ChainInfoResponse::new(&self.chain, None);
+        if let Some(signer) = signer {
+            response.info.requested_owner_balance = self
+                .chain
+                .execution_state
+                .system
+                .balances
+                .get(&signer)
+                .await?;
+        }
+
+        Ok((outcome.with(block), response))
+    }
+
+    /// Executes a block without persisting any changes to the state.
+    pub(super) async fn stage_block_execution_with_local_time(
+        &mut self,
+        block: ProposedBlock,
+        round: Option<u32>,
+        published_blobs: &[Blob],
+        local_time: Timestamp,
+    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
+        self.initialize_and_save_if_needed().await?;
+        let signer = block.authenticated_signer;
+        let (_, committee) = self.chain.current_committee()?;
+        block.check_proposal_size(committee.policy().maximum_block_proposal_size)?;
+
+        let outcome = self
+            .execute_block(&block, local_time, round, published_blobs)
+            .await?;
 
         // No need to sign: only used internally.
         let mut response = ChainInfoResponse::new(&self.chain, None);

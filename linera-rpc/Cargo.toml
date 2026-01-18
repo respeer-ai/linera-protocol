@@ -73,6 +73,7 @@ tonic-health = { workspace = true, optional = true }
 tonic-reflection = { workspace = true, optional = true }
 tower.workspace = true
 tracing.workspace = true
+lazy_static.workspace = true
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml"] }
