@@ -283,7 +283,27 @@ impl TestValidator {
     /// it with the given key pair.
     pub async fn new_chain_with_keypair(&self, key_pair: AccountSecretKey) -> ActiveChain {
         let description = self
-            .request_new_chain_from_admin_chain(key_pair.public().into())
+            .request_new_chain_from_admin_chain(key_pair.public().into(), None)
+            .await;
+        let chain = ActiveChain::new(key_pair, description.clone(), self.clone());
+
+        chain.handle_received_messages().await;
+
+        self.chains.pin().insert(description.id(), chain.clone());
+
+        chain
+    }
+
+    pub async fn new_chain_with_keypair_and_application_permissions(
+        &self,
+        key_pair: AccountSecretKey,
+        application_permissions: ApplicationPermissions,
+    ) -> ActiveChain {
+        let description = self
+            .request_new_chain_from_admin_chain(
+                key_pair.public().into(),
+                Some(application_permissions),
+            )
             .await;
         let chain = ActiveChain::new(key_pair, description.clone(), self.clone());
 
@@ -301,6 +321,15 @@ impl TestValidator {
         self.new_chain_with_keypair(key_pair).await
     }
 
+    pub async fn new_chain_with_application_permissions(
+        &self,
+        application_permissions: ApplicationPermissions,
+    ) -> ActiveChain {
+        let key_pair = AccountSecretKey::generate();
+        self.new_chain_with_keypair_and_application_permissions(key_pair, application_permissions)
+            .await
+    }
+
     /// Adds an existing [`ActiveChain`].
     pub fn add_chain(&self, chain: ActiveChain) {
         self.chains.pin().insert(chain.id(), chain);
@@ -309,7 +338,11 @@ impl TestValidator {
     /// Adds a block to the admin chain to create a new chain.
     ///
     /// Returns the [`ChainDescription`] of the new chain.
-    async fn request_new_chain_from_admin_chain(&self, owner: AccountOwner) -> ChainDescription {
+    async fn request_new_chain_from_admin_chain(
+        &self,
+        owner: AccountOwner,
+        application_permissions: Option<ApplicationPermissions>,
+    ) -> ChainDescription {
         let admin_id = self.admin_chain_id;
         let pinned = self.chains.pin();
         let admin_chain = pinned
@@ -321,7 +354,8 @@ impl TestValidator {
         let open_chain_config = OpenChainConfig {
             ownership: ChainOwnership::single(owner),
             balance: Amount::from_tokens(10),
-            application_permissions: ApplicationPermissions::default(),
+            application_permissions: application_permissions
+                .unwrap_or(ApplicationPermissions::default()),
         };
         let new_chain_config = open_chain_config.init_chain_config(epoch, epoch, epoch);
 
