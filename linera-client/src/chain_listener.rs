@@ -681,7 +681,7 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                                             .extend_chain_mode(chain_id, ListeningMode::FullChain);
                                         let chain_description = context_guard
                                             .client()
-                                            .get_chain_description(chain_id)
+                                            .get_chain_description(chain_id, false)
                                             .await?;
                                         // Get existing chain info from wallet or use default
                                         let mut chain = context_guard

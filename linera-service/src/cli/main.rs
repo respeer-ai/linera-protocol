@@ -1581,7 +1581,7 @@ impl Runnable for Job {
                     .await?;
                 let chain_id = chain_id.unwrap_or_else(|| context.default_chain());
                 let chain_client = context.make_chain_client(chain_id).await?;
-                let description = match chain_client.get_chain_description().await {
+                let description = match chain_client.get_chain_description(false).await {
                     Ok(description) => description,
                     Err(ChainClientError::LocalNodeError(LocalNodeError::BlobsNotFound(_))) => {
                         println!("Could not find a chain description corresponding to the given chain ID.");

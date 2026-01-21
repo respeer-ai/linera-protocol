@@ -607,17 +607,20 @@ impl<Env: Environment> Client<Env> {
     pub async fn get_chain_description(
         &self,
         chain_id: ChainId,
+        force_update: bool,
     ) -> Result<ChainDescription, ChainClientError> {
         let chain_desc_id = BlobId::new(chain_id.0, BlobType::ChainDescription);
-        let blob = self
-            .local_node
-            .storage_client()
-            .read_blob(chain_desc_id)
-            .await?;
-        if let Some(blob) = blob {
-            // We have the blob - return it.
-            return Ok(bcs::from_bytes(blob.bytes())?);
-        };
+        if !force_update {
+            let blob = self
+                .local_node
+                .storage_client()
+                .read_blob(chain_desc_id)
+                .await?;
+            if let Some(blob) = blob {
+                // We have the blob - return it.
+                return Ok(bcs::from_bytes(blob.bytes())?);
+            };
+        }
         // Recover history from the current validators, according to the admin chain.
         Box::pin(self.synchronize_chain_state(self.admin_id)).await?;
         let nodes = self.validator_nodes().await?;
@@ -2149,8 +2152,13 @@ impl<Env: Environment> ChainClient<Env> {
     }
 
     /// Returns the chain's description. Fetches it from the validators if necessary.
-    pub async fn get_chain_description(&self) -> Result<ChainDescription, ChainClientError> {
-        self.client.get_chain_description(self.chain_id).await
+    pub async fn get_chain_description(
+        &self,
+        force_update: bool,
+    ) -> Result<ChainDescription, ChainClientError> {
+        self.client
+            .get_chain_description(self.chain_id, force_update)
+            .await
     }
 
     /// Obtains up to `self.options.max_pending_message_bundles` pending message bundles for the

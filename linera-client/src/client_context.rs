@@ -503,7 +503,7 @@ impl<Env: Environment> ClientContext<Env> {
         self.client
             .extend_chain_mode(chain_id, ListeningMode::FullChain);
         let client = self.make_chain_client(chain_id).await?;
-        let chain_description = client.get_chain_description().await?;
+        let chain_description = client.get_chain_description(true).await?;
         let config = chain_description.config();
 
         if !config.ownership.verify_owner(&owner) && !config.ownership.open_multi_leader_rounds {
@@ -952,7 +952,7 @@ impl<Env: Environment> ClientContext<Env> {
             // though it will eventually get those blobs, we're getting a head start here and
             // fetching those blobs in advance.
             for chain_id in &unknown_chain_ids {
-                self.client.get_chain_description(*chain_id).await?;
+                self.client.get_chain_description(*chain_id, false).await?;
             }
         }
 
