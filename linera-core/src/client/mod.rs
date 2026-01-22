@@ -2378,6 +2378,10 @@ impl<Env: Environment> ChainClient<Env> {
                 ChainClientError::InternalError("Invalid chain of blocks in local node")
             );
         }
+
+        // Patch committees
+        let info = self.chain_info_with_committees().await?;
+
         Ok(info)
     }
 
