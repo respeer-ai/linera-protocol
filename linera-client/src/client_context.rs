@@ -513,6 +513,8 @@ impl<Env: Environment> ClientContext<Env> {
             && !info.manager.ownership.open_multi_leader_rounds
         {
             tracing::error!(
+                ?chain_id,
+                ?owner,
                 "The chain with the ID returned by the faucet is not owned by you. \
                 Please make sure you are connecting to a genuine faucet."
             );

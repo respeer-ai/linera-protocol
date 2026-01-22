@@ -1498,7 +1498,8 @@ where
         block.check_proposal_size(policy.maximum_block_proposal_size)?;
         // Check the authentication of the block.
         ensure!(
-            chain.manager.verify_owner(&owner, proposal.content.round)?,
+            chain.manager.verify_owner(&owner, proposal.content.round)?
+                || chain.ownership().open_multi_leader_rounds,
             WorkerError::InvalidOwner
         );
         let old_round = self.chain.manager.current_round();
