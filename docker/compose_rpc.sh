@@ -74,6 +74,7 @@ fi
 
 if [ "x$GENERATE" == "x1" ]; then
   linera --wallet $RPC_DIR/wallet.json --keystore $RPC_DIR/keystore.json --storage rocksdb:$RPC_DIR/client.db wallet init --faucet $FAUCET_URL
+  linera --wallet $RPC_DIR/wallet.json --keystore $RPC_DIR/keystore.json --storage rocksdb:$RPC_DIR/client.db wallet request-chain --faucet $FAUCET_URL
 fi
 
 cd $SCRIPT_DIR

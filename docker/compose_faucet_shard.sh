@@ -9,6 +9,7 @@ LAN_IP=$( hostname -I | awk '{print $1}' )
 GENERATE=0
 FAUCET_URL=https://faucet.testnet-conway.linera.net
 CLUSTER=testnet-conway
+COMPILE=0
 
 options="f:z:g:"
 
@@ -45,20 +46,22 @@ mkdir -p $RESPEER_BIN_DIR
 # Cleanup before building
 docker stop faucet rpc
 docker rm faucet rpc
-docker stop `docker ps -a | grep linera-respeer | awk '{print $NF}'`
-docker rm `docker ps -a | grep linera-respeer | awk '{print $NF}'`
-docker rmi linera-respeer npool/linera-respeer
 
 ROOT_DIR=$SCRIPT_DIR/..
-
-cd "$ROOT_DIR"
-
 NGINX_TEMPLATE_FILE=$ROOT_DIR/configuration/template/nginx.conf.j2
 
-GIT_COMMIT=$(git rev-parse --short HEAD)
+if [ $COMPILE -eq 1 ]; then
+  docker stop `docker ps -a | grep linera-respeer | awk '{print $NF}'`
+  docker rm `docker ps -a | grep linera-respeer | awk '{print $NF}'`
+  docker rmi linera-respeer npool/linera-respeer
 
-docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,opentelemetry,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
-docker tag linera-respeer:latest docker.io/npool/linera-respeer:latest
+  cd "$ROOT_DIR"
+
+  GIT_COMMIT=$(git rev-parse --short HEAD)
+
+  docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,opentelemetry,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+  docker tag linera-respeer:latest docker.io/npool/linera-respeer:latest
+fi
 
 export PATH=$RESPEER_BIN_DIR:$PATH
 
