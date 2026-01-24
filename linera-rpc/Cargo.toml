@@ -104,6 +104,8 @@ wasm-bindgen-test.workspace = true
 cfg_aliases.workspace = true
 rcgen.workspace = true
 tonic-prost-build.workspace = true
+time.workspace = true
+time-core.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["prost", "tonic-prost"]
