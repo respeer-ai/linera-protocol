@@ -250,7 +250,7 @@ impl ClientContext for DummyContext {
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let _options = <Options as clap::Parser>::parse();
-    let (_, command_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
     let service = NodeService::new(
         ChainListenerConfig::default(),
         std::num::NonZeroU16::new(8080).unwrap(),
@@ -261,6 +261,7 @@ async fn main() -> std::io::Result<()> {
         false, // read-only mode disabled for schema export
         tokio_util::sync::CancellationToken::new(),
         Arc::new(Mutex::new(command_receiver)),
+        command_sender,
     )
     .await;
     let schema = service.schema().sdl();

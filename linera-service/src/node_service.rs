@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::{
-    borrow::Cow, collections::HashMap, future::IntoFuture, iter, net::SocketAddr, num::NonZeroU16,
+    borrow::Cow,
+    collections::{BTreeSet, HashMap},
+    future::IntoFuture,
+    iter,
+    net::SocketAddr,
+    num::NonZeroU16,
     sync::Arc,
 };
 
@@ -52,7 +57,10 @@ use linera_metrics::monitoring_server;
 use linera_sdk::linera_base_types::BlobContent;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
-use tokio::sync::{mpsc::UnboundedReceiver, OwnedRwLockReadGuard};
+use tokio::sync::{
+    mpsc::{UnboundedReceiver, UnboundedSender},
+    OwnedRwLockReadGuard,
+};
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tracing::{debug, error, info, instrument, trace};
@@ -85,6 +93,7 @@ where
     context: Arc<Mutex<C>>,
 
     chain_listener: Arc<Mutex<Option<ChainListener<C>>>>,
+    command_sender: UnboundedSender<ListenerCommand>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -808,6 +817,20 @@ where
         Ok(chain_id)
     }
 
+    /// Forget chain in some special case (e.g. let proxy cluster forget meme chain after meme mining started otherwise mine will fail)
+    async fn forget_chain(&self, chain_id: ChainId) -> Result<ChainId, Error> {
+        self.context.lock().await.wallet().remove(chain_id).await?;
+        if let Err(err) = self.command_sender.send(ListenerCommand::StopListening(
+            vec![chain_id].into_iter().collect::<BTreeSet<_>>(),
+        )) {
+            return Err(Error::new(format!(
+                "error sending a command to chain listener: {}",
+                err
+            )));
+        }
+        Ok(chain_id)
+    }
+
     /// Submit block proposal with signature
     async fn submit_signed_block(
         &self,
@@ -1345,6 +1368,7 @@ where
     read_only: bool,
 
     chain_listener: Arc<Mutex<Option<ChainListener<C>>>>,
+    command_sender: UnboundedSender<ListenerCommand>,
 }
 
 impl<C> Clone for NodeService<C>
@@ -1362,6 +1386,7 @@ where
             read_only: self.read_only,
 
             chain_listener: Arc::clone(&self.chain_listener),
+            command_sender: self.command_sender.clone(),
         }
     }
 }
@@ -1386,6 +1411,7 @@ where
         #[cfg(feature = "fake-chain-listener")] _command_receiver: Arc<
             Mutex<UnboundedReceiver<ListenerCommand>>,
         >,
+        command_sender: UnboundedSender<ListenerCommand>,
     ) -> Self {
         #[cfg(not(feature = "fake-chain-listener"))]
         let storage = context.lock().await.storage().clone();
@@ -1410,6 +1436,7 @@ where
             )))),
             #[cfg(feature = "fake-chain-listener")]
             chain_listener: Arc::new(Mutex::new(None)),
+            command_sender,
         }
     }
 
@@ -1438,6 +1465,7 @@ where
                         context: Arc::clone(&self.context),
 
                         chain_listener: Arc::clone(&self.chain_listener),
+                        command_sender: self.command_sender.clone(),
                     },
                     subscription,
                 )

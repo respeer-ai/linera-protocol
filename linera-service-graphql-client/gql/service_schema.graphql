@@ -1192,6 +1192,10 @@ type MutationRoot {
 	"""
 	importChain(owner: AccountOwner!, chainId: ChainId!, signature: AccountSignature!, creatorChainId: ChainId!): ChainId!
 	"""
+	Forget chain in some special case (e.g. let proxy cluster forget meme chain after meme mining started otherwise mine will fail)
+	"""
+	forgetChain(chainId: ChainId!): ChainId!
+	"""
 	Submit block proposal with signature
 	"""
 	submitSignedBlock(chainId: ChainId!, block: SignedBlock!): CryptoHash!

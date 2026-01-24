@@ -1131,6 +1131,7 @@ impl Runnable for Job {
                     read_only,
                     cancellation_token.clone(),
                     command_receiver.clone(),
+                    command_sender,
                 )
                 .await;
                 service.run(cancellation_token, command_receiver).await?;
