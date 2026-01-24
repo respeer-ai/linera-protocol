@@ -1114,7 +1114,7 @@ impl Runnable for Job {
                         chain_client,
                         cancellation_token.clone(),
                         operators,
-                        command_sender,
+                        command_sender.clone(),
                     );
 
                     tokio::spawn(controller.run());

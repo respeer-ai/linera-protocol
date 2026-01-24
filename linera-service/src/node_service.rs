@@ -818,7 +818,11 @@ where
     }
 
     /// Forget chain in some special case (e.g. let proxy cluster forget meme chain after meme mining started otherwise mine will fail)
-    async fn forget_chain(&self, chain_id: ChainId) -> Result<ChainId, Error> {
+    async fn forget_chain(&self, chain_id: ChainId) -> Result<Option<ChainId>, Error> {
+        if let None = self.context.lock().await.wallet().get(chain_id).await? {
+            return Ok(None);
+        }
+
         self.context.lock().await.wallet().remove(chain_id).await?;
         if let Err(err) = self.command_sender.send(ListenerCommand::StopListening(
             vec![chain_id].into_iter().collect::<BTreeSet<_>>(),
@@ -828,7 +832,7 @@ where
                 err
             )));
         }
-        Ok(chain_id)
+        Ok(Some(chain_id))
     }
 
     /// Submit block proposal with signature
