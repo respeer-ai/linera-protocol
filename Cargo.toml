@@ -303,6 +303,7 @@ lazy_static = "1.5.0"
 serde_alias = "0.0.2"
 time = "=0.3.41"
 time-core = "=0.1.4"
+home = "=0.5.11"
 
 linera-base = { version = "0.15.10", path = "./linera-base" }
 linera-chain = { version = "0.15.10", path = "./linera-chain" }

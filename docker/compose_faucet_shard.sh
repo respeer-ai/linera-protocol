@@ -11,13 +11,14 @@ FAUCET_URL=https://faucet.testnet-conway.linera.net
 CLUSTER=testnet-conway
 COMPILE=0
 
-options="f:z:g:"
+options="f:z:g:C:"
 
 while getopts $options opt; do
   case ${opt} in
     f) FAUCET_URL=${OPTARG} ;;
     z) CLUSTER=${OPTARG} ;;
     g) GENERATE=${OPTARG} ;;
+    C) COMPILE=${OPTARG} ;;
   esac
 done
 
