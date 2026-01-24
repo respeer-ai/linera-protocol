@@ -7,6 +7,7 @@
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+OUTPUT_DIR=$SCRIPT_DIR/../output
 
 RESPEER_BIN_DIR=$OUTPUT_DIR/respeer/bin
 mkdir -p $RESPEER_BIN_DIR

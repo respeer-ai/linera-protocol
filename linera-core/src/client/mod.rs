@@ -2996,6 +2996,7 @@ impl<Env: Environment> ChainClient<Env> {
             .await?
             .into_iter()
             .map(Transaction::ExecuteOperation)
+            .chain(operations.into_iter().map(Transaction::ExecuteOperation))
             .chain(
                 incoming_bundles
                     .into_iter()
@@ -3006,7 +3007,6 @@ impl<Env: Environment> ChainClient<Env> {
                     .into_iter()
                     .map(Transaction::ExecuteOperation),
             )
-            .chain(operations.into_iter().map(Transaction::ExecuteOperation))
             .collect::<Vec<_>>())
     }
 
