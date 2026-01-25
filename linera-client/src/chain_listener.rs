@@ -61,6 +61,16 @@ pub struct ChainListenerConfig {
         env = "LINERA_LISTENER_DELAY_AFTER"
     )]
     pub delay_after_ms: u64,
+
+    /// Do not create blocks automatically to receive incoming messages for
+    /// permissionless chain (open_multi_leader_rounds = true). Instead, wait for
+    /// an explicit mutation `processInbox`.
+    #[serde(default)]
+    #[arg(
+        long = "listener-skip-permissionless-chain",
+        env = "LINERA_LISTENER_SKIP_PERMISSIONLESS_CHAIN"
+    )]
+    pub skip_permissionless_chain: bool,
 }
 
 type ContextChainClient<C> = ChainClient<<C as ClientContext>::Environment>;
@@ -802,6 +812,11 @@ impl<C: ClientContext + 'static> ChainListener<C> {
         }
         if listening_client.client.preferred_owner().is_none() {
             debug!("Not processing inbox for follow-only chain {chain_id:.8}");
+            return Ok(());
+        }
+        let ownership = listening_client.client.query_chain_ownership().await?;
+        if self.config.skip_permissionless_chain && ownership.open_multi_leader_rounds {
+            debug!("Not processing inbox for permissionless chain {chain_id:.8} due to listener configuration");
             return Ok(());
         }
         debug!("Processing inbox for {chain_id:.8}");

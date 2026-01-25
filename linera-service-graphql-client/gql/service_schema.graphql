@@ -1194,7 +1194,7 @@ type MutationRoot {
 	"""
 	Forget chain in some special case (e.g. let proxy cluster forget meme chain after meme mining started otherwise mine will fail)
 	"""
-	forgetChain(chainId: ChainId!): ChainId!
+	forgetChain(chainId: ChainId!): ChainId
 	"""
 	Submit block proposal with signature
 	"""
