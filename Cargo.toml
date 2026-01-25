@@ -74,12 +74,36 @@ edition = "2021"
 
 [workspace.dependencies]
 allocative = "0.3.4"
-alloy = { version = "=1.0.5", default-features = false }
-alloy-primitives = { version = "=1.1.2", default-features = false, features = [
+alloy = { version = "=1.0.24", default-features = false }
+alloy-primitives = { version = "=1.3.0", default-features = false, features = [
     "serde",
     "k256",
 ] }
-alloy-sol-types = "=1.1.2"
+alloy-sol-types = "=1.3.0"
+alloy-consensus = "=1.0.24"
+alloy-consensus-any = "=1.0.24"
+alloy-contract = "=1.0.24"
+alloy-eip2930 = "=1.0.24"
+alloy-eip7702 = "=1.0.24"
+alloy-eip7928 = "=1.0.24"
+alloy-eips = "=1.0.24"
+alloy-genesis = "=1.0.24"
+alloy-json-rpc = "=1.0.24"
+alloy-network = "=1.0.24"
+alloy-network-primitives = "=1.0.24"
+alloy-node-bindings = "=1.0.24"
+alloy-provider = "=1.0.24"
+alloy-rpc-client = "=1.0.24"
+alloy-rpc-types = "=1.0.24"
+alloy-rpc-types-anvil = "=1.0.24"
+alloy-rpc-types-any = "=1.0.24"
+alloy-rpc-types-eth = "=1.0.24"
+alloy-serde = "=1.0.24"
+alloy-signer = "=1.0.24"
+alloy-signer-local = "=1.0.24"
+alloy-transport = "=1.0.24"
+alloy-transport-http = "=1.0.24"
+alloy-tx-macros = "=1.0.24"
 anyhow = "1.0.80"
 assert_matches = "1.5.0"
 async-graphql = "=7.0.17"
@@ -175,7 +199,7 @@ pathdiff = "0.2.1"
 port-selector = "0.1.6"
 prettyplease = "0.2.16"
 proc-macro-error = "1.0.4"
-proc-macro2 = "1.0"
+proc-macro2 = "=1.0.97"
 prometheus = "0.13.3"
 prometheus-parse = "0.2.5"
 proptest = { version = "1.6.0", default-features = false, features = ["alloc"] }
@@ -223,7 +247,7 @@ rocksdb = "0.21.0"
 ruzstd = "=0.8.1"
 scylla = "~1.1.0"
 semver = "1.0.22"
-serde = { version = "1.0.197", features = ["derive"] }
+serde = { version = "=1.0.219", features = ["derive"] }
 serde-command-opts = "0.1.1"
 serde-name = "0.2.1"
 serde-reflection = "0.3.6"
@@ -240,7 +264,7 @@ similar-asserts = "1.5.0"
 sqlx = "0.8"
 static_assertions = "1.1.0"
 stdext = "0.3.3"
-syn = "2.0.52"
+syn = "=2.0.109"
 sync_wrapper = { version = "1.0.1", features = ["futures"] }
 sysinfo = "0.33.1"
 tempfile = "3.20.0"
