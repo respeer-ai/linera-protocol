@@ -1,9 +1,5 @@
 #!/bin/bash
 
-####
-## E.g. ./compose_faucet.sh -f https://faucet.testnet-conway.linera.net -g 0
-####
-
 LAN_IP=$( hostname -I | awk '{print $1}' )
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
