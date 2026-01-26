@@ -60,7 +60,7 @@ if [ $COMPILE -eq 1 ]; then
 
   GIT_COMMIT=$(git rev-parse --short HEAD)
 
-  docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,opentelemetry,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+  docker build --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,opentelemetry,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
   docker tag linera-respeer:latest docker.io/npool/linera-respeer:latest
 fi
 
