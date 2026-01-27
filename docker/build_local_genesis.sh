@@ -19,6 +19,6 @@ cd "$ROOT_DIR"
 
 GIT_COMMIT=$(git rev-parse --short HEAD)
 
-docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="storage-service,metrics,memory-profiling,opentelemetry,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-local-genesis || exit 1
+docker build --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="storage-service,metrics,memory-profiling,opentelemetry,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-local-genesis || exit 1
 docker tag linera-local-genesis:latest docker.io/npool/linera-local-genesis:latest
 

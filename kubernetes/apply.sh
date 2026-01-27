@@ -29,8 +29,8 @@ SERVICES="faucet rpc"
 # kubectl -n kube-system rollout restart daemonset kube-flannel-ds-amd64
 # kubectl -n kube-system edit configmap kube-flannel-cfg
 
-export FAUCET_URL=https://faucet.testnet-conway.linera.net
 # export FAUCET_URL=http://local-genesis-service:8080
+export FAUCET_URL=${FAUCET_URL:-https://faucet.testnet-conway.linera.net}
 
 ######
 ## If contine deploy with testnet faucet, it should be 0
