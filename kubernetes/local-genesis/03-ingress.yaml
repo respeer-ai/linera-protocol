@@ -7,16 +7,12 @@ metadata:
     k8s.kuboard.cn/displayName: local-genesis-service
     k8s.kuboard.cn/workload: local-genesis-service
     kubernetes.io/ingress.class: "traefik-internet"
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure, web
-    traefik.ingress.kubernetes.io/router.middlewares:
-      kube-system-http-redirect-https@kubernetescrd,
-      kube-system-http-redirect-https-testing@kubernetescrd,
-      kube-system-common-headers@kubernetescrd
+    traefik.ingress.kubernetes.io/router.entrypoints: grpc
+    traefik.ingress.kubernetes.io/service.serversscheme: h2c
 
 spec:
   tls:
     - hosts:
-        - 'local-genesis.respeer.ai'
         - local-genesis.respeer.ai
       secretName: local-genesis-respeer-ai-tls
   rules:
