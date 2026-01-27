@@ -9,3 +9,4 @@ while [ $count -eq 1 ]; do
 done
 
 kubectl apply -f local-genesis/02-deployment.yaml
+kubectl apply -f local-genesis/03-ingress.yaml
