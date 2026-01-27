@@ -17,7 +17,7 @@ spec:
       - name: local-genesis-service
         image: npool/linera-local-genesis:latest
         imagePullPolicy: Always
-        command: ["./linera", "net", "up", "--with-faucet", "--faucet-port", "8080", "--external-protocol", "grpcs"]
+        command: ["./linera", "net", "up", "--with-faucet", "--faucet-port", "8080", "--external-protocol", "grpc"]
         env:
         - name: RUST_LOG
           value: info
