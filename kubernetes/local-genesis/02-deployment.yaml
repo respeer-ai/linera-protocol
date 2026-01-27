@@ -17,12 +17,14 @@ spec:
       - name: local-genesis-service
         image: npool/linera-local-genesis:latest
         imagePullPolicy: Always
-        command: ["./linera", "net", "up", "--with-faucet", "--faucet-port", "8080"]
+        command: ["./linera", "net", "up", "--with-faucet", "--faucet-port", "8080", "--external-protocol", "grpcs"]
         env:
         - name: RUST_LOG
-          value: debug
+          value: info
         - name: LOCALHOST_HOST
-          value: local-genesis-service
+          value: local-genesis.respeer.ai # local-genesis-service
+        - name: LOCALHOST_PORT
+          value: "443"
         resources:
           requests:
             cpu: "500m"
