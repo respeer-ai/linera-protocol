@@ -24,7 +24,7 @@ spec:
         - name: EXTERNAL_HOST
           value: local-genesis.respeer.ai # local-genesis-service
         - name: EXTERNAL_PORT
-          value: "443"
+          value: "80"
         resources:
           requests:
             cpu: "500m"
