@@ -21,9 +21,9 @@ spec:
         env:
         - name: RUST_LOG
           value: info
-        - name: LOCALHOST_HOST
+        - name: EXTERNAL_HOST
           value: local-genesis.respeer.ai # local-genesis-service
-        - name: LOCALHOST_PORT
+        - name: EXTERNAL_PORT
           value: "443"
         resources:
           requests:
