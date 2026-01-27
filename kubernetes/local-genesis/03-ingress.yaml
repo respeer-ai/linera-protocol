@@ -8,7 +8,7 @@ metadata:
     k8s.kuboard.cn/workload: local-genesis-service
     kubernetes.io/ingress.class: "traefik-internet"
     traefik.ingress.kubernetes.io/router.entrypoints: web, websecure
-    traefik.ingress.kubernetes.io/service.serversscheme: h2c
+    traefik.ingress.kubernetes.io/service.serversscheme: https
 
 spec:
   tls:
