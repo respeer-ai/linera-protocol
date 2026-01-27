@@ -41,16 +41,16 @@ metadata:
   namespace: kube-system
 spec:
   ports:
-    - name: local-genesis-service-faucet
+    - name: faucet
       port: 8080
       targetPort: 8080
-    - name: local-genesis-server
+    - name: server
       port: 9001
       targetPort: 9001
-    - name: local-genesis-proxy
+    - name: proxy
       port: 10001
       targetPort: 10001
-    - name: local-genesis-validator
+    - name: validator
       port: 13001
       targetPort: 13001
   selector:
