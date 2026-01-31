@@ -2189,7 +2189,7 @@ impl<Env: Environment> ChainClient<Env> {
             );
         }
 
-        tracing::info!(?info.requested_pending_message_bundles.length(), self.options.max_pending_message_bundles. "pending message bundles");
+        tracing::info!(?info.requested_pending_message_bundles.length(), ?self.options.max_pending_message_bundles, "pending message bundles");
 
         Ok(info
             .requested_pending_message_bundles
