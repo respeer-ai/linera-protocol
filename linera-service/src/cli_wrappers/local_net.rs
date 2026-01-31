@@ -510,8 +510,8 @@ impl LocalNet {
             .unwrap_or(self.proxy_public_port(n, 0));
         let external_protocol = self.network.external.toml();
         let internal_protocol = self.network.internal.toml();
-        let external_host = std::env::var("EXTERNAL_HOST")
-            .unwrap_or(self.network.external.localhost().to_string());
+        let external_host =
+            std::env::var("EXTERNAL_HOST").unwrap_or(self.network.external.localhost().to_string());
         let internal_host = self.network.internal.localhost();
         let mut content = format!(
             r#"
