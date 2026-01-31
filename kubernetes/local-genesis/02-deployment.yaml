@@ -39,6 +39,8 @@ kind: Service
 metadata:
   name: local-genesis-service
   namespace: kube-system
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: h2c
 spec:
   ports:
     - name: faucet
