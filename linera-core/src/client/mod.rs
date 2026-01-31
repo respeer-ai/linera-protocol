@@ -2189,7 +2189,12 @@ impl<Env: Environment> ChainClient<Env> {
             );
         }
 
-        info!(pending_messages=?info.requested_pending_message_bundles.len(), max_processing=?self.options.max_pending_message_bundles, "pending message bundles");
+        info!(
+            chain_id=?self.chain_id,
+            pending_messages=?info.requested_pending_message_bundles.len(),
+            max_processing=?self.options.max_pending_message_bundles,
+            "pending message bundles",
+        );
 
         Ok(info
             .requested_pending_message_bundles
