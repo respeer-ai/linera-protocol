@@ -3,6 +3,7 @@ set -e
 
 echo "Starting Linera Explorer..."
 
+<<<<<<< HEAD
 # Log database connection
 echo "Using PostgreSQL database"
 
@@ -11,6 +12,20 @@ echo "Starting services..."
 # Start the Rust API server in the background
 echo "Starting API server on port ${EXPLORER_API_PORT:-3002}..."
 ./linera-explorer-server &
+=======
+# Log which database type is being used
+if [ -n "$DATABASE_URL" ]; then
+    echo "Using PostgreSQL database"
+else
+    echo "Using SQLite database at ${DB_PATH:-/data/indexer.db}"
+fi
+
+echo "Starting services..."
+
+# Start the API server in the background
+echo "Starting API server on port ${EXPLORER_API_PORT:-3002}..."
+cd /app && node server/index.js &
+>>>>>>> respeer-maas-testnet_conway-d411bd6c-2026-01-18
 API_PID=$!
 
 # Wait a moment for API to start

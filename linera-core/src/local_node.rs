@@ -10,7 +10,7 @@ use std::{
 use futures::{stream::FuturesUnordered, TryStreamExt as _};
 use linera_base::{
     crypto::{CryptoHash, ValidatorPublicKey},
-    data_types::{ArithmeticError, Blob, BlockHeight, Epoch},
+    data_types::{ArithmeticError, Blob, BlockHeight, Epoch, Timestamp},
     identifiers::{BlobId, ChainId, StreamId},
 };
 use linera_chain::{
@@ -158,11 +158,12 @@ where
         round: Option<u32>,
         published_blobs: Vec<Blob>,
         policy: BundleExecutionPolicy,
+        local_time: Option<Timestamp>,
     ) -> Result<(ProposedBlock, Block, ChainInfoResponse, ResourceTracker), LocalNodeError> {
         Ok(self
             .node
             .state
-            .stage_block_execution_with_policy(block, round, published_blobs, policy)
+            .stage_block_execution_with_policy(block, round, published_blobs, policy, local_time)
             .await?)
     }
 

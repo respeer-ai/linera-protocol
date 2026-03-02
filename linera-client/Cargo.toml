@@ -48,7 +48,7 @@ anyhow.workspace = true
 bcs.workspace = true
 clap.workspace = true
 futures.workspace = true
-hdrhistogram = { workspace = true }
+hdrhistogram.workspace = true
 linera-base.workspace = true
 linera-chain.workspace = true
 linera-core.workspace = true
@@ -56,7 +56,7 @@ linera-execution.workspace = true
 linera-rpc.workspace = true
 linera-sdk.workspace = true
 linera-storage.workspace = true
-linera-version = { workspace = true }
+linera-version.workspace = true
 linera-views.workspace = true
 num-format.workspace = true
 prometheus-parse.workspace = true
@@ -87,7 +87,11 @@ fs-err = { workspace = true, optional = true }
 fs4 = { workspace = true, optional = true }
 papaya = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["full"] }
-linera-rpc = { workspace = true, features = ["server", "simple-network"] }
+linera-rpc = { workspace = true, features = [
+    "server",
+    "simple-network",
+    "transport",
+] }
 
 [build-dependencies]
 cfg_aliases.workspace = true

@@ -638,6 +638,26 @@ query Blocks($from: CryptoHash, $chainId: ChainId!, $limit: Int) {
   }
 }
 
+query PendingMessages($chainId: ChainId!) {
+  pendingMessages(chainId: $chainId) {
+    origin
+    bundle
+    action
+  }
+}
+
+query BlockMaterial($chainId: ChainId!, $maxPendingMessages: Int!) {
+	blockMaterial(chainId: $chainId, maxPendingMessages: $maxPendingMessages) {
+	    incomingBundles {
+            origin
+            bundle
+            action
+        }
+	    localTime
+	    round
+    }
+}
+
 subscription Notifications($chainId: ChainId!) {
   notifications(chainId: $chainId)
 }

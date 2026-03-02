@@ -171,7 +171,7 @@ impl Runnable for Job {
         let command = options.command.clone();
 
         use ClientCommand::*;
-        match command {
+        match std::mem::replace(&mut options.command, ClientCommand::Keygen) {
             Transfer {
                 sender,
                 recipient,
@@ -227,9 +227,12 @@ impl Runnable for Job {
 
                         let chain_client = chain_client.clone();
                         async move {
-                            chain_client
-                                .open_chain(ownership, ApplicationPermissions::default(), balance)
-                                .await
+                            Box::pin(chain_client.open_chain(
+                                ownership,
+                                ApplicationPermissions::default(),
+                                balance,
+                            ))
+                            .await
                         }
                     })
                     .await
@@ -237,6 +240,7 @@ impl Runnable for Job {
                 let timestamp = certificate.block().header.timestamp;
                 let epoch = certificate.block().header.epoch;
                 let id = description.id();
+                let epoch = description.config().epoch;
                 context
                     .update_wallet_for_new_chain(id, Some(new_owner), timestamp, epoch)
                     .await?;
@@ -276,9 +280,12 @@ impl Runnable for Job {
                         let application_permissions = application_permissions.clone();
                         let chain_client = chain_client.clone();
                         async move {
-                            chain_client
-                                .open_chain(ownership, application_permissions, balance)
-                                .await
+                            Box::pin(chain_client.open_chain(
+                                ownership,
+                                application_permissions,
+                                balance,
+                            ))
+                            .await
                         }
                     })
                     .await
@@ -1267,6 +1274,7 @@ impl Runnable for Job {
                 let context = Arc::new(Mutex::new(context));
 
                 let (command_sender, command_receiver) = mpsc::unbounded_channel();
+                let command_receiver = Arc::new(Mutex::new(command_receiver));
 
                 if let Some(controller_id) = controller_application_id {
                     // For the controller case, we share the context via Arc so the
@@ -1280,7 +1288,7 @@ impl Runnable for Job {
                         cancellation_token.clone(),
                         operators,
                         retry_delay,
-                        command_sender,
+                        command_sender.clone(),
                     );
 
                     tokio::spawn(controller.run());
@@ -1294,7 +1302,11 @@ impl Runnable for Job {
                     Some(chain_id),
                     context,
                     read_only,
-                );
+                    cancellation_token.clone(),
+                    command_receiver.clone(),
+                    command_sender,
+                )
+                .await;
                 service.run(cancellation_token, command_receiver).await?;
             }
 
@@ -1337,6 +1349,7 @@ impl Runnable for Job {
                     chain_listener_config: config,
                     storage_path,
                     max_batch_size,
+                    without_cache: true,
                 };
                 let faucet = FaucetService::new(config, context).await?;
                 let cancellation_token = CancellationToken::new();
@@ -2337,7 +2350,14 @@ async fn run(options: &Options) -> Result<i32, Error> {
         },
 
         ClientCommand::Storage(command) => {
-            Ok(options.run_with_store(DatabaseToolJob(command)).await?)
+            let assert_storage_v1 = matches!(
+                command,
+                DatabaseToolCommand::ListBlobIds | DatabaseToolCommand::ListChainIds
+            );
+            let need_migration = matches!(command, DatabaseToolCommand::Initialize { .. });
+            Ok(options
+                .run_with_store(assert_storage_v1, need_migration, DatabaseToolJob(command))
+                .await?)
         }
 
         ClientCommand::Wallet(wallet_command) => match wallet_command {

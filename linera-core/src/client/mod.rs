@@ -17,7 +17,9 @@ use futures::{
 use linera_base::prometheus_util::MeasureLatency as _;
 use linera_base::{
     crypto::{CryptoHash, Signer as _, ValidatorPublicKey},
-    data_types::{ArithmeticError, Blob, BlockHeight, ChainDescription, Epoch, TimeDelta},
+    data_types::{
+        ArithmeticError, Blob, BlockHeight, ChainDescription, Epoch, TimeDelta, Timestamp,
+    },
     ensure,
     identifiers::{AccountOwner, BlobId, BlobType, ChainId, StreamId},
     time::Duration,
@@ -1250,7 +1252,7 @@ impl<Env: Environment> Client<Env> {
     ///
     /// Whether manager values are fetched depends on the chain's follow-only state.
     #[instrument(level = "trace", skip_all)]
-    async fn synchronize_chain_state(
+    pub(crate) async fn synchronize_chain_state(
         &self,
         chain_id: ChainId,
     ) -> Result<Box<ChainInfo>, chain_client::Error> {
@@ -1374,10 +1376,8 @@ impl<Env: Environment> Client<Env> {
         }
         'proposal_loop: for proposal in proposals {
             let owner: AccountOwner = proposal.owner();
-            if let Err(mut err) = self
-                .local_node
-                .handle_block_proposal(proposal.clone())
-                .await
+            if let Err(mut err) =
+                Box::pin(self.local_node.handle_block_proposal(proposal.clone())).await
             {
                 if let LocalNodeError::BlobsNotFound(_) = &err {
                     let required_blob_ids = proposal.required_blob_ids().collect::<Vec<_>>();
@@ -1408,10 +1408,8 @@ impl<Env: Environment> Client<Env> {
                             .handle_pending_blobs(chain_id, blobs)
                             .await?;
                         // We found the missing blobs: retry.
-                        if let Err(new_err) = self
-                            .local_node
-                            .handle_block_proposal(proposal.clone())
-                            .await
+                        if let Err(new_err) =
+                            Box::pin(self.local_node.handle_block_proposal(proposal.clone())).await
                         {
                             err = new_err;
                         } else {
@@ -1425,10 +1423,8 @@ impl<Env: Environment> Client<Env> {
                         )
                         .await?;
                         // We found the missing blobs: retry.
-                        if let Err(new_err) = self
-                            .local_node
-                            .handle_block_proposal(proposal.clone())
-                            .await
+                        if let Err(new_err) =
+                            Box::pin(self.local_node.handle_block_proposal(proposal.clone())).await
                         {
                             err = new_err;
                         } else {
@@ -1564,6 +1560,7 @@ impl<Env: Environment> Client<Env> {
         round: Option<u32>,
         published_blobs: Vec<Blob>,
         policy: BundleExecutionPolicy,
+        local_time: Option<Timestamp>,
     ) -> Result<(Block, ChainInfoResponse), chain_client::Error> {
         loop {
             let result = self
@@ -1573,6 +1570,7 @@ impl<Env: Environment> Client<Env> {
                     round,
                     published_blobs.clone(),
                     policy,
+                    local_time,
                 )
                 .await;
             if let Err(LocalNodeError::BlobsNotFound(blob_ids)) = &result {
@@ -1672,6 +1670,7 @@ where
 
 /// Wrapper for `AbortHandle` that aborts when its dropped.
 #[must_use]
+#[derive(Clone)]
 pub struct AbortOnDrop(pub AbortHandle);
 
 impl Drop for AbortOnDrop {

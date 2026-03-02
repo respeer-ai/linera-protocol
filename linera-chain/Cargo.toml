@@ -45,6 +45,7 @@ strum.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+serde_alias.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

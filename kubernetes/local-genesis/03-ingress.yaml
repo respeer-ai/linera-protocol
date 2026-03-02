@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: local-genesis-ingress
+  namespace: kube-system
+  annotations:
+    k8s.kuboard.cn/displayName: local-genesis-service
+    k8s.kuboard.cn/workload: local-genesis-service
+    kubernetes.io/ingress.class: "traefik-internet"
+    traefik.ingress.kubernetes.io/router.entrypoints: web, websecure
+
+spec:
+  tls:
+    - hosts:
+        - local-genesis.respeer.ai
+      secretName: local-genesis-respeer-ai-tls
+  rules:
+    - host: local-genesis.respeer.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: local-genesis-service
+                port:
+                  name: validator

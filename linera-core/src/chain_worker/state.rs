@@ -177,9 +177,16 @@ where
                 published_blobs,
                 policy,
                 callback,
+                local_time,
             } => {
                 let result = self
-                    .stage_block_execution_with_policy(block, round, &published_blobs, policy)
+                    .stage_block_execution_with_policy(
+                        block,
+                        round,
+                        &published_blobs,
+                        policy,
+                        local_time,
+                    )
                     .await;
                 callback.send(result).is_ok()
             }
@@ -1490,6 +1497,7 @@ where
                 round,
                 published_blobs,
                 BundleExecutionPolicy::Abort,
+                None,
             )
             .await?;
         Ok((executed_block, response, resource_tracker))
@@ -1510,9 +1518,10 @@ where
         round: Option<u32>,
         published_blobs: &[Blob],
         policy: BundleExecutionPolicy,
+        local_time: Option<Timestamp>,
     ) -> Result<(ProposedBlock, Block, ChainInfoResponse, ResourceTracker), WorkerError> {
         self.initialize_and_save_if_needed().await?;
-        let local_time = self.storage.clock().current_time();
+        let local_time = local_time.unwrap_or(self.storage.clock().current_time());
         let (_, committee) = self.chain.current_committee()?;
         block.check_proposal_size(committee.policy().maximum_block_proposal_size)?;
 

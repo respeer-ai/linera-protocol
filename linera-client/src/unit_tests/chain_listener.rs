@@ -80,6 +80,26 @@ impl chain_listener::ClientContext for ClientContext {
         );
         Ok(())
     }
+
+    async fn assign_new_chain_to_owner(
+        &mut self,
+        _chain_id: ChainId,
+        _owner: AccountOwner,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        _owner: AccountOwner,
+        _chain_id: ChainId,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn save_wallet(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
 }
 
 /// Tests that the chain listener, if there is a message in the inbox, will continue requesting
@@ -267,12 +287,13 @@ async fn test_chain_listener_follow_only() -> anyhow::Result<()> {
     let context = Arc::new(Mutex::new(context));
     let cancellation_token = CancellationToken::new();
     let child_token = cancellation_token.child_token();
+    let (_command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
     let chain_listener = ChainListener::new(
         config,
         context.clone(),
         storage.clone(),
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        command_receiver,
         false, // Unit test doesn't need background sync
     )
     .run()

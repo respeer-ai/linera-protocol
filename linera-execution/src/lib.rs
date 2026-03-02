@@ -23,7 +23,7 @@ mod wasm;
 use std::{any::Any, collections::BTreeMap, fmt, ops::RangeInclusive, str::FromStr, sync::Arc};
 
 use allocative::Allocative;
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, SimpleObject};
 use async_trait::async_trait;
 use custom_debug_derive::Debug;
 use derive_more::Display;
@@ -87,6 +87,16 @@ pub const LINERA_TYPES_SOL: &str = include_str!("../solidity/LineraTypes.sol");
 
 /// The maximum length of a stream name.
 const MAX_STREAM_NAME_LEN: usize = 64;
+
+/// The flag that, if present in `http_request_allow_list` field of the content policy of
+/// current committee, causes the execution state not to be hashed, and instead the hash
+/// returned to be all zeros.
+// Note: testnet-only! This should not survive to mainnet.
+pub const FLAG_ZERO_HASH: &str = "FLAG_ZERO_HASH.linera.network";
+/// The flag that deactivates charging for bouncing messages. If this is present, outgoing
+/// messages are free of charge if they are bouncing, and operation outcomes are counted only
+/// by payload size, so that rejecting messages is free.
+pub const FLAG_FREE_REJECT: &str = "FLAG_FREE_REJECT.linera.network";
 
 /// An implementation of [`UserContractModule`].
 #[derive(Clone)]
@@ -1074,6 +1084,7 @@ pub enum Operation {
     System(Box<SystemOperation>),
     /// A user operation (in serialized form).
     User {
+        #[serde(alias = "application_id", alias = "applicationId")]
         application_id: ApplicationId,
         #[serde(with = "serde_bytes")]
         #[debug(with = "hex_debug")]
@@ -1188,7 +1199,10 @@ impl Display for MessageKind {
 }
 
 /// A posted message together with routing information.
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, Allocative)]
+#[derive(
+    Debug, PartialEq, Eq, Hash, Clone, Serialize, Deserialize, SimpleObject, Allocative, InputObject,
+)]
+#[graphql(input_name = "InputOutgoingMessage")]
 pub struct OutgoingMessage {
     /// The destination of the message.
     pub destination: ChainId,

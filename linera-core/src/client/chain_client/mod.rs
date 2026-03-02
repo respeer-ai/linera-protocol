@@ -18,7 +18,7 @@ use futures::{
 use linera_base::prometheus_util::MeasureLatency as _;
 use linera_base::{
     abi::Abi,
-    crypto::{signer, AccountPublicKey, CryptoHash, Signer, ValidatorPublicKey},
+    crypto::{signer, AccountPublicKey, AccountSignature, CryptoHash, Signer, ValidatorPublicKey},
     data_types::{
         Amount, ApplicationPermissions, ArithmeticError, Blob, BlobContent, BlockHeight,
         ChainDescription, Epoch, MessagePolicy, Round, Timestamp,
@@ -68,7 +68,7 @@ use super::{
     ListeningMode, PendingProposal, ReceiveCertificateMode, TimingType,
 };
 use crate::{
-    data_types::{ChainInfo, ChainInfoQuery, ClientOutcome, RoundTimeout},
+    data_types::{ChainInfo, ChainInfoQuery, ClientOutcome, RoundTimeout, UnsignedBlockProposal},
     environment::Environment,
     local_node::{LocalChainInfoExt as _, LocalNodeClient, LocalNodeError},
     node::{
@@ -283,6 +283,18 @@ pub enum Error {
          The committed certificate hash is {0}"
     )]
     Conflict(CryptoHash),
+
+    #[error("Mismatch block timestamp {0} != {1}")]
+    MismatchBlockTimestamp(u64, u64),
+
+    #[error("Invalid block round")]
+    InvalidBlockRound,
+
+    #[error("Waiting for finalizing block process")]
+    WaitFinalizingBlock,
+
+    #[error("Blobs not provided")]
+    BlobsNotProvided,
 }
 
 impl From<Infallible> for Error {
@@ -515,7 +527,7 @@ impl<Env: Environment> ChainClient<Env> {
     /// Obtains up to `self.options.max_pending_message_bundles` pending message bundles for the
     /// local chain.
     #[instrument(level = "trace")]
-    async fn pending_message_bundles(&self) -> Result<Vec<IncomingBundle>, Error> {
+    pub async fn pending_message_bundles(&self) -> Result<Vec<IncomingBundle>, Error> {
         if self.options.message_policy.is_ignore() {
             // Ignore all messages.
             return Ok(Vec::new());
@@ -1384,6 +1396,7 @@ impl<Env: Environment> ChainClient<Env> {
                 BundleExecutionPolicy::AutoRetry {
                     max_failures: self.options.max_block_limit_errors,
                 },
+                None,
             )
             .await?;
         let (proposed_block, _) = block.clone().into_proposal();
@@ -1398,7 +1411,7 @@ impl<Env: Environment> ChainClient<Env> {
     /// This will usually be the current time according to the local clock, but may be slightly
     /// ahead to make sure it's not earlier than the incoming messages or the previous block.
     #[instrument(level = "trace", skip(transactions))]
-    fn next_timestamp(&self, transactions: &[Transaction], block_time: Timestamp) -> Timestamp {
+    pub fn next_timestamp(&self, transactions: &[Transaction], block_time: Timestamp) -> Timestamp {
         let local_time = self.storage_client().clock().current_time();
         transactions
             .iter()
@@ -1555,6 +1568,7 @@ impl<Env: Environment> ChainClient<Env> {
                 BundleExecutionPolicy::AutoRetry {
                     max_failures: self.options.max_block_limit_errors,
                 },
+                None,
             )
             .await
         {
@@ -2900,6 +2914,294 @@ impl<Env: Environment> ChainClient<Env> {
         }
 
         Ok(())
+    }
+
+    #[tracing::instrument(level = "trace")]
+    /// Processes the last pending block. Assumes that the local chain is up to date.
+    pub async fn block_round(&self) -> Result<Round, Error> {
+        let info = self.prepare_chain().await?;
+
+        // let info = self.request_leader_timeout_if_needed().await?;
+        let identity = self.identity().await?;
+
+        // TODO: use latest process
+
+        match self.pending_proposal() {
+            Some(_) => match self.round_for_new_proposal(&info, &identity, true).await? {
+                Either::Left(round) => Ok(round),
+                Either::Right(_) => Err(Error::InvalidBlockRound),
+            },
+            None => Ok(info.manager.current_round),
+        }
+    }
+
+    pub async fn block_time(&self) -> Result<Timestamp, Error> {
+        let info = self.chain_info().await?;
+        Ok(info.timestamp)
+    }
+
+    pub async fn submit_external_signed_block_proposal_and_signature(
+        &self,
+        unsigned_block_proposal: UnsignedBlockProposal,
+        signature: AccountSignature,
+        blobs: Vec<Blob>,
+    ) -> Result<ConfirmedBlockCertificate, Error> {
+        let info = self.prepare_chain().await?;
+
+        let mutex = self.client_mutex();
+        let _guard = mutex.lock_owned().await;
+
+        // let info = self.request_leader_timeout_if_needed().await?;
+        let committee = self.local_committee().await?;
+
+        // If there is a validated block in the current round, finalize it.
+        if info.manager.has_locking_block_in_current_round()
+            && !info.manager.current_round.is_fast()
+        {
+            self.finalize_locking_block(info).await?;
+            return Err(Error::WaitFinalizingBlock);
+        }
+
+        let proposed_block = unsigned_block_proposal.clone().content.block.into();
+        let round = unsigned_block_proposal.content.round;
+        let outcome = unsigned_block_proposal.outcome;
+
+        let already_handled_locally = info
+            .manager
+            .already_handled_proposal(round, &proposed_block);
+        // TODO: should we use blob ids in ExecutedBlock instead ?
+        let blob_ids: Vec<BlobId> = proposed_block.published_blob_ids().into_iter().collect();
+        ensure!(blob_ids.len() == blobs.len(), Error::BlobsNotProvided);
+        for blob in blobs.clone() {
+            ensure!(blob_ids.contains(&blob.id()), Error::BlobsNotProvided);
+        }
+
+        let proposal = Box::new(BlockProposal {
+            content: unsigned_block_proposal.content.into(),
+            signature,
+            original_proposal: unsigned_block_proposal.original_proposal,
+        });
+
+        if !already_handled_locally {
+            // Check the final block proposal. This will be cheaper after #1401.
+            if let Err(err) = self
+                .client
+                .local_node
+                .handle_block_proposal(*proposal.clone())
+                .await
+            {
+                match err {
+                    LocalNodeError::BlobsNotFound(_) => {
+                        self.client
+                            .local_node
+                            .handle_pending_blobs(self.chain_id, blobs.clone())
+                            .await?;
+                        self.client
+                            .local_node
+                            .handle_block_proposal(*proposal.clone())
+                            .await?;
+                    }
+                    err => return Err(err.into()),
+                }
+            }
+        }
+
+        self.update_state(|state| {
+            state.set_pending_proposal(proposed_block.clone(), blobs.clone())
+        });
+
+        let block = Block::new(proposed_block, outcome);
+
+        let certificate = if round.is_fast() {
+            let hashed_value = ConfirmedBlock::new(block);
+            self.client
+                .submit_block_proposal(&committee, proposal, hashed_value)
+                .await?
+        } else {
+            let hashed_value = ValidatedBlock::new(block);
+            let certificate = self
+                .client
+                .submit_block_proposal(&committee, proposal, hashed_value)
+                .await?;
+            self.client.finalize_block(&committee, certificate).await?
+        };
+
+        self.update_validators(Some(&committee), Some(certificate.clone()))
+            .await?;
+
+        Ok(certificate)
+    }
+
+    #[tracing::instrument(level = "trace", skip(incoming_bundles))]
+    /// Returns a suitable timestamp for the next block.
+    ///
+    /// This will usually be the current time according to the local clock, but may be slightly
+    /// ahead to make sure it's not earlier than the incoming messages or the previous block.
+    fn next_timestamp_ext(
+        &self,
+        incoming_bundles: &[IncomingBundle],
+        local_time: Timestamp,
+        block_time: Timestamp,
+    ) -> Timestamp {
+        incoming_bundles
+            .iter()
+            .map(|msg| msg.bundle.timestamp)
+            .max()
+            .map_or(local_time, |timestamp| timestamp.max(local_time))
+            .max(block_time)
+    }
+
+    /// Sets the pending block, so that next time `process_pending_block_without_prepare` is
+    /// called, it will be proposed to the validators.
+    #[tracing::instrument(level = "trace", skip(incoming_bundles, operations))]
+    async fn new_block(
+        &self,
+        incoming_bundles: Vec<IncomingBundle>,
+        operations: Vec<Operation>,
+        blobs: Vec<Blob>,
+        local_time: Timestamp,
+    ) -> Result<Block, Error> {
+        let info = self.chain_info().await?;
+        let timestamp = self.next_timestamp_ext(&incoming_bundles, local_time, info.timestamp);
+        if timestamp != local_time {
+            return Err(Error::MismatchBlockTimestamp(
+                timestamp.micros(),
+                local_time.micros(),
+            ));
+        }
+        let identity = self.identity().await?;
+
+        let transactions = incoming_bundles
+            .into_iter()
+            .map(Transaction::ReceiveMessages)
+            .chain(operations.into_iter().map(Transaction::ExecuteOperation))
+            .collect::<Vec<_>>();
+        let block = ProposedBlock {
+            epoch: info.epoch,
+            chain_id: self.chain_id,
+            transactions,
+            previous_block_hash: info.block_hash,
+            height: info.next_block_height,
+            authenticated_owner: Some(identity),
+            timestamp,
+        };
+        // Make sure every incoming message succeeds and otherwise remove them.
+        // Also, compute the final certified hash while we're at it.
+
+        let info = self.chain_info_with_committees().await?;
+        // Use the round number assuming there are oracle responses.
+        // Using the round number during execution counts as an oracle.
+        // Accessing the round number in single-leader rounds where we are not the leader
+        // is not currently supported.
+        let round = match self.round_for_new_proposal(&info, &identity, true).await? {
+            Either::Left(round) => round.multi_leader(),
+            Either::Right(_) => None,
+        };
+
+        let (block, _) = self
+            .client
+            .stage_block_execution_with_policy(
+                block,
+                round,
+                blobs,
+                BundleExecutionPolicy::AutoRetry {
+                    max_failures: self.options.max_block_limit_errors,
+                },
+                Some(local_time),
+            )
+            .await?;
+
+        Ok(block)
+    }
+
+    pub async fn simulate_execute_block(
+        &self,
+        operations: Vec<Operation>,
+        incoming_bundles: Vec<IncomingBundle>,
+        blobs: Vec<Blob>,
+        local_time: Timestamp,
+    ) -> Result<Option<UnsignedBlockProposal>, Error> {
+        let mutex = self.client_mutex();
+        let _guard = mutex.lock_owned().await;
+
+        let _ = self.prepare_chain().await?;
+        let info = self.request_leader_timeout_if_needed().await?;
+
+        // If there is a validated block in the current round, finalize it.
+        if info.manager.has_locking_block_in_current_round()
+            && !info.manager.current_round.is_fast()
+        {
+            let _ = self.finalize_locking_block(info).await?;
+            return Ok(None);
+        }
+
+        let owner = self.identity().await?;
+        let local_node = &self.client.local_node;
+
+        let (block, _blobs) = if let Some(locking) = &info.manager.requested_locking {
+            match &**locking {
+                LockingBlock::Regular(certificate) => {
+                    let blob_ids = certificate.block().required_blob_ids();
+                    let blobs = local_node
+                        .get_locking_blobs(&blob_ids, self.chain_id)
+                        .await?
+                        .ok_or_else(|| Error::InternalError("Missing local locking blobs"))?;
+                    debug!("Retrying locking block from round {}", certificate.round);
+                    (certificate.block().clone(), blobs)
+                }
+                LockingBlock::Fast(proposal) => {
+                    let proposed_block = proposal.content.block.clone();
+                    let blob_ids = proposed_block.published_blob_ids();
+                    let blobs = local_node
+                        .get_locking_blobs(&blob_ids, self.chain_id)
+                        .await?
+                        .ok_or_else(|| Error::InternalError("Missing local locking blobs"))?;
+                    let block = self
+                        .client
+                        .stage_block_execution(proposed_block, None, blobs.clone())
+                        .await?
+                        .0;
+                    debug!("Retrying locking block from fast round.");
+                    (block, blobs)
+                }
+            }
+        } else {
+            let block = self
+                .new_block(incoming_bundles, operations, blobs.clone(), local_time)
+                .await?;
+            (block, blobs)
+        };
+
+        let has_oracle_responses = block.has_oracle_responses();
+        let (proposed_block, outcome) = block.into_proposal();
+        let round = match self
+            .round_for_new_proposal(&info, &owner, has_oracle_responses)
+            .await?
+        {
+            Either::Left(round) => round,
+            Either::Right(_) => return Ok(None),
+        };
+        debug!("Proposing block for round {}", round);
+
+        // Create the final block proposal.
+        let proposal = if let Some(locking) = info.manager.requested_locking {
+            Box::new(match *locking {
+                LockingBlock::Regular(cert) => {
+                    UnsignedBlockProposal::new_retry_regular(round, cert, outcome)
+                }
+                LockingBlock::Fast(proposal) => {
+                    UnsignedBlockProposal::new_retry_fast(round, proposal, outcome)
+                }
+            })
+        } else {
+            Box::new(UnsignedBlockProposal::new_initial(
+                round,
+                proposed_block.clone(),
+                outcome,
+            ))
+        };
+
+        return Ok(Some(*proposal));
     }
 }
 

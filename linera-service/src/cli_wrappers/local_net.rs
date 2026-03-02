@@ -528,10 +528,14 @@ impl LocalNet {
             .path_provider
             .path()
             .join(format!("validator_{n}.toml"));
-        let port = self.proxy_public_port(n, 0);
+        let port = std::env::var("EXTERNAL_PORT")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(self.proxy_public_port(n, 0));
         let external_protocol = self.network.external.toml();
         let internal_protocol = self.network.internal.toml();
-        let external_host = self.network.external.localhost();
+        let external_host =
+            std::env::var("EXTERNAL_HOST").unwrap_or(self.network.external.localhost().to_string());
         let internal_host = self.network.internal.localhost();
         let mut content = format!(
             r#"

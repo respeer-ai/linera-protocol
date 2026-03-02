@@ -154,13 +154,16 @@ where
             Some(async move { (remote_node.public_key, execute(remote_node).await) })
         })
         .collect();
+    let total_validators = responses.len();
 
     let start_time = Instant::now();
+    tracing::debug!(total_validators, "starting communicate_with_quorum");
     let mut end_time: Option<Instant> = None;
     let mut remaining_votes = committee.total_votes();
     let mut highest_key_score = 0;
     let mut value_scores: HashMap<K, (u64, Vec<(ValidatorPublicKey, V)>)> = HashMap::new();
     let mut error_scores = HashMap::new();
+    let mut responses_received = 0;
 
     'vote_wait: while let Ok(Some((name, result))) = timeout(
         end_time.map_or(MAX_TIMEOUT, |t| t.saturating_duration_since(Instant::now())),
@@ -168,6 +171,7 @@ where
     )
     .await
     {
+        responses_received += 1;
         remaining_votes -= committee.weight(&name);
         match result {
             Ok(value) => {
@@ -200,6 +204,12 @@ where
             end_time = Some(Instant::now() + start_time.elapsed().mul_f64(quorum_grace_period));
         }
     }
+    tracing::debug!(
+        total_wait_ms = start_time.elapsed().as_millis(),
+        responses_received,
+        total_validators,
+        "exiting communicate_with_quorum loop"
+    );
 
     let scores = value_scores
         .values()
@@ -471,6 +481,29 @@ where
                 .await
             {
                 Ok(info) => return Ok(info),
+                Err(ref err) if err.parse_invalid_timestamp().is_some() => {
+                    let invalid_ts = err.parse_invalid_timestamp().unwrap();
+                    // The validator's clock is behind the block's timestamp. We need to
+                    // wait for two things:
+                    // 1. Our clock to reach block_timestamp (in case the block timestamp
+                    //    is in the future from our perspective too).
+                    // 2. The validator's clock to catch up (in case of clock skew between
+                    //    us and the validator).
+                    let clock_skew = local_time.delta_since(invalid_ts.validator_local_time);
+                    tracing::debug!(
+                        remote_node = self.remote_node.address(),
+                        %chain_id,
+                        block_timestamp = %invalid_ts.block_timestamp,
+                        ?clock_skew,
+                        "validator's clock is behind; waiting and retrying",
+                    );
+                    // Report the clock skew before sleeping so the caller can aggregate.
+                    let _ = clock_skew_sender.send((self.remote_node.public_key, clock_skew));
+                    storage
+                        .clock()
+                        .sleep_until(invalid_ts.block_timestamp.saturating_add(clock_skew))
+                        .await;
+                }
                 Err(NodeError::WrongRound(_round)) => {
                     // The proposal is for a different round, so we need to update the validator.
                     // TODO: this should probably be more specific as to which rounds are retried.

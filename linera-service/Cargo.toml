@@ -61,6 +61,9 @@ memory-profiling = [
 ]
 storage-service = ["linera-storage-service"]
 opentelemetry = ["linera-rpc/opentelemetry"]
+enable-wallet-rpc = []
+disable-native-rpc = []
+fake-chain-listener = []
 
 [dependencies]
 alloy-primitives.workspace = true
@@ -69,6 +72,7 @@ anyhow.workspace = true
 assert_matches.workspace = true
 async-graphql.workspace = true
 async-graphql-axum.workspace = true
+async-graphql-value.workspace = true
 async-lock.workspace = true
 async-trait.workspace = true
 async-tungstenite.workspace = true
@@ -199,6 +203,7 @@ test-log = { workspace = true, features = ["trace"] }
 test-strategy.workspace = true
 tokio = { workspace = true, features = ["full", "test-util"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
+home.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["tonic-prost"]
@@ -218,6 +223,7 @@ path = "src/proxy/main.rs"
 [[bin]]
 name = "linera-schema-export"
 path = "src/schema_export.rs"
+required-features = ["fake-chain-listener"]
 
 [[bin]]
 name = "linera-benchmark"
