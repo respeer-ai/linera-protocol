@@ -171,7 +171,7 @@ impl Runnable for Job {
         let command = options.command.clone();
 
         use ClientCommand::*;
-        match std::mem::replace(&mut options.command, ClientCommand::Keygen) {
+        match command {
             Transfer {
                 sender,
                 recipient,
@@ -240,7 +240,6 @@ impl Runnable for Job {
                 let timestamp = certificate.block().header.timestamp;
                 let epoch = certificate.block().header.epoch;
                 let id = description.id();
-                let epoch = description.config().epoch;
                 context
                     .update_wallet_for_new_chain(id, Some(new_owner), timestamp, epoch)
                     .await?;
@@ -844,7 +843,7 @@ impl Runnable for Job {
                             shared_context.clone(),
                             storage.clone(),
                             shutdown_notifier.clone(),
-                            mpsc::unbounded_channel().1,
+                            Arc::new(Mutex::new(mpsc::unbounded_channel().1)),
                             true, // Enabling background sync for benchmarks
                         );
                         let all_chain_ids: Vec<ChainId> =
@@ -2350,14 +2349,7 @@ async fn run(options: &Options) -> Result<i32, Error> {
         },
 
         ClientCommand::Storage(command) => {
-            let assert_storage_v1 = matches!(
-                command,
-                DatabaseToolCommand::ListBlobIds | DatabaseToolCommand::ListChainIds
-            );
-            let need_migration = matches!(command, DatabaseToolCommand::Initialize { .. });
-            Ok(options
-                .run_with_store(assert_storage_v1, need_migration, DatabaseToolJob(command))
-                .await?)
+            Ok(options.run_with_store(DatabaseToolJob(command)).await?)
         }
 
         ClientCommand::Wallet(wallet_command) => match wallet_command {
