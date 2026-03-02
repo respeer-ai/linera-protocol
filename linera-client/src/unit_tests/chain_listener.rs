@@ -81,7 +81,7 @@ impl chain_listener::ClientContext for ClientContext {
         Ok(())
     }
 
-    async fn assign_new_chain_to_owner(
+    async fn assign_new_chain_to_key(
         &mut self,
         _chain_id: ChainId,
         _owner: AccountOwner,
@@ -94,10 +94,6 @@ impl chain_listener::ClientContext for ClientContext {
         _owner: AccountOwner,
         _chain_id: ChainId,
     ) -> Result<(), Error> {
-        Ok(())
-    }
-
-    async fn save_wallet(&mut self) -> Result<(), Error> {
         Ok(())
     }
 }
@@ -176,7 +172,7 @@ async fn test_chain_listener() -> anyhow::Result<()> {
         context,
         storage,
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        Arc::new(Mutex::new(tokio::sync::mpsc::unbounded_channel().1)),
         false, // Unit test doesn't need background sync
     )
     .run()
@@ -293,7 +289,7 @@ async fn test_chain_listener_follow_only() -> anyhow::Result<()> {
         context.clone(),
         storage.clone(),
         child_token,
-        command_receiver,
+        Arc::new(Mutex::new(command_receiver)),
         false, // Unit test doesn't need background sync
     )
     .run()
@@ -421,7 +417,7 @@ async fn test_chain_listener_admin_chain() -> anyhow::Result<()> {
         context,
         storage.clone(),
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        Arc::new(Mutex::new(tokio::sync::mpsc::unbounded_channel().1)),
         false, // Unit test doesn't need background sync
     )
     .run()
@@ -503,7 +499,7 @@ async fn test_chain_listener_listen_command_adds_chains_to_wallet() -> anyhow::R
         context.clone(),
         storage.clone(),
         child_token,
-        command_receiver,
+        Arc::new(Mutex::new(command_receiver)),
         false,
     )
     .run()
@@ -645,7 +641,7 @@ async fn test_listener_uses_autosigner_for_incoming_messages() -> anyhow::Result
         context,
         storage.clone(),
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        Arc::new(Mutex::new(tokio::sync::mpsc::unbounded_channel().1)),
         false,
     )
     .run()

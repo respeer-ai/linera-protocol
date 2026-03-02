@@ -450,6 +450,7 @@ where
             None,
             vec![],
             BundleExecutionPolicy::AutoRetry { max_failures: 3 },
+            None,
         )
         .await?;
 
@@ -476,6 +477,7 @@ where
             None,
             vec![],
             BundleExecutionPolicy::Abort,
+            None,
         )
         .await?;
 

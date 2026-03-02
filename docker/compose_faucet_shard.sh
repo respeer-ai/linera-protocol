@@ -51,12 +51,12 @@ docker rm faucet rpc
 ROOT_DIR=$SCRIPT_DIR/..
 NGINX_TEMPLATE_FILE=$ROOT_DIR/configuration/template/nginx.conf.j2
 
+cd "$ROOT_DIR"
+
 if [ $COMPILE -eq 1 ]; then
   docker stop `docker ps -a | grep linera-respeer | awk '{print $NF}'`
   docker rm `docker ps -a | grep linera-respeer | awk '{print $NF}'`
   docker rmi linera-respeer npool/linera-respeer
-
-  cd "$ROOT_DIR"
 
   GIT_COMMIT=$(git rev-parse --short HEAD)
 
