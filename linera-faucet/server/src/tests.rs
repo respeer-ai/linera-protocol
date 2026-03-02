@@ -77,7 +77,7 @@ impl chain_listener::ClientContext for ClientContext {
         Ok(())
     }
 
-    async fn assign_new_chain_to_owner(
+    async fn assign_new_chain_to_key(
         &mut self,
         _chain_id: ChainId,
         _owner: AccountOwner,
@@ -93,8 +93,8 @@ impl chain_listener::ClientContext for ClientContext {
         Ok(())
     }
 
-    async fn save_wallet(&mut self) -> Result<(), linera_client::Error> {
-        Ok(())
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
+        None
     }
 }
 

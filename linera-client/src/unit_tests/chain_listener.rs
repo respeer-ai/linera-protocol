@@ -96,6 +96,10 @@ impl chain_listener::ClientContext for ClientContext {
     ) -> Result<(), Error> {
         Ok(())
     }
+
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
+        None
+    }
 }
 
 /// Tests that the chain listener, if there is a message in the inbox, will continue requesting

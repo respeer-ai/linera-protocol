@@ -72,3 +72,4 @@ strip = 'debuginfo'
 
 [profile.bench]
 debug = true
+
