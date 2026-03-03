@@ -1376,8 +1376,10 @@ impl<Env: Environment> Client<Env> {
         }
         'proposal_loop: for proposal in proposals {
             let owner: AccountOwner = proposal.owner();
-            if let Err(mut err) =
-                Box::pin(self.local_node.handle_block_proposal(proposal.clone())).await
+            if let Err(mut err) = self
+                .local_node
+                .handle_block_proposal(proposal.clone())
+                .await
             {
                 if let LocalNodeError::BlobsNotFound(_) = &err {
                     let required_blob_ids = proposal.required_blob_ids().collect::<Vec<_>>();
@@ -1408,8 +1410,10 @@ impl<Env: Environment> Client<Env> {
                             .handle_pending_blobs(chain_id, blobs)
                             .await?;
                         // We found the missing blobs: retry.
-                        if let Err(new_err) =
-                            Box::pin(self.local_node.handle_block_proposal(proposal.clone())).await
+                        if let Err(new_err) = self
+                            .local_node
+                            .handle_block_proposal(proposal.clone())
+                            .await
                         {
                             err = new_err;
                         } else {
@@ -1423,8 +1427,10 @@ impl<Env: Environment> Client<Env> {
                         )
                         .await?;
                         // We found the missing blobs: retry.
-                        if let Err(new_err) =
-                            Box::pin(self.local_node.handle_block_proposal(proposal.clone())).await
+                        if let Err(new_err) = self
+                            .local_node
+                            .handle_block_proposal(proposal.clone())
+                            .await
                         {
                             err = new_err;
                         } else {

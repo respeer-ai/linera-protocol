@@ -479,13 +479,13 @@ where
             tokio::select! {
                 _ = self.request_notifier.notified() => {
                     if let Err(e) = self.process_batch().await {
-                        tracing::error!(?e, "batch processing error");
+                        tracing::error!("Batch processing error: {}", e);
                     }
                 }
                 _ = cancellation_token.cancelled() => {
                     // Process any remaining requests before shutting down
                     if let Err(e) = self.process_batch().await {
-                        tracing::error!(?e, "final batch processing error");
+                        tracing::error!("Final batch processing error: {}", e);
                     }
                     break;
                 }
@@ -654,6 +654,7 @@ where
             .await
             .update_wallet(&self.client)
             .await?;
+
         let certificate = match result {
             Err(chain_client::Error::LocalNodeError(LocalNodeError::WorkerError(
                 WorkerError::ChainError(chain_err),
@@ -748,7 +749,6 @@ where
             .iter()
             .map(|(owner, description)| (*owner, description.id()))
             .collect();
-
         if let Err(e) = self
             .faucet_storage
             .store_chains_batch(chains_to_store)
