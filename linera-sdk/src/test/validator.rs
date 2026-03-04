@@ -297,10 +297,43 @@ impl TestValidator {
     }
 
     /// Creates a new microchain and returns the [`ActiveChain`] that can be used to add blocks to
+    /// it with the given key pair and permissions.
+    pub async fn new_chain_with_keypair_and_application_permissions(
+        &self,
+        key_pair: AccountSecretKey,
+        application_permissions: ApplicationPermissions,
+    ) -> ActiveChain {
+        let description = self
+            .request_new_chain_from_admin_chain(
+                key_pair.public().into(),
+                Some(application_permissions),
+            )
+            .await;
+        let chain = ActiveChain::new(key_pair, description.clone(), self.clone());
+
+        chain.handle_received_messages().await;
+
+        self.chains.pin().insert(description.id(), chain.clone());
+
+        chain
+    }
+
+    /// Creates a new microchain and returns the [`ActiveChain`] that can be used to add blocks to
     /// it.
     pub async fn new_chain(&self) -> ActiveChain {
         let key_pair = AccountSecretKey::generate();
         self.new_chain_with_keypair(key_pair).await
+    }
+
+    /// Creates a new microchain and returns the [`ActiveChain`] that can be used to add blocks to
+    /// it with the given permissions.
+    pub async fn new_chain_with_application_permissions(
+        &self,
+        application_permissions: ApplicationPermissions,
+    ) -> ActiveChain {
+        let key_pair = AccountSecretKey::generate();
+        self.new_chain_with_keypair_and_application_permissions(key_pair, application_permissions)
+            .await
     }
 
     /// Adds an existing [`ActiveChain`].

@@ -111,6 +111,7 @@ echo -e "   http://${SUB_DOMAIN}rpc.respeer.ai/api/rpc\n\n"
 
 function run_rpc_service() {
     linera --wallet $WALLET_DIR/rpc/wallet.json \
+           --keystore $WALLET_DIR/rpc/keystore.json \
            --storage rocksdb://$WALLET_DIR/rpc/client.db \
            service \
            --listener-skip-process-inbox \
