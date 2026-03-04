@@ -285,7 +285,7 @@ impl TestValidator {
     /// it with the given key pair.
     pub async fn new_chain_with_keypair(&self, key_pair: AccountSecretKey) -> ActiveChain {
         let description = self
-            .request_new_chain_from_admin_chain(key_pair.public().into())
+            .request_new_chain_from_admin_chain(key_pair.public().into(), None)
             .await;
         let chain = ActiveChain::new(key_pair, description.clone(), self.clone());
 
@@ -344,7 +344,11 @@ impl TestValidator {
     /// Adds a block to the admin chain to create a new chain.
     ///
     /// Returns the [`ChainDescription`] of the new chain.
-    async fn request_new_chain_from_admin_chain(&self, owner: AccountOwner) -> ChainDescription {
+    async fn request_new_chain_from_admin_chain(
+        &self,
+        owner: AccountOwner,
+        application_permissions: Option<ApplicationPermissions>,
+    ) -> ChainDescription {
         let admin_chain_id = self.admin_chain_id;
         let pinned = self.chains.pin();
         let admin_chain = pinned
@@ -354,7 +358,8 @@ impl TestValidator {
         let open_chain_config = OpenChainConfig {
             ownership: ChainOwnership::single(owner),
             balance: Amount::from_tokens(10),
-            application_permissions: ApplicationPermissions::default(),
+            application_permissions: application_permissions
+                .unwrap_or(ApplicationPermissions::default()),
         };
 
         // Query the admin chain's committees to get the correct min/max active epochs,
