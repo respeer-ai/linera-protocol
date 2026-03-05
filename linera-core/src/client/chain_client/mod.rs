@@ -650,7 +650,7 @@ impl<Env: Environment> ChainClient<Env> {
     ///
     /// Returns an error if we don't have the private key for the identity.
     #[instrument(level = "trace")]
-    pub async fn identity(&self) -> Result<AccountOwner, Error> {
+    pub async fn identity(&self, must_has_signer: bool) -> Result<AccountOwner, Error> {
         let Some(preferred_owner) = self.preferred_owner else {
             return Err(Error::NoAccountKeyConfigured(self.chain_id));
         };
@@ -687,7 +687,7 @@ impl<Env: Environment> ChainClient<Env> {
 
         let has_signer = self.has_key_for(&preferred_owner).await?;
 
-        if !has_signer {
+        if !has_signer && must_has_signer {
             warn!(%self.chain_id, ?preferred_owner,
                 "Chain is one of the owners but its Signer instance doesn't contain the key",
             );
@@ -705,11 +705,17 @@ impl<Env: Environment> ChainClient<Env> {
     /// Returns the chain info if the owner can propose on this chain (either because they are
     /// an owner, or because `open_multi_leader_rounds` is enabled).
     #[instrument(level = "trace")]
-    pub async fn prepare_for_owner(&self, owner: AccountOwner) -> Result<Box<ChainInfo>, Error> {
-        ensure!(
-            self.has_key_for(&owner).await?,
-            Error::CannotFindKeyForChain(self.chain_id)
-        );
+    pub async fn prepare_for_owner(
+        &self,
+        owner: AccountOwner,
+        must_has_signer: bool,
+    ) -> Result<Box<ChainInfo>, Error> {
+        if must_has_signer {
+            ensure!(
+                self.has_key_for(&owner).await?,
+                Error::CannotFindKeyForChain(self.chain_id)
+            );
+        }
         // Ensure we have the chain description blob.
         self.client
             .get_chain_description_blob(self.chain_id)
@@ -1363,7 +1369,7 @@ impl<Env: Environment> ChainClient<Env> {
         transactions: Vec<Transaction>,
         blobs: Vec<Blob>,
     ) -> Result<Block, Error> {
-        let identity = self.identity().await?;
+        let identity = self.identity(true).await?;
 
         ensure!(
             self.pending_proposal().is_none(),
@@ -1718,7 +1724,7 @@ impl<Env: Environment> ChainClient<Env> {
         {
             return self.finalize_locking_block(info).await;
         }
-        let owner = self.identity().await?;
+        let owner = self.identity(true).await?;
 
         let local_node = &self.client.local_node;
         // Otherwise we have to re-propose the highest validated block, if there is one.
@@ -2922,7 +2928,7 @@ impl<Env: Environment> ChainClient<Env> {
         let info = self.prepare_chain().await?;
 
         // let info = self.request_leader_timeout_if_needed().await?;
-        let identity = self.identity().await?;
+        let identity = self.identity(false).await?;
 
         // TODO: use latest process
 
@@ -3069,7 +3075,7 @@ impl<Env: Environment> ChainClient<Env> {
                 local_time.micros(),
             ));
         }
-        let identity = self.identity().await?;
+        let identity = self.identity(false).await?;
 
         let transactions = incoming_bundles
             .into_iter()
@@ -3135,7 +3141,7 @@ impl<Env: Environment> ChainClient<Env> {
             return Ok(None);
         }
 
-        let owner = self.identity().await?;
+        let owner = self.identity(false).await?;
         let local_node = &self.client.local_node;
 
         let (block, _blobs) = if let Some(locking) = &info.manager.requested_locking {

@@ -81,6 +81,7 @@ impl chain_listener::ClientContext for ClientContext {
         &mut self,
         _chain_id: ChainId,
         _owner: AccountOwner,
+        _must_has_signer: bool,
     ) -> Result<(), linera_client::Error> {
         Ok(())
     }

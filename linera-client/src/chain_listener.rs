@@ -141,6 +141,7 @@ pub trait ClientContext {
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
+        must_has_signer: bool,
     ) -> Result<(), Error>;
 
     async fn set_owner_default_chain(

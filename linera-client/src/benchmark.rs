@@ -747,7 +747,7 @@ impl<Env: Environment> Benchmark<Env> {
         }
 
         let owner = chain_client
-            .identity()
+            .identity(true)
             .await
             .map_err(BenchmarkError::ChainClient)?;
 

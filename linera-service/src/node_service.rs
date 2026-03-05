@@ -821,7 +821,7 @@ and no system operations."
         self.context
             .lock()
             .await
-            .assign_new_chain_to_key(chain_id, owner)
+            .assign_new_chain_to_key(chain_id, owner, false)
             .await?;
 
         tracing::info!("Setting default chain with public key ...");

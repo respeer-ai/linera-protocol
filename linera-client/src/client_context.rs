@@ -261,8 +261,9 @@ impl<Env: Environment> chain_listener::ClientContext for ClientContext<Env> {
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
+        must_has_signer: bool,
     ) -> Result<(), Error> {
-        self.assign_new_chain_to_key(chain_id, owner)
+        self.assign_new_chain_to_key(chain_id, owner, must_has_signer)
             .make_sync()
             .await
     }
@@ -518,14 +519,18 @@ impl<Env: Environment> ClientContext<Env> {
         &mut self,
         chain_id: ChainId,
         owner: AccountOwner,
+        must_has_signer: bool,
     ) -> Result<(), Error> {
         self.client
             .extend_chain_mode(chain_id, ListeningMode::FullChain);
         let client = self.make_chain_client(chain_id).await?;
-        let info = client.prepare_for_owner(owner).await.map_err(|error| {
-            tracing::error!(%chain_id, %owner, %error, "Chain is not owned");
-            error::Inner::ChainOwnership
-        })?;
+        let info = client
+            .prepare_for_owner(owner, must_has_signer)
+            .await
+            .map_err(|error| {
+                tracing::error!(%chain_id, %owner, %error, "Chain is not owned");
+                error::Inner::ChainOwnership
+            })?;
 
         // Try to modify existing chain entry, setting the owner.
         let modified = self
