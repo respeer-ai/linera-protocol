@@ -3861,6 +3861,7 @@ name = "linera-storage-service"
 version = "0.16.0"
 dependencies = [
  "anyhow",
+ "async-graphql-value",
  "async-lock",
  "bcs",
  "cfg_aliases",

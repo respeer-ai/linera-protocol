@@ -1537,7 +1537,7 @@ impl Runnable for Job {
                     "Linking chain {chain_id} to its corresponding key in the wallet, owned by \
                     {owner}",
                 );
-                context.assign_new_chain_to_key(chain_id, owner).await?;
+                context.assign_new_chain_to_key(chain_id, owner, true).await?;
                 info!(
                     "Chain linked to owner in {} ms",
                     start_time.elapsed().as_millis()
