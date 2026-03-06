@@ -1938,7 +1938,6 @@ impl<Env: Environment> ChainClient<Env> {
             .chain(&manager.requested_proposed)
             .any(|proposal| proposal.content.round == manager.current_round)
             || skip_fast;
-        info!(chain_id=%self.chain_id, skip_fast, conflict, has_oracle_responses, "Round for new proposal");
         let round = if !conflict {
             manager.current_round
         } else if let Some(round) = manager
