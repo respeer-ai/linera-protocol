@@ -245,6 +245,7 @@ impl ClientContext for DummyContext {
         &mut self,
         _chain_id: ChainId,
         _owner: AccountOwner,
+        _must_has_signer: bool,
     ) -> Result<(), Error> {
         unimplemented!()
     }
