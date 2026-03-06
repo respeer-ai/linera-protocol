@@ -875,12 +875,6 @@ impl ChainManagerInfo {
         seed: u64,
         current_committee: &BTreeMap<AccountOwner, u64>,
     ) -> bool {
-        tracing::info!(
-            "Should propose {} at round {}, ownership {:?}",
-            round,
-            self.ownership.can_propose_in_multi_leader_round(identity),
-            self.ownership
-        );
         match round {
             Round::Fast => self.ownership.super_owners.contains(identity),
             Round::MultiLeader(_) => self.ownership.can_propose_in_multi_leader_round(identity),

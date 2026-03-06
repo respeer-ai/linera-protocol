@@ -1959,6 +1959,12 @@ impl<Env: Environment> ChainClient<Env> {
             .values()
             .map(|v| (AccountOwner::from(v.account_public_key), v.votes))
             .collect();
+        info!(
+            "Round for new proposal round {}, should propose {}, timeout {:?}",
+            round,
+            manager.should_propose(identity, round, seed, &current_committee),
+            info.round_timeout(),
+        );
         if manager.should_propose(identity, round, seed, &current_committee) {
             return Ok(Either::Left(round));
         }
