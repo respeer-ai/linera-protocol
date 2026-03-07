@@ -192,7 +192,7 @@ impl ChainOwnership {
 
     /// Returns the first consensus round for this configuration.
     pub fn first_round(&self) -> Round {
-        if !self.super_owners.is_empty() {
+        let round = if !self.super_owners.is_empty() {
             Round::Fast
         } else if self.owners.is_empty() {
             Round::Validator(0)
@@ -200,7 +200,9 @@ impl ChainOwnership {
             Round::MultiLeader(0)
         } else {
             Round::SingleLeader(0)
-        }
+        };
+        tracing::info!(?round, "First round");
+        round
     }
 
     /// Returns an iterator over all super owners, followed by all owners.
@@ -228,6 +230,7 @@ impl ChainOwnership {
                 .map_or(Round::Validator(0), Round::SingleLeader),
             Round::Validator(r) => Round::Validator(r.checked_add(1)?),
         };
+        tracing::info!(?round, ?next_round, "Next round");
         Some(next_round)
     }
 
