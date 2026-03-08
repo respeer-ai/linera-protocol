@@ -203,7 +203,14 @@ impl ChainOwnership {
         } else {
             Round::SingleLeader(0)
         };
-        tracing::info!(?round, "First round");
+        tracing::info!(
+            ?round,
+            open_multi_leader_round=?self.open_multi_leader_rounds,
+            super_owners=?self.super_owners,
+            owners=?self.owners,
+            multi_leader_rounds=?self.multi_leader_rounds,
+            "First round",
+        );
         round
     }
 
