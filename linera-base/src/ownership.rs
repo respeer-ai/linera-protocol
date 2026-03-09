@@ -194,8 +194,6 @@ impl ChainOwnership {
     pub fn first_round(&self) -> Round {
         let round = if !self.super_owners.is_empty() {
             Round::Fast
-        } else if self.open_multi_leader_rounds {
-            Round::MultiLeader(0)
         } else if self.owners.is_empty() {
             Round::Validator(0)
         } else if self.multi_leader_rounds > 0 {
