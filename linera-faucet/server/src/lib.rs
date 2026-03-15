@@ -201,6 +201,7 @@ pub struct MutationRoot<S> {
     pending_requests: Arc<Mutex<VecDeque<PendingRequest>>>,
     request_notifier: Arc<Notify>,
     storage: S,
+    without_cache: bool,
 }
 
 /// The result of a successful `claim` mutation.
@@ -234,6 +235,7 @@ struct BatchProcessorConfig {
     start_timestamp: Timestamp,
     start_balance: Amount,
     max_batch_size: usize,
+    without_cache: bool,
 }
 
 /// Batching coordinator for processing chain creation requests.
@@ -304,6 +306,11 @@ where
 
         chain_id.ok_or(Error::new("This user has no chain yet"))
     }
+
+    /// Returns the balance of faucet
+    async fn balance(&self) -> Result<Amount, Error> {
+        Ok(self.client.query_balance().await?)
+    }
 }
 
 #[async_graphql::Object(cache_control(no_cache))]
@@ -352,17 +359,19 @@ where
             .with_label_values(&["get_chain_id"])
             .observe(db_start_time.elapsed().as_secs_f64() * 1000.0);
 
-        if let Some(existing_chain_id) = existing_chain_id {
-            #[cfg(with_metrics)]
-            metrics::CLAIM_REQUESTS_TOTAL
-                .with_label_values(&["duplicate"])
-                .inc();
+        if !self.without_cache {
+            if let Some(existing_chain_id) = existing_chain_id {
+                #[cfg(with_metrics)]
+                metrics::CLAIM_REQUESTS_TOTAL
+                    .with_label_values(&["duplicate"])
+                    .inc();
 
-            // Retrieve the chain description from local storage
-            let stored_chain =
-                get_chain_description_from_storage(&self.storage, existing_chain_id).await;
-            tracing::debug!(account_owner=?owner, "claim request processed; returning pre-existing chain");
-            return stored_chain;
+                // Retrieve the chain description from local storage
+                let stored_chain =
+                    get_chain_description_from_storage(&self.storage, existing_chain_id).await;
+                tracing::debug!(account_owner=?owner, "claim request processed; returning pre-existing chain");
+                return stored_chain;
+            }
         }
 
         // Create a oneshot channel to receive the result.
@@ -562,6 +571,10 @@ where
                     continue;
                 }
                 Ok(Some(existing_chain_id)) => {
+                    if self.config.without_cache {
+                        batch_requests.push(request);
+                        continue;
+                    }
                     // Retrieve the chain description from local storage.
                     get_chain_description_from_storage(
                         self.client.storage_client(),
@@ -851,6 +864,7 @@ where
     pending_requests: Arc<Mutex<VecDeque<PendingRequest>>>,
     request_notifier: Arc<Notify>,
     max_batch_size: usize,
+    without_cache: bool,
 }
 
 impl<C> Clone for FaucetService<C>
@@ -877,6 +891,7 @@ where
             pending_requests: Arc::clone(&self.pending_requests),
             request_notifier: Arc::clone(&self.request_notifier),
             max_batch_size: self.max_batch_size,
+            without_cache: self.without_cache,
         }
     }
 }
@@ -892,6 +907,7 @@ pub struct FaucetConfig {
     pub chain_listener_config: ChainListenerConfig,
     pub storage_path: PathBuf,
     pub max_batch_size: usize,
+    pub without_cache: bool,
 }
 
 impl<C> FaucetService<C>
@@ -945,6 +961,7 @@ where
             pending_requests,
             request_notifier,
             max_batch_size: config.max_batch_size,
+            without_cache: config.without_cache,
         })
     }
 
@@ -960,6 +977,7 @@ where
             pending_requests: Arc::clone(&self.pending_requests),
             request_notifier: Arc::clone(&self.request_notifier),
             storage: self.storage.clone(),
+            without_cache: self.without_cache,
         };
         let query_root = QueryRoot {
             genesis_config: Arc::clone(&self.genesis_config),
@@ -999,6 +1017,7 @@ where
             start_timestamp: self.start_timestamp,
             start_balance: self.start_balance,
             max_batch_size: self.max_batch_size,
+            without_cache: self.without_cache,
         };
         let mut batch_processor = BatchProcessor::new(
             batch_processor_config,
@@ -1014,8 +1033,8 @@ where
             self.context,
             self.storage,
             cancellation_token.clone(),
-            tokio::sync::mpsc::unbounded_channel().1,
-            false, // Faucet doesn't receive messages, so no need for background sync
+            Arc::new(Mutex::new(tokio::sync::mpsc::unbounded_channel().1)),
+            false,
         )
         .run()
         .await?;

@@ -1236,6 +1236,7 @@ impl Runnable for Job {
                 let context = Arc::new(Mutex::new(context));
 
                 let (command_sender, command_receiver) = mpsc::unbounded_channel();
+                let command_receiver = Arc::new(Mutex::new(command_receiver));
 
                 if let Some(controller_id) = controller_application_id {
                     // For the controller case, we share the context via Arc so the
@@ -1249,7 +1250,7 @@ impl Runnable for Job {
                         cancellation_token.clone(),
                         operators,
                         retry_delay,
-                        command_sender,
+                        command_sender.clone(),
                     );
 
                     tokio::spawn(controller.run());
@@ -1286,7 +1287,10 @@ impl Runnable for Job {
                     query_cache_size,
                     query_subscriptions,
                     cancellation_token.clone(),
-                );
+                    command_receiver.clone(),
+                    command_sender,
+                )
+                .await;
                 service.run(cancellation_token, command_receiver).await?;
             }
 
@@ -1329,6 +1333,7 @@ impl Runnable for Job {
                     chain_listener_config: config,
                     storage_path,
                     max_batch_size,
+                    without_cache: true,
                 };
                 let faucet = FaucetService::new(config, context).await?;
                 let cancellation_token = CancellationToken::new();
@@ -1741,7 +1746,7 @@ impl Runnable for Job {
                     .await?;
                 let chain_id = chain_id.unwrap_or_else(|| context.default_chain());
                 let chain_client = context.make_chain_client(chain_id).await?;
-                let description = match chain_client.get_chain_description().await {
+                let description = match chain_client.get_chain_description(true).await {
                     Ok(description) => description,
                     Err(ChainClientError::LocalNodeError(LocalNodeError::BlobsNotFound(_))) => {
                         println!("Could not find a chain description corresponding to the given chain ID.");

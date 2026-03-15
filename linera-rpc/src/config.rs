@@ -201,7 +201,12 @@ impl ValidatorInternalNetworkConfig {
 
 impl ValidatorPublicNetworkConfig {
     pub fn http_address(&self) -> String {
-        format!("{}://{}:{}", self.protocol.scheme(), self.host, self.port)
+        let scheme = std::env::var("EXTERNAL_SCHEME")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| self.protocol.scheme().to_string());
+
+        format!("{}://{}:{}", scheme, self.host, self.port)
     }
 }
 

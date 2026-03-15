@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-genesis-service
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: local-genesis-service
+  template:
+    metadata:
+      labels:
+        app: local-genesis-service
+    spec:
+      containers:
+      - name: local-genesis-service
+        image: npool/linera-local-genesis:latest
+        imagePullPolicy: Always
+        command: ["./linera", "net", "up", "--with-faucet", "--faucet-port", "8080", "--external-protocol", "grpc"]
+        env:
+        - name: RUST_LOG
+          value: info
+        - name: EXTERNAL_HOST
+          value: local-genesis.respeer.ai # local-genesis-service
+        - name: EXTERNAL_PORT
+          value: "80"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "2048Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2560Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: local-genesis-service
+  namespace: kube-system
+  annotations:
+    traefik.ingress.kubernetes.io/service.serversscheme: h2c
+spec:
+  ports:
+    - name: faucet
+      port: 8080
+      targetPort: 8080
+    - name: server
+      port: 9001
+      targetPort: 9001
+    - name: proxy
+      port: 10001
+      targetPort: 10001
+    - name: validator
+      port: 13001
+      targetPort: 13001
+  selector:
+    app: local-genesis-service

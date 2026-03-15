@@ -9,6 +9,7 @@ use std::{
 use futures::{stream, Stream};
 use linera_base::{
     data_types::{ChainDescription, ChainOrigin},
+    ensure,
     identifiers::{AccountOwner, ChainId},
 };
 use linera_client::config::GenesisConfig;
@@ -20,6 +21,9 @@ struct Data {
     pub chains: wallet::Memory,
     default: Arc<RwLock<Option<ChainId>>>,
     genesis_config: GenesisConfig,
+
+    #[serde(default)]
+    pub defaults: papaya::HashMap<AccountOwner, ChainId>,
 }
 
 struct ChainDetails {
@@ -137,6 +141,27 @@ impl linera_core::Wallet for Wallet {
     ) -> Result<Option<()>, Self::Error> {
         self.mutate(id, f).transpose()
     }
+
+    async fn set_owner_default_chain(
+        &self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Self::Error> {
+        self.set_owner_default_chain(owner, chain_id)?;
+        self.save()
+    }
+
+    fn genesis_admin_chain(&self) -> ChainId {
+        self.genesis_admin_chain()
+    }
+
+    fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error> {
+        Ok(self.chain_ids().contains(&chain_id))
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.owner_default_chain(owner)
+    }
 }
 
 impl Extend<(ChainId, wallet::Chain)> for Wallet {
@@ -214,6 +239,8 @@ impl Wallet {
                 chains: wallet::Memory::default(),
                 default: Arc::new(RwLock::new(None)),
                 genesis_config,
+
+                defaults: papaya::HashMap::new(),
             },
         )?))
     }
@@ -311,5 +338,25 @@ impl Wallet {
     /// Returns the list of all chain IDs for which we have a secret key.
     pub fn owned_chain_ids(&self) -> Vec<ChainId> {
         self.0.chains.owned_chain_ids()
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.0.defaults.pin().get(&owner).cloned()
+    }
+
+    pub fn set_owner_default_chain(
+        &self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> anyhow::Result<()> {
+        ensure!(
+            self.0.chains.chain_ids().contains(&chain_id),
+            anyhow::anyhow!("nonexistent chain `{chain_id}`")
+        );
+
+        self.0.defaults.pin().insert(owner, chain_id);
+
+        self.0.save()?;
+        Ok(())
     }
 }

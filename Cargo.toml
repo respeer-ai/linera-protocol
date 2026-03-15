@@ -89,6 +89,7 @@ assert_matches = "1.5.0"
 async-graphql = "=7.0.17"
 async-graphql-axum = "=7.0.17"
 async-graphql-derive = "=7.0.17"
+async-graphql-value = "=7.0.17"
 async-lock = "3.3.0"
 async-trait = "0.1.77"
 async-tungstenite = { version = "0.22", features = ["tokio-runtime"] }
@@ -179,7 +180,7 @@ pathdiff = "0.2.1"
 port-selector = "0.1.6"
 prettyplease = "0.2.16"
 proc-macro-error = "1.0.4"
-proc-macro2 = "1.0"
+proc-macro2 = "=1.0.97"
 prometheus = "0.13.3"
 prometheus-parse = "0.2.5"
 proptest = { version = "1.6.0", default-features = false, features = ["alloc"] }
@@ -227,7 +228,7 @@ rocksdb = "0.21.0"
 ruzstd = "=0.8.1"
 scylla = "~1.1.0"
 semver = "1.0.22"
-serde = { version = "1.0.197", features = ["derive"] }
+serde = { version = "=1.0.219", features = ["derive"] }
 serde-command-opts = "0.1.1"
 serde-name = "0.2.1"
 serde-reflection = "0.5.2"
@@ -304,6 +305,11 @@ web-thread-select = "0.2.0"
 web-time = "1.1.0"
 wit-bindgen = "0.24.0"
 zstd = "0.13.2"
+lazy_static = "1.5.0"
+serde_alias = "0.0.2"
+time = "=0.3.41"
+time-core = "=0.1.4"
+home = "=0.5.11"
 
 linera-base = { version = "0.15.15", path = "./linera-base" }
 linera-bridge = { version = "0.15.15", path = "./linera-bridge" }
@@ -401,3 +407,4 @@ range_minus_one = "deny"
 range_plus_one = "deny"
 ref_option_ref = "deny"
 str_split_at_newline = "deny"
+

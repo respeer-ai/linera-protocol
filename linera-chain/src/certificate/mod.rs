@@ -15,6 +15,7 @@ pub use generic::GenericCertificate;
 use linera_base::{
     crypto::{CryptoHash, ValidatorPublicKey, ValidatorSignature},
     data_types::{BlockHeight, Epoch, Round},
+    doc_scalar,
     identifiers::{BlobId, ChainId},
 };
 pub use lite::LiteCertificate;
@@ -27,6 +28,8 @@ use crate::types::{ConfirmedBlock, Timeout, ValidatedBlock};
 /// Since only one block per round is validated,
 /// there can be at most one such certificate in every round.
 pub type ValidatedBlockCertificate = GenericCertificate<ValidatedBlock>;
+
+doc_scalar!(ValidatedBlockCertificate, "A validated block certificate.");
 
 /// Certificate for a [`ConfirmedBlock`] instance.
 /// A confirmed block certificate means that the block is finalized:

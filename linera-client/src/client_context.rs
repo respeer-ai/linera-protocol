@@ -259,6 +259,30 @@ impl<Env: Environment> chain_listener::ClientContext for ClientContext<Env> {
             .make_sync()
             .await
     }
+
+    async fn assign_new_chain_to_key(
+        &mut self,
+        chain_id: ChainId,
+        owner: AccountOwner,
+    ) -> Result<(), Error> {
+        self.assign_new_chain_to_key(chain_id, owner)
+            .make_sync()
+            .await
+    }
+
+    async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.set_owner_default_chain(owner, chain_id)
+            .make_sync()
+            .await
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.owner_default_chain(owner)
+    }
 }
 
 impl<S, Si, W> ClientContext<linera_core::environment::Impl<S, NodeProvider, Si, W>>
@@ -808,6 +832,22 @@ impl<Env: Environment> ClientContext<Env> {
             chain_info,
         })
     }
+
+    pub async fn set_owner_default_chain(
+        &mut self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Error> {
+        self.wallet()
+            .set_owner_default_chain(owner, chain_id)
+            .await
+            .map_err(error::Inner::wallet)?;
+        Ok(())
+    }
+
+    pub fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.wallet().owner_default_chain(owner)
+    }
 }
 
 #[cfg(feature = "fs")]
@@ -966,7 +1006,7 @@ impl<Env: Environment> ClientContext<Env> {
             // though it will eventually get those blobs, we're getting a head start here and
             // fetching those blobs in advance.
             for chain_id in &unknown_chain_ids {
-                self.client.get_chain_description(*chain_id).await?;
+                self.client.get_chain_description(*chain_id, false).await?;
             }
         }
 

@@ -95,6 +95,32 @@ pub trait Wallet {
         self.items()
             .try_filter_map(|(id, chain)| async move { Ok(chain.owner.map(|_| id)) })
     }
+
+    async fn set_owner_default_chain(
+        &self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Self::Error>;
+
+    fn genesis_admin_chain(&self) -> ChainId;
+
+    fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error>;
+
+    fn owner_chain_ids(
+        &self,
+        owner: AccountOwner,
+    ) -> impl Stream<Item = Result<ChainId, Self::Error>> {
+        self.items()
+            .try_filter_map(move |(chain_id, chain)| async move {
+                Ok(chain
+                    .owner
+                    .as_ref()
+                    .is_some_and(|&_owner| _owner == owner)
+                    .then_some(chain_id))
+            })
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId>;
 }
 
 impl<W: Deref<Target: Wallet> + linera_base::util::traits::AutoTraits> Wallet for W {
@@ -134,5 +160,37 @@ impl<W: Deref<Target: Wallet> + linera_base::util::traits::AutoTraits> Wallet fo
         f: impl FnMut(&mut Chain) + Send,
     ) -> Result<Option<()>, Self::Error> {
         self.deref().modify(id, f).await
+    }
+
+    async fn set_owner_default_chain(
+        &self,
+        owner: AccountOwner,
+        chain_id: ChainId,
+    ) -> Result<(), Self::Error> {
+        self.deref().set_owner_default_chain(owner, chain_id).await
+    }
+
+    fn genesis_admin_chain(&self) -> ChainId {
+        self.deref().genesis_admin_chain()
+    }
+
+    fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error> {
+        futures::executor::block_on(async {
+            self.deref()
+                .chain_ids()
+                .try_any(|id| futures::future::ready(id == chain_id))
+                .await
+        })
+    }
+
+    fn owner_chain_ids(
+        &self,
+        owner: AccountOwner,
+    ) -> impl Stream<Item = Result<ChainId, Self::Error>> {
+        self.deref().owner_chain_ids(owner)
+    }
+
+    fn owner_default_chain(&self, owner: AccountOwner) -> Option<ChainId> {
+        self.deref().owner_default_chain(owner)
     }
 }

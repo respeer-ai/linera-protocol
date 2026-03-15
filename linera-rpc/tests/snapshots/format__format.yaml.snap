@@ -1,10 +1,11 @@
 ---
 source: linera-rpc/tests/format.rs
+assertion_line: 93
 expression: get_registry().unwrap()
 ---
 Account:
   STRUCT:
-    - chain_id:
+    - chainId:
         TYPENAME: ChainId
     - owner:
         TYPENAME: AccountOwner
@@ -189,7 +190,7 @@ BlockExecutionOutcome:
         SEQ:
           SEQ:
             TYPENAME: OutgoingMessage
-    - previous_message_blocks:
+    - previousMessageBlocks:
         MAP:
           KEY:
             TYPENAME: ChainId
@@ -197,7 +198,7 @@ BlockExecutionOutcome:
             TUPLE:
               - TYPENAME: CryptoHash
               - TYPENAME: BlockHeight
-    - previous_event_blocks:
+    - previousEventBlocks:
         MAP:
           KEY:
             TYPENAME: StreamId
@@ -205,9 +206,9 @@ BlockExecutionOutcome:
             TUPLE:
               - TYPENAME: CryptoHash
               - TYPENAME: BlockHeight
-    - state_hash:
+    - stateHash:
         TYPENAME: CryptoHash
-    - oracle_responses:
+    - oracleResponses:
         SEQ:
           SEQ:
             TYPENAME: OracleResponse
@@ -219,7 +220,7 @@ BlockExecutionOutcome:
         SEQ:
           SEQ:
             TYPENAME: BlobContent
-    - operation_results:
+    - operationResults:
         SEQ:
           TYPENAME: OperationResult
 BlockHeader:
@@ -641,9 +642,9 @@ MessageBundle:
         TYPENAME: BlockHeight
     - timestamp:
         TYPENAME: Timestamp
-    - certificate_hash:
+    - certificateHash:
         TYPENAME: CryptoHash
-    - transaction_index: U32
+    - transactionIndex: U32
     - messages:
         SEQ:
           TYPENAME: PostedMessage
@@ -825,7 +826,7 @@ Operation:
     1:
       User:
         STRUCT:
-          - application_id:
+          - applicationId:
               TYPENAME: ApplicationId
           - bytes: BYTES
 OperationResult:
@@ -873,12 +874,12 @@ OutgoingMessage:
   STRUCT:
     - destination:
         TYPENAME: ChainId
-    - authenticated_signer:
+    - authenticatedSigner:
         OPTION:
           TYPENAME: AccountOwner
     - grant:
         TYPENAME: Amount
-    - refund_grant_to:
+    - refundGrantTo:
         OPTION:
           TYPENAME: Account
     - kind:
@@ -887,12 +888,12 @@ OutgoingMessage:
         TYPENAME: Message
 PostedMessage:
   STRUCT:
-    - authenticated_signer:
+    - authenticatedSigner:
         OPTION:
           TYPENAME: AccountOwner
     - grant:
         TYPENAME: Amount
-    - refund_grant_to:
+    - refundGrantTo:
         OPTION:
           TYPENAME: Account
     - kind:
@@ -911,7 +912,7 @@ ProposalContent:
           TYPENAME: BlockExecutionOutcome
 ProposedBlock:
   STRUCT:
-    - chain_id:
+    - chainId:
         TYPENAME: ChainId
     - epoch:
         TYPENAME: Epoch
@@ -922,10 +923,10 @@ ProposedBlock:
         TYPENAME: BlockHeight
     - timestamp:
         TYPENAME: Timestamp
-    - authenticated_signer:
+    - authenticatedSigner:
         OPTION:
           TYPENAME: AccountOwner
-    - previous_block_hash:
+    - previousBlockHash:
         OPTION:
           TYPENAME: CryptoHash
 ResourceControlPolicy:
