@@ -46,12 +46,6 @@ cfg_if::cfg_if! {
             if let Some(timeout) = options.timeout {
                 endpoint = endpoint.timeout(timeout);
             }
-
-            endpoint = endpoint.tcp_keepalive(Some(linera_base::time::Duration::new(5, 0)));
-            endpoint = endpoint.http2_keep_alive_interval(linera_base::time::Duration::new(5, 0));
-            endpoint = endpoint.keep_alive_timeout(linera_base::time::Duration::new(5, 0));
-            endpoint = endpoint.keep_alive_while_idle(true);
-
             Ok(endpoint.connect_lazy())
         }
     }

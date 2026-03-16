@@ -229,14 +229,20 @@ where
         block: ProposedBlock,
         round: Option<u32>,
         published_blobs: Vec<Blob>,
+        policy: BundleExecutionPolicy,
         local_time: Timestamp,
-    ) -> Result<(Block, ChainInfoResponse), LocalNodeError> {
-        let (executed_block, info) = self
+    ) -> Result<(ProposedBlock, Block, ChainInfoResponse, ResourceTracker), LocalNodeError> {
+        Ok(self
             .node
             .state
-            .stage_block_execution_with_local_time(block, round, published_blobs, local_time)
-            .await?;
-        Ok((executed_block, info))
+            .stage_block_execution_with_local_time(
+                block,
+                round,
+                published_blobs,
+                policy,
+                local_time,
+            )
+            .await?)
     }
 
     /// Returns a read-only view of the [`ChainStateView`] of a chain referenced by its

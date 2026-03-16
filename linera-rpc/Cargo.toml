@@ -75,7 +75,6 @@ tonic-health = { workspace = true, optional = true }
 tonic-reflection = { workspace = true, optional = true }
 tower.workspace = true
 tracing.workspace = true
-lazy_static.workspace = true
 
 [dev-dependencies]
 insta = { workspace = true, features = ["yaml"] }
@@ -110,8 +109,6 @@ wasm-bindgen-test.workspace = true
 cfg_aliases.workspace = true
 rcgen.workspace = true
 tonic-prost-build.workspace = true
-time.workspace = true
-time-core.workspace = true
 
 [package.metadata.cargo-machete]
 ignored = ["prost", "tonic-prost"]

@@ -300,7 +300,10 @@ where
         round: Option<u32>,
         published_blobs: Vec<Blob>,
         local_time: Timestamp,
-        callback: oneshot::Sender<Result<(Block, ChainInfoResponse), WorkerError>>,
+        policy: BundleExecutionPolicy,
+        callback: oneshot::Sender<
+            Result<(ProposedBlock, Block, ChainInfoResponse, ResourceTracker), WorkerError>,
+        >,
     },
 }
 

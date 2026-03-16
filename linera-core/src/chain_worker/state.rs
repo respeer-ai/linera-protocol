@@ -282,6 +282,7 @@ where
                 block,
                 round,
                 published_blobs,
+                policy,
                 local_time,
                 callback,
             } => callback
@@ -290,6 +291,7 @@ where
                         block,
                         round,
                         &published_blobs,
+                        policy,
                         local_time,
                     )
                     .await,
@@ -1563,16 +1565,19 @@ where
         block: ProposedBlock,
         round: Option<u32>,
         published_blobs: &[Blob],
+        policy: BundleExecutionPolicy,
         local_time: Timestamp,
-    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
+    ) -> Result<(ProposedBlock, Block, ChainInfoResponse, ResourceTracker), WorkerError> {
         self.initialize_and_save_if_needed().await?;
         let signer = block.authenticated_signer;
         let (_, committee) = self.chain.current_committee()?;
         block.check_proposal_size(committee.policy().maximum_block_proposal_size)?;
 
-        let outcome = self
-            .execute_block(&block, local_time, round, published_blobs)
+        self.chain
+            .remove_bundles_from_inboxes(block.timestamp, true, block.incoming_bundles())
             .await?;
+        let (executed_block, resource_tracker) =
+            Box::pin(self.execute_block(block, local_time, round, published_blobs, policy)).await?;
 
         // No need to sign: only used internally.
         let mut response = ChainInfoResponse::new(&self.chain, None);
@@ -1586,7 +1591,8 @@ where
                 .await?;
         }
 
-        Ok((outcome.with(block), response))
+        let (proposed_block, _) = executed_block.clone().into_proposal();
+        Ok((proposed_block, executed_block, response, resource_tracker))
     }
 
     /// Validates and executes a block proposed to extend this chain.

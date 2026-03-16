@@ -768,11 +768,6 @@ type IndexAndEvent {
 }
 
 """
-<<<<<<< HEAD
-A scalar that can represent any JSON value.
-"""
-scalar JSON
-=======
 The messages and the state hash resulting from a [`ProposedBlock`]'s execution.
 """
 input InputBlockExecutionOutcome {
@@ -915,7 +910,11 @@ input InputWrapperProposedBlock {
 	"""
 	previousBlockHash: CryptoHash
 }
->>>>>>> respeer-maas-testnet_conway-d411bd6c-2026-01-18
+
+"""
+A scalar that can represent any JSON value.
+"""
+scalar JSON
 
 """
 A scalar that can represent any JSON Object value.

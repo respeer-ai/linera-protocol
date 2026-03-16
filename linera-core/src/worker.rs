@@ -779,14 +779,14 @@ where
         published_blobs: Vec<Blob>,
         policy: BundleExecutionPolicy,
     ) -> Result<(ProposedBlock, Block, ChainInfoResponse, ResourceTracker), WorkerError> {
-        self.query_chain_worker(block.chain_id, move |callback| {
-                ChainWorkerRequest::StageBlockExecution {
-                    block,
-                    round,
-                    published_blobs,
-                    policy,
-                    callback,
-                },
+        self.query_chain_worker(
+            block.chain_id,
+            move |callback| ChainWorkerRequest::StageBlockExecution {
+                block,
+                round,
+                published_blobs,
+                policy,
+                callback,
             },
             None,
         )
@@ -804,12 +804,12 @@ where
         query: Query,
         block_hash: Option<CryptoHash>,
     ) -> Result<(QueryOutcome, BlockHeight), WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-                ChainWorkerRequest::QueryApplication {
-                    query,
-                    block_hash,
-                    callback,
-                },
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::QueryApplication {
+                query,
+                block_hash,
+                callback,
             },
             None,
         )
@@ -1379,14 +1379,16 @@ where
         block: ProposedBlock,
         round: Option<u32>,
         published_blobs: Vec<Blob>,
+        policy: BundleExecutionPolicy,
         local_time: Timestamp,
-    ) -> Result<(Block, ChainInfoResponse), WorkerError> {
+    ) -> Result<(ProposedBlock, Block, ChainInfoResponse, ResourceTracker), WorkerError> {
         self.query_chain_worker(
             block.chain_id,
             move |callback| ChainWorkerRequest::StageBlockExecutionWithLocalTime {
                 block,
                 round,
                 published_blobs,
+                policy,
                 local_time,
                 callback,
             },
@@ -1576,12 +1578,14 @@ where
         chain_id: ChainId,
         stream_ids: Vec<StreamId>,
     ) -> Result<BTreeMap<StreamId, (BlockHeight, CryptoHash)>, WorkerError> {
-        self.query_chain_worker(chain_id, move |callback| {
-            ChainWorkerRequest::GetPreviousEventBlocks {
+        self.query_chain_worker(
+            chain_id,
+            move |callback| ChainWorkerRequest::GetPreviousEventBlocks {
                 stream_ids,
                 callback,
-            }
-        })
+            },
+            None,
+        )
         .await
     }
 }

@@ -35,10 +35,6 @@ web = [
 [dependencies]
 allocative.workspace = true
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
-alloy-serde.workspace = true
-alloy-eips.workspace = true
-alloy-tx-macros.workspace = true
 anyhow.workspace = true
 async-graphql.workspace = true
 async-graphql-derive.workspace = true

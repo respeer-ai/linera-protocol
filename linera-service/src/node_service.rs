@@ -3,6 +3,7 @@
 
 use std::{
     borrow::Cow,
+    collections::{BTreeSet, HashMap},
     future::IntoFuture,
     iter,
     net::SocketAddr,
@@ -54,7 +55,7 @@ use linera_execution::{
 };
 #[cfg(with_metrics)]
 use linera_metrics::monitoring_server;
-use linera_sdk::linera_base_types::BlobContent;
+use linera_sdk::linera_base_types::{Blob, BlobContent};
 use lru::LruCache;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};

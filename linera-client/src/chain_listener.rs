@@ -173,13 +173,13 @@ struct ListeningClient<C: ClientContext> {
     /// The abort handle for the task that listens to the validators.
     abort_handle: AbortOnDrop,
     /// The listening task.
-    listener: Task<()>,
+    listener: Arc<Mutex<Option<Task<()>>>>,
     /// The stream of notifications from the local node.
     notification_stream: Arc<Mutex<NotificationStream>>,
     /// This is only `< u64::MAX` when the client is waiting for a timeout to process the inbox.
     timeout: Timestamp,
     /// The background sync process.
-    background_sync: Task<()>,
+    background_sync: Arc<Mutex<Option<Task<()>>>>,
 }
 
 impl<C: ClientContext> Clone for ListeningClient<C> {
@@ -187,10 +187,10 @@ impl<C: ClientContext> Clone for ListeningClient<C> {
         Self {
             client: self.client.clone(),
             abort_handle: self.abort_handle.clone(),
-            join_handle: self.join_handle.clone(),
+            listener: self.listener.clone(),
             notification_stream: self.notification_stream.clone(),
             timeout: self.timeout,
-            maybe_sync_cancellation_token: self.maybe_sync_cancellation_token.clone(),
+            background_sync: self.background_sync.clone(),
         }
     }
 }
@@ -206,18 +206,29 @@ impl<C: ClientContext> ListeningClient<C> {
         Self {
             client,
             abort_handle,
-            listener,
+            listener: Arc::new(Mutex::new(Some(listener))),
             #[allow(clippy::arc_with_non_send_sync)] // Only `Send` with `futures-util/alloc`.
             notification_stream: Arc::new(Mutex::new(notification_stream)),
             timeout: Timestamp::from(u64::MAX),
-            background_sync,
+            background_sync: Arc::new(Mutex::new(Some(background_sync))),
         }
     }
 
     async fn stop(self) {
         // TODO(#4965): this is unnecessary: the join handle now also acts as an abort handle
         drop(self.abort_handle);
-        futures::future::join(self.listener.cancel(), self.background_sync.cancel()).await;
+
+        let listener = {
+            let mut guard = self.listener.lock().await;
+            guard.take()
+        };
+        let background_sync = {
+            let mut guard = self.background_sync.lock().await;
+            guard.take()
+        };
+        if let (Some(listener), Some(background_sync)) = (listener, background_sync) {
+            futures::future::join(listener.cancel(), background_sync.cancel()).await;
+        }
     }
 }
 
@@ -355,7 +366,7 @@ impl<C: ClientContext + 'static> ChainListener<C> {
     pub async fn run_with_chain_id(mut self, chain_id: ChainId) -> Result<(), Error> {
         let chain_ids = {
             let guard = self.context.lock().await;
-            let admin_chain_id = guard.wallet().genesis_admin_chain();
+            let admin_chain_id = guard.wallet().genesis_admin_chain_id();
             guard
                 .make_chain_client(admin_chain_id)
                 .await?

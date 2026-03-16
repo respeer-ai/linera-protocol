@@ -139,7 +139,7 @@ impl Wallet for Memory {
         Ok(())
     }
 
-    fn genesis_admin_chain(&self) -> ChainId {
+    fn genesis_admin_chain_id(&self) -> ChainId {
         unimplemented!()
     }
 

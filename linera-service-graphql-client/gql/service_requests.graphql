@@ -613,14 +613,14 @@ query PendingMessages($chainId: ChainId!) {
 }
 
 query BlockMaterial($chainId: ChainId!, $maxPendingMessages: Int!) {
-	blockMaterial(chainId: $chainId, maxPendingMessages: $maxPendingMessages) {
-	    incomingBundles {
+    blockMaterial(chainId: $chainId, maxPendingMessages: $maxPendingMessages) {
+        incomingBundles {
             origin
             bundle
             action
         }
-	    localTime
-	    round
+        localTime
+        round
     }
 }
 

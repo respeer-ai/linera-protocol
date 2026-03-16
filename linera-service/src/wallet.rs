@@ -151,8 +151,8 @@ impl linera_core::Wallet for Wallet {
         self.save()
     }
 
-    fn genesis_admin_chain(&self) -> ChainId {
-        self.genesis_admin_chain()
+    fn genesis_admin_chain_id(&self) -> ChainId {
+        self.genesis_admin_chain_id()
     }
 
     fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error> {

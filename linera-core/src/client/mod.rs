@@ -1866,66 +1866,6 @@ impl<Env: Environment> Client<Env> {
         }
     }
 
-    /// Attempts to execute the block locally. If any incoming message execution fails, that
-    /// message is rejected and execution is retried, until the block accepts only messages
-    /// that succeed.
-    #[instrument(level = "trace", skip(self, block))]
-    async fn stage_block_execution_with_local_time_and_discard_failing_messages(
-        &self,
-        mut block: ProposedBlock,
-        round: Option<u32>,
-        published_blobs: Vec<Blob>,
-        local_time: Timestamp,
-    ) -> Result<(Block, ChainInfoResponse), ChainClientError> {
-        loop {
-            let result = self
-                .stage_block_execution_with_local_time(
-                    block.clone(),
-                    round,
-                    published_blobs.clone(),
-                    local_time,
-                )
-                .await;
-            if let Err(ChainClientError::LocalNodeError(LocalNodeError::WorkerError(
-                WorkerError::ChainError(chain_error),
-            ))) = &result
-            {
-                if let ChainError::ExecutionError(
-                    error,
-                    ChainExecutionContext::IncomingBundle(index),
-                ) = &**chain_error
-                {
-                    let transaction = block
-                        .transactions
-                        .get_mut(*index as usize)
-                        .expect("Transaction at given index should exist");
-                    let Transaction::ReceiveMessages(message) = transaction else {
-                        panic!(
-                            "Expected incoming bundle at transaction index {}, found operation",
-                            index
-                        );
-                    };
-                    ensure!(
-                        !message.bundle.is_protected(),
-                        ChainClientError::BlockProposalError(
-                            "Protected incoming message failed to execute locally"
-                        )
-                    );
-                    // Reject the faulty message from the block and continue.
-                    // TODO(#1420): This is potentially a bit heavy-handed for
-                    // retryable errors.
-                    info!(
-                    %error, origin = ?message.origin,
-                    "Message failed to execute locally and will be rejected."
-                    );
-                    message.action = MessageAction::Reject;
-                    continue;
-                }
-            }
-            return result;
-        }
-    }
-
     /// Attempts to execute the block locally. If any attempt to read a blob fails, the blob is
     /// downloaded and execution is retried.
     #[instrument(level = "trace", skip(self, block))]
@@ -1943,6 +1883,7 @@ impl<Env: Environment> Client<Env> {
                     block.clone(),
                     round,
                     published_blobs.clone(),
+                    self.options.bundle_execution_policy(),
                     local_time,
                 )
                 .await;
@@ -1952,7 +1893,8 @@ impl<Env: Environment> Client<Env> {
                     .await?;
                 continue; // We found the missing blob: retry.
             }
-            return Ok(result?);
+            let (_modified_block, executed_block, response, _resource_tracker) = result?;
+            return Ok((executed_block, response));
         }
     }
 }
@@ -2182,13 +2124,12 @@ pub enum ChainClientError {
         height: BlockHeight,
     },
 
-<<<<<<< HEAD
     #[error(
         "A different block was already committed at this height. \
          The committed certificate hash is {0}"
     )]
     Conflict(CryptoHash),
-=======
+
     #[error("Mismatch block timestamp {0} != {1}")]
     MismatchBlockTimestamp(u64, u64),
 
@@ -2200,7 +2141,6 @@ pub enum ChainClientError {
 
     #[error("Blobs not provided")]
     BlobsNotProvided,
->>>>>>> respeer-maas-testnet_conway-d411bd6c-2026-01-18
 }
 
 impl From<Infallible> for ChainClientError {
@@ -2365,13 +2305,8 @@ impl<Env: Environment> ChainClient<Env> {
     }
 
     /// Returns the chain's description. Fetches it from the validators if necessary.
-    pub async fn get_chain_description(
-        &self,
-        force_update: bool,
-    ) -> Result<ChainDescription, ChainClientError> {
-        self.client
-            .get_chain_description(self.chain_id, force_update)
-            .await
+    pub async fn get_chain_description(&self) -> Result<ChainDescription, ChainClientError> {
+        self.client.get_chain_description(self.chain_id).await
     }
 
     /// Prepares the chain for the specified owner.
@@ -4957,7 +4892,7 @@ impl<Env: Environment> ChainClient<Env> {
     ) -> Result<ConfirmedBlockCertificate, ChainClientError> {
         let info = self.prepare_chain().await?;
 
-        let mutex = self.client_mutex();
+        let mutex = self.proposal_mutex();
         let _guard = mutex.lock_owned().await;
 
         // let info = self.request_leader_timeout_if_needed().await?;
@@ -5020,10 +4955,6 @@ impl<Env: Environment> ChainClient<Env> {
                 }
             }
         }
-
-        self.update_state(|state| {
-            state.set_pending_proposal(proposed_block.clone(), blobs.clone())
-        });
 
         let block = Block::new(proposed_block, outcome);
 
@@ -5115,9 +5046,7 @@ impl<Env: Environment> ChainClient<Env> {
 
         let (block, _) = self
             .client
-            .stage_block_execution_with_local_time_and_discard_failing_messages(
-                block, round, blobs, local_time,
-            )
+            .stage_block_execution_with_local_time(block, round, blobs, local_time)
             .await?;
 
         Ok(block)
@@ -5133,7 +5062,7 @@ impl<Env: Environment> ChainClient<Env> {
 
         // TODO: use latest process
 
-        match self.pending_proposal() {
+        match self.pending_proposal().await {
             Some(_) => match self.round_for_new_proposal(&info, &identity, true).await? {
                 Either::Left(round) => Ok(round),
                 Either::Right(_) => Err(ChainClientError::InvalidBlockRound),
@@ -5151,7 +5080,7 @@ impl<Env: Environment> ChainClient<Env> {
         blobs: Vec<Blob>,
         local_time: Timestamp,
     ) -> Result<Option<UnsignedBlockProposal>, ChainClientError> {
-        let mutex = self.client_mutex();
+        let mutex = self.proposal_mutex();
         let _guard = mutex.lock_owned().await;
 
         let _ = self.prepare_chain().await?;
@@ -5192,7 +5121,12 @@ impl<Env: Environment> ChainClient<Env> {
                         })?;
                     let block = self
                         .client
-                        .stage_block_execution(proposed_block, None, blobs.clone())
+                        .stage_block_execution(
+                            proposed_block,
+                            None,
+                            blobs.clone(),
+                            self.options.bundle_execution_policy(),
+                        )
                         .await?
                         .0;
                     debug!("Retrying locking block from fast round.");

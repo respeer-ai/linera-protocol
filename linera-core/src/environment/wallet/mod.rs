@@ -102,7 +102,7 @@ pub trait Wallet {
         chain_id: ChainId,
     ) -> Result<(), Self::Error>;
 
-    fn genesis_admin_chain(&self) -> ChainId;
+    fn genesis_admin_chain_id(&self) -> ChainId;
 
     fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error>;
 
@@ -170,8 +170,8 @@ impl<W: Deref<Target: Wallet> + linera_base::util::traits::AutoTraits> Wallet fo
         self.deref().set_owner_default_chain(owner, chain_id).await
     }
 
-    fn genesis_admin_chain(&self) -> ChainId {
-        self.deref().genesis_admin_chain()
+    fn genesis_admin_chain_id(&self) -> ChainId {
+        self.deref().genesis_admin_chain_id()
     }
 
     fn contains_key(&self, chain_id: ChainId) -> Result<bool, Self::Error> {

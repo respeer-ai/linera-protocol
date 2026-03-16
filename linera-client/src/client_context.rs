@@ -1006,7 +1006,7 @@ impl<Env: Environment> ClientContext<Env> {
             // though it will eventually get those blobs, we're getting a head start here and
             // fetching those blobs in advance.
             for chain_id in &unknown_chain_ids {
-                self.client.get_chain_description(*chain_id, false).await?;
+                self.client.get_chain_description(*chain_id).await?;
             }
         }
 
