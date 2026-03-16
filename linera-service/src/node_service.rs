@@ -1704,7 +1704,7 @@ where
             read_only,
             query_cache,
             query_subscriptions,
-            cancellation_token,
+            cancellation_token: cancellation_token.clone(),
 
             #[cfg(not(feature = "fake-chain-listener"))]
             chain_listener: Arc::new(Mutex::new(Some(ChainListener::new(
