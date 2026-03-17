@@ -1232,10 +1232,6 @@ type MutationRoot {
 	Calculate block execution state hash
 	"""
 	simulateExecuteBlock(chainId: ChainId!, blockMaterial: BlockMaterial!): SimulatedBlockMaterial
-	"""
-	Calculate block execution state hash
-	"""
-	estimateGas(chainId: ChainId!, blockMaterial: BlockMaterial!): Amount!
 }
 
 """
@@ -1446,6 +1442,10 @@ type QueryRoot {
 	Returns the maintained chains of given owner
 	"""
 	ownerChains(owner: AccountOwner!): Chains!
+	"""
+	Estimate gas
+	"""
+	estimateGas(chainId: ChainId!, blockMaterial: BlockMaterial!): Amount!
 }
 
 type QueueView_MessageBundle_f4399f0b {
