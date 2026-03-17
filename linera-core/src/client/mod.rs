@@ -53,7 +53,8 @@ use linera_execution::{
         AdminOperation, OpenChainConfig, SystemOperation, EPOCH_STREAM_NAME,
         REMOVED_EPOCH_STREAM_NAME,
     },
-    ExecutionError, Operation, Query, QueryOutcome, QueryResponse, SystemQuery, SystemResponse,
+    ExecutionError, Operation, Query, QueryOutcome, QueryResponse, ResourceTracker, SystemQuery,
+    SystemResponse,
 };
 use linera_storage::{Clock as _, ResultReadCertificates, Storage as _};
 use linera_views::ViewError;
@@ -1875,7 +1876,7 @@ impl<Env: Environment> Client<Env> {
         round: Option<u32>,
         published_blobs: Vec<Blob>,
         local_time: Timestamp,
-    ) -> Result<(Block, ChainInfoResponse), ChainClientError> {
+    ) -> Result<(Block, ChainInfoResponse, ResourceTracker), ChainClientError> {
         loop {
             let result = self
                 .local_node
@@ -1893,8 +1894,8 @@ impl<Env: Environment> Client<Env> {
                     .await?;
                 continue; // We found the missing blob: retry.
             }
-            let (_modified_block, executed_block, response, _resource_tracker) = result?;
-            return Ok((executed_block, response));
+            let (_modified_block, executed_block, response, resource_tracker) = result?;
+            return Ok((executed_block, response, resource_tracker));
         }
     }
 }
@@ -5006,7 +5007,7 @@ impl<Env: Environment> ChainClient<Env> {
         operations: Vec<Operation>,
         blobs: Vec<Blob>,
         local_time: Timestamp,
-    ) -> Result<Block, ChainClientError> {
+    ) -> Result<(Block, ResourceTracker), ChainClientError> {
         let info = self.chain_info().await?;
         let timestamp = self.next_timestamp_ext(&incoming_bundles, local_time, info.timestamp);
         if timestamp != local_time {
@@ -5044,12 +5045,12 @@ impl<Env: Environment> ChainClient<Env> {
             Either::Right(_) => None,
         };
 
-        let (block, _) = self
+        let (block, _, resource_tracker) = self
             .client
             .stage_block_execution_with_local_time(block, round, blobs, local_time)
             .await?;
 
-        Ok(block)
+        Ok((block, resource_tracker))
     }
 
     #[tracing::instrument(level = "trace")]
@@ -5134,7 +5135,7 @@ impl<Env: Environment> ChainClient<Env> {
                 }
             }
         } else {
-            let block = self
+            let (block, _) = self
                 .new_block(incoming_bundles, operations, blobs.clone(), local_time)
                 .await?;
             (block, blobs)
@@ -5170,6 +5171,25 @@ impl<Env: Environment> ChainClient<Env> {
         };
 
         return Ok(Some(*proposal));
+    }
+
+    /// Estimate gas of operations
+    #[tracing::instrument(level = "trace", skip(operations))]
+    pub async fn estimate_gas(
+        &self,
+        incoming_bundles: Vec<IncomingBundle>,
+        operations: Vec<Operation>,
+        blobs: Vec<Blob>,
+    ) -> Result<Amount, ChainClientError> {
+        let _ = self.prepare_chain().await?;
+
+        let local_time = self.storage_client().clock().current_time();
+
+        let (_, resource_tracker) = self
+            .new_block(incoming_bundles, operations, blobs.clone(), local_time)
+            .await?;
+
+        return Ok(Amount::from_attos(resource_tracker.wasm_fuel.into()));
     }
 
     pub async fn block_time(&self) -> Result<Timestamp, ChainClientError> {

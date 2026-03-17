@@ -1232,6 +1232,10 @@ type MutationRoot {
 	Calculate block execution state hash
 	"""
 	simulateExecuteBlock(chainId: ChainId!, blockMaterial: BlockMaterial!): SimulatedBlockMaterial
+	"""
+	Calculate block execution state hash
+	"""
+	estimateGas(chainId: ChainId!, blockMaterial: BlockMaterial!): Amount!
 }
 
 """

@@ -1002,6 +1002,39 @@ where
             blob_bytes,
         }))
     }
+
+    /// Calculate block execution state hash
+    async fn estimate_gas(
+        &self,
+        chain_id: ChainId,
+        block_material: BlockMaterial,
+    ) -> Result<Amount, Error> {
+        let BlockMaterial {
+            operations,
+            blob_bytes,
+            candidate,
+        } = block_material;
+        let CandidateBlockMaterial {
+            incoming_bundles, ..
+        } = candidate;
+
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
+
+        let bundles: Vec<_> = incoming_bundles
+            .iter()
+            .map(|bundle| bundle.clone())
+            .collect();
+        let blobs: Vec<_> = blob_bytes.into_iter().map(Blob::new_data).collect();
+
+        Ok(client
+            .estimate_gas(bundles, operations, blobs.clone())
+            .await?)
+    }
 }
 
 #[async_graphql::Object(cache_control(no_cache))]
