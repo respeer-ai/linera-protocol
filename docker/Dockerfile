@@ -47,10 +47,23 @@ ENV RUSTFLAGS=${rustflags}
 RUN CARGO_NET_GIT_FETCH_WITH_CLI=true all_proxy=$all_proxy \
     cargo build ${build_flag:+"$build_flag"} \
     --bin linera-proxy \
+    --features $build_features \
+    -j 1
+RUN CARGO_NET_GIT_FETCH_WITH_CLI=true all_proxy=$all_proxy \
+    cargo build ${build_flag:+"$build_flag"} \
     --bin linera-server \
+    --features $build_features \
+    -j 1
+RUN CARGO_NET_GIT_FETCH_WITH_CLI=true all_proxy=$all_proxy \
+    cargo build ${build_flag:+"$build_flag"} \
     --bin linera \
+    --features $build_features \
+    -j 1
+RUN CARGO_NET_GIT_FETCH_WITH_CLI=true all_proxy=$all_proxy \
+    cargo build ${build_flag:+"$build_flag"} \
     --bin linera-storage-server \
-    --features $build_features
+    --features $build_features \
+    -j 1
 
 RUN mv \
     target/"$build_folder"/linera \

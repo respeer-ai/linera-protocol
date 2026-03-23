@@ -57,7 +57,7 @@ GIT_COMMIT=$(git rev-parse --short HEAD)
 
 if [ $COMPILE -eq 1 ]; then
   docker rmi linera-respeer
-  docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,tempo,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
+  docker build --no-cache --build-arg all_proxy=$all_proxy --build-arg git_commit="$GIT_COMMIT" --build-arg build_features="scylladb,metrics,memory-profiling,disable-native-rpc,enable-wallet-rpc" -f docker/Dockerfile . -t linera-respeer || exit 1
 fi
 
 export PATH=$RESPEER_BIN_DIR:$PATH
