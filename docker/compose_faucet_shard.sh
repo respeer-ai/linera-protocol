@@ -72,6 +72,7 @@ INSTALLED_COMMIT=`linera --version | grep tree | awk -F '/' '{print $7}' | awk '
 
 # Compile respeer for local linera toolchain
 if [ "x$LATEST_COMMIT" != "x$INSTALLED_COMMIT" ]; then
+  cd $ROOT_DIR
   sudo apt-get update
   sudo apt-get install libssl-dev pkg-config
   cargo build --release -j 2
