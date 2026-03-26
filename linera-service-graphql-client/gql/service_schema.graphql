@@ -1445,7 +1445,7 @@ type QueryRoot {
 	"""
 	Estimate gas
 	"""
-	estimateGas(chainId: ChainId!, blockMaterial: BlockMaterial!): Amount!
+	estimateGas(chainId: ChainId, blockMaterial: BlockMaterial!): Amount!
 }
 
 type QueueView_MessageBundle_f4399f0b {

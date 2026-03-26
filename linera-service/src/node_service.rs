@@ -1259,7 +1259,7 @@ where
     /// Estimate gas
     async fn estimate_gas(
         &self,
-        chain_id: ChainId,
+        chain_id: Option<ChainId>,
         block_material: BlockMaterial,
     ) -> Result<Amount, Error> {
         let BlockMaterial {
@@ -1270,6 +1270,20 @@ where
         let CandidateBlockMaterial {
             incoming_bundles, ..
         } = candidate;
+        let chain_id = match chain_id {
+            Some(chain_id) => chain_id,
+            None => self
+                .context
+                .lock()
+                .await
+                .wallet()
+                .chain_ids()
+                .try_collect::<Vec<_>>()
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| Error::new("wallet has no chains"))?,
+        };
 
         let client = self
             .context
