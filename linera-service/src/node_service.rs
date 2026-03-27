@@ -100,6 +100,51 @@ where
     command_sender: UnboundedSender<ListenerCommand>,
 }
 
+impl<C> QueryRoot<C>
+where
+    C: ClientContext + 'static,
+{
+    fn chain_id_or_default(&self, chain_id: Option<ChainId>) -> Result<ChainId, Error> {
+        chain_id
+            .or(self.default_chain)
+            .ok_or_else(|| Error::new("wallet has no default chain"))
+    }
+
+    async fn load_block_material(
+        &self,
+        chain_id: ChainId,
+        max_pending_messages: usize,
+    ) -> Result<CandidateBlockMaterial, Error> {
+        let client = self
+            .context
+            .lock()
+            .await
+            .make_chain_client(chain_id)
+            .await?;
+
+        let incoming_bundles = client.pending_message_bundles().await?;
+        let transactions = incoming_bundles
+            .clone()
+            .into_iter()
+            .map(Transaction::ReceiveMessages)
+            .collect::<Vec<_>>();
+        let local_time = client.next_timestamp(&transactions, client.block_time().await?);
+        let round = client.block_round().await?;
+
+        let incoming_bundles = if incoming_bundles.len() > max_pending_messages {
+            incoming_bundles[..max_pending_messages].to_vec()
+        } else {
+            incoming_bundles
+        };
+
+        Ok(CandidateBlockMaterial {
+            incoming_bundles,
+            local_time,
+            round,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockMaterial {
@@ -1156,33 +1201,19 @@ where
         chain_id: ChainId,
         max_pending_messages: usize,
     ) -> Result<CandidateBlockMaterial, Error> {
-        let client = self
-            .context
-            .lock()
+        self.load_block_material(chain_id, max_pending_messages)
             .await
-            .make_chain_client(chain_id)
-            .await?;
+    }
 
-        let incoming_bundles = client.pending_message_bundles().await?;
-        let transactions = incoming_bundles
-            .clone()
-            .into_iter()
-            .map(Transaction::ReceiveMessages)
-            .collect::<Vec<_>>();
-        let local_time = client.next_timestamp(&transactions, client.block_time().await?);
-        let round = client.block_round().await?;
-
-        let incoming_bundles = if incoming_bundles.len() > max_pending_messages {
-            incoming_bundles[..max_pending_messages].to_vec()
-        } else {
-            incoming_bundles
-        };
-
-        Ok(CandidateBlockMaterial {
-            incoming_bundles,
-            local_time,
-            round,
-        })
+    /// Returns block material of the chain, using the default chain if omitted
+    async fn block_material_with_default_chain(
+        &self,
+        chain_id: Option<ChainId>,
+        max_pending_messages: usize,
+    ) -> Result<CandidateBlockMaterial, Error> {
+        let chain_id = self.chain_id_or_default(chain_id)?;
+        self.load_block_material(chain_id, max_pending_messages)
+            .await
     }
 
     /// Returns the balance of given owner
@@ -1270,20 +1301,7 @@ where
         let CandidateBlockMaterial {
             incoming_bundles, ..
         } = candidate;
-        let chain_id = match chain_id {
-            Some(chain_id) => chain_id,
-            None => self
-                .context
-                .lock()
-                .await
-                .wallet()
-                .chain_ids()
-                .try_collect::<Vec<_>>()
-                .await?
-                .into_iter()
-                .next()
-                .ok_or_else(|| Error::new("wallet has no chains"))?,
-        };
+        let chain_id = self.chain_id_or_default(chain_id)?;
 
         let client = self
             .context

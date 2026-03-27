@@ -1431,6 +1431,10 @@ type QueryRoot {
 	"""
 	blockMaterial(chainId: ChainId!, maxPendingMessages: Int!): CandidateBlockMaterial!
 	"""
+	Returns block material of the chain, using the default chain if omitted
+	"""
+	blockMaterialWithDefaultChain(chainId: ChainId, maxPendingMessages: Int!): CandidateBlockMaterial!
+	"""
 	Returns the balance of given owner
 	"""
 	balance(chainId: ChainId!, owner: AccountOwner): Amount!
