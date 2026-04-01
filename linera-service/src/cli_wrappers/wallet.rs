@@ -1010,6 +1010,17 @@ impl ClientWrapper {
         Ok(())
     }
 
+    /// Runs `linera wallet import-chain --owner OWNER CHAIN_ID`.
+    pub async fn import_chain(&self, owner: AccountOwner, chain_id: ChainId) -> Result<()> {
+        let mut command = self.command().await?;
+        command
+            .args(["wallet", "import-chain"])
+            .args(["--owner", &owner.to_string()])
+            .arg(chain_id.to_string());
+        command.spawn_and_wait_for_stdout().await?;
+        Ok(())
+    }
+
     /// Runs `linera wallet forget-chain CHAIN_ID`.
     pub async fn forget_chain(&self, chain_id: ChainId) -> Result<()> {
         let mut command = self.command().await?;

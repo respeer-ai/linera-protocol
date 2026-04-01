@@ -4089,6 +4089,53 @@ async fn test_end_to_end_change_ownership(config: impl LineraNetConfig) -> Resul
 #[cfg_attr(feature = "kubernetes", test_case(SharedLocalKubernetesNetTestingConfig::new(Network::Grpc, BuildArg::Build) ; "kubernetes_grpc"))]
 #[cfg_attr(feature = "remote-net", test_case(RemoteNetTestingConfig::new(LeakChains) ; "remote_net_grpc"))]
 #[test_log::test(tokio::test)]
+async fn test_end_to_end_import_chain_full_chain(config: impl LineraNetConfig) -> Result<()> {
+    let _guard = INTEGRATION_TEST_GUARD.lock().await;
+    tracing::info!("Starting test {}", test_name!());
+
+    let (mut net, client1) = config.instantiate().await?;
+
+    let client2 = net.make_client().await;
+    client2.wallet_init(None).await?;
+
+    let chain1 = *client1.load_wallet()?.owned_chain_ids().first().unwrap();
+
+    let owner2 = client2.keygen().await?;
+
+    let (grandparent, _) = client1
+        .open_chain(chain1, None, Amount::from_tokens(2))
+        .await?;
+    let (parent, _) = client1.open_chain(grandparent, None, Amount::ONE).await?;
+    let (chain2, _) = client1
+        .open_chain(parent, Some(owner2), Amount::ZERO)
+        .await?;
+
+    client2.import_chain(owner2, chain2).await?;
+    assert_eq!(
+        client2.load_wallet()?.owner_default_chain(owner2),
+        Some(chain2)
+    );
+
+    // Importing as a full chain means the client can actively create blocks on that chain.
+    let account2 = Account::chain(chain2);
+    assert_eq!(client2.local_balance(account2).await?, Amount::ZERO);
+    client1.transfer(Amount::ONE, chain1, chain2).await?;
+    client2.sync(chain2).await?;
+    client2.process_inbox(chain2).await?;
+    assert!(client2.local_balance(account2).await? > Amount::ZERO);
+
+    net.ensure_is_running().await?;
+    net.terminate().await?;
+
+    Ok(())
+}
+
+#[cfg_attr(feature = "storage-service", test_case(LocalNetConfig::new_test(Database::Service, Network::Grpc) ; "storage_test_service_grpc"))]
+#[cfg_attr(feature = "scylladb", test_case(LocalNetConfig::new_test(Database::ScyllaDb, Network::Grpc) ; "scylladb_grpc"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Grpc) ; "aws_grpc"))]
+#[cfg_attr(feature = "kubernetes", test_case(SharedLocalKubernetesNetTestingConfig::new(Network::Grpc, BuildArg::Build) ; "kubernetes_grpc"))]
+#[cfg_attr(feature = "remote-net", test_case(RemoteNetTestingConfig::new(LeakChains) ; "remote_net_grpc"))]
+#[test_log::test(tokio::test)]
 async fn test_end_to_end_assign_greatgrandchild_chain(config: impl LineraNetConfig) -> Result<()> {
     let _guard = INTEGRATION_TEST_GUARD.lock().await;
     tracing::info!("Starting test {}", test_name!());

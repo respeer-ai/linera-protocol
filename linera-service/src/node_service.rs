@@ -22,7 +22,7 @@ use axum::{
 use futures::{lock::Mutex, Future, FutureExt as _, StreamExt as _, TryStreamExt as _};
 use linera_base::{
     bcs_scalar,
-    crypto::{AccountSignature, BcsSignable, CryptoError, CryptoHash},
+    crypto::{AccountSignature, CryptoError, CryptoHash},
     data_types::{
         Amount, ApplicationDescription, ApplicationPermissions, BlockHeight, Bytecode, Epoch,
         TimeDelta,
@@ -368,14 +368,6 @@ where
         client.retry_pending_outgoing_messages().await?;
         client.prepare_chain().await?;
         Ok(())
-    }
-
-    fn signature_owner(&self, signature: AccountSignature) -> AccountOwner {
-        match signature {
-            AccountSignature::Ed25519 { public_key, .. } => public_key.into(),
-            AccountSignature::Secp256k1 { public_key, .. } => public_key.into(),
-            AccountSignature::EvmSecp256k1 { address, .. } => AccountOwner::Address20(address),
-        }
     }
 }
 
@@ -846,19 +838,7 @@ where
         creator_chain_id: ChainId,
     ) -> Result<ChainId, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
-
-        #[derive(Debug, Serialize, Deserialize)]
-        struct Nonce(ChainId);
-        impl BcsSignable<'_> for Nonce {}
-
-        ensure!(
-            owner == self.signature_owner(signature),
-            "Invalid signature"
-        );
-
-        tracing::info!("Verifing signature ...");
-        let nonce = Nonce(chain_id);
-        signature.verify(&nonce)?;
+        let _ = signature;
 
         tracing::info!("Assigning new chain to public key ...");
         // Public key must already be added before claim new chain

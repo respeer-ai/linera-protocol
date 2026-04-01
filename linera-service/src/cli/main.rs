@@ -1719,6 +1719,22 @@ impl Runnable for Job {
                 );
             }
 
+            Wallet(WalletCommand::ImportChain { owner, chain_id }) => {
+                let mut context = options
+                    .create_client_context(storage, wallet, signer.into_value())
+                    .await?;
+                let start_time = Instant::now();
+                context
+                    .client
+                    .extend_chain_mode(chain_id, ListeningMode::FullChain);
+                context.assign_new_chain_to_key(chain_id, owner).await?;
+                context.set_owner_default_chain(owner, chain_id).await?;
+                info!(
+                    "Chain imported as full chain in {} ms",
+                    start_time.elapsed().as_millis()
+                );
+            }
+
             Chain(ChainCommand::ShowBlock { chain_id, height }) => {
                 let context = options
                     .create_client_context(storage, wallet, signer.into_value())
@@ -2450,7 +2466,9 @@ Make sure to use a Linera client compatible with this network.
                 Ok(0)
             }
 
-            WalletCommand::FollowChain { .. } | WalletCommand::RequestChain { .. } => {
+            WalletCommand::FollowChain { .. }
+            | WalletCommand::ImportChain { .. }
+            | WalletCommand::RequestChain { .. } => {
                 options.run_with_storage(Job(options.clone())).await??;
                 Ok(0)
             }

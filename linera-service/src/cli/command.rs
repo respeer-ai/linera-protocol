@@ -1304,6 +1304,15 @@ pub enum WalletCommand {
         sync: bool,
     },
 
+    /// Import a chain as an owned full chain and set it as the owner's default chain.
+    ImportChain {
+        /// The owner of the chain.
+        #[arg(long)]
+        owner: AccountOwner,
+        /// The chain ID.
+        chain_id: ChainId,
+    },
+
     /// Forgets the specified chain's keys. The chain will still be followed by the
     /// wallet.
     ForgetKeys { chain_id: ChainId },
