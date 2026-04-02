@@ -1215,7 +1215,7 @@ type MutationRoot {
 	"""
 	ResPeer::CheCko::Initialize offline wallet
 	"""
-	importChain(owner: AccountOwner!, chainId: ChainId!, signature: AccountSignature!, creatorChainId: ChainId!): ChainId!
+	importChain(owner: AccountOwner!, chainId: ChainId!): ChainId!
 	"""
 	Forget chain in some special case (e.g. let proxy cluster forget meme chain after meme mining started otherwise mine will fail)
 	"""

@@ -208,8 +208,6 @@ bcs_scalar!(
 #[serde(rename_all = "camelCase")]
 pub struct WalletInitializer {
     owner: AccountOwner,
-    signature: AccountSignature,
-    creator_chain_id: ChainId,
 }
 
 doc_scalar!(
@@ -834,11 +832,8 @@ where
         &self,
         owner: AccountOwner,
         chain_id: ChainId,
-        signature: AccountSignature,
-        creator_chain_id: ChainId,
     ) -> Result<ChainId, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
-        let _ = signature;
 
         tracing::info!("Assigning new chain to public key ...");
         // Public key must already be added before claim new chain
@@ -863,14 +858,6 @@ where
             .unwrap()
             .clone()
             .run_with_chain_id(chain_id)
-            .await?;
-        self.chain_listener
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .clone()
-            .run_with_chain_id(creator_chain_id)
             .await?;
 
         tokio::task::yield_now().await;
