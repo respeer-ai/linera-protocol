@@ -4136,6 +4136,67 @@ async fn test_end_to_end_import_chain_full_chain(config: impl LineraNetConfig) -
 #[cfg_attr(feature = "kubernetes", test_case(SharedLocalKubernetesNetTestingConfig::new(Network::Grpc, BuildArg::Build) ; "kubernetes_grpc"))]
 #[cfg_attr(feature = "remote-net", test_case(RemoteNetTestingConfig::new(LeakChains) ; "remote_net_grpc"))]
 #[test_log::test(tokio::test)]
+async fn test_import_chain_api_imports_existing_child_chains(
+    config: impl LineraNetConfig,
+) -> Result<()> {
+    let _guard = INTEGRATION_TEST_GUARD.lock().await;
+    tracing::info!("Starting test {}", test_name!());
+
+    let (mut net, client1) = config.instantiate().await?;
+
+    let client2 = net.make_client().await;
+    client2.wallet_init(None).await?;
+
+    let chain1 = *client1.load_wallet()?.owned_chain_ids().first().unwrap();
+    let owner2 = client2.keygen().await?;
+
+    let (parent, _) = client1
+        .open_chain(chain1, Some(owner2), Amount::from_tokens(2))
+        .await?;
+    client2.assign(owner2, parent).await?;
+
+    let (child, _) = client2.open_chain(parent, Some(owner2), Amount::ONE).await?;
+    client2.sync(child).await?;
+
+    assert!(client2.is_chain_present_in_wallet(parent));
+    assert!(client2.is_chain_present_in_wallet(child));
+
+    client2.forget_chain(child).await?;
+    client2.forget_chain(parent).await?;
+
+    assert!(!client2.is_chain_present_in_wallet(parent));
+    assert!(!client2.is_chain_present_in_wallet(child));
+
+    let port = get_node_port().await;
+    let mut node_service = client2.run_node_service(port, ProcessInbox::Skip).await?;
+
+    let query = format!(
+        "mutation {{ importChain(owner: {}, chainId: \"{}\") }}",
+        owner2.to_value(),
+        parent
+    );
+    let response = node_service.query_node(query).await?;
+    assert_eq!(response["importChain"].as_str(), Some(parent.to_string().as_str()));
+
+    let wallet = client2.load_wallet()?;
+    assert!(wallet.chain_ids().contains(&parent));
+    assert!(wallet.chain_ids().contains(&child));
+    assert_eq!(wallet.owner_default_chain(owner2), Some(parent));
+
+    node_service.ensure_is_running()?;
+    node_service.terminate().await?;
+    net.ensure_is_running().await?;
+    net.terminate().await?;
+
+    Ok(())
+}
+
+#[cfg_attr(feature = "storage-service", test_case(LocalNetConfig::new_test(Database::Service, Network::Grpc) ; "storage_test_service_grpc"))]
+#[cfg_attr(feature = "scylladb", test_case(LocalNetConfig::new_test(Database::ScyllaDb, Network::Grpc) ; "scylladb_grpc"))]
+#[cfg_attr(feature = "dynamodb", test_case(LocalNetConfig::new_test(Database::DynamoDb, Network::Grpc) ; "aws_grpc"))]
+#[cfg_attr(feature = "kubernetes", test_case(SharedLocalKubernetesNetTestingConfig::new(Network::Grpc, BuildArg::Build) ; "kubernetes_grpc"))]
+#[cfg_attr(feature = "remote-net", test_case(RemoteNetTestingConfig::new(LeakChains) ; "remote_net_grpc"))]
+#[test_log::test(tokio::test)]
 async fn test_end_to_end_assign_greatgrandchild_chain(config: impl LineraNetConfig) -> Result<()> {
     let _guard = INTEGRATION_TEST_GUARD.lock().await;
     tracing::info!("Starting test {}", test_name!());
