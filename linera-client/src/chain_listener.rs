@@ -67,6 +67,15 @@ pub struct ChainListenerConfig {
         env = "LINERA_LISTENER_SKIP_PERMISSIONLESS_CHAIN"
     )]
     pub skip_permissionless_chain: bool,
+
+    /// Automatically add newly discovered child chains to the wallet even when their
+    /// owner is not present in the local signer.
+    #[serde(default)]
+    #[arg(
+        long = "listener-auto-import-owned-child-chains-without-key",
+        env = "LINERA_LISTENER_AUTO_IMPORT_OWNED_CHILD_CHAINS_WITHOUT_KEY"
+    )]
+    pub auto_import_owned_child_chains_without_key: bool,
 }
 
 type ContextChainClient<C> = ChainClient<<C as ClientContext>::Environment>;
@@ -476,7 +485,9 @@ impl<C: ClientContext + 'static> ChainListener<C> {
         let mut context_guard = self.context.lock().await;
         for (new_chain_id, owners, epoch) in new_chains {
             for chain_owner in owners {
-                if context_guard.client().has_key_for(&chain_owner).await? {
+                if context_guard.client().has_key_for(&chain_owner).await?
+                    || self.config.auto_import_owned_child_chains_without_key
+                {
                     context_guard
                         .update_wallet_for_new_chain(
                             new_chain_id,

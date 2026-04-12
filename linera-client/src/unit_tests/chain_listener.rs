@@ -6,7 +6,7 @@ use std::{collections::HashSet, sync::Arc, time::Duration};
 use futures::{lock::Mutex, FutureExt as _};
 use linera_base::{
     crypto::{AccountPublicKey, InMemorySigner},
-    data_types::{Amount, BlockHeight, Bytecode, Epoch, TimeDelta, Timestamp},
+    data_types::{Amount, ApplicationPermissions, BlockHeight, Bytecode, Epoch, TimeDelta, Timestamp},
     identifiers::{Account, AccountOwner, ChainId},
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
@@ -87,7 +87,7 @@ impl chain_listener::ClientContext for ClientContext {
         Ok(())
     }
 
-    async fn assign_new_chain_to_owner(
+    async fn assign_new_chain_to_key(
         &mut self,
         _chain_id: ChainId,
         _owner: AccountOwner,
@@ -103,9 +103,13 @@ impl chain_listener::ClientContext for ClientContext {
         Ok(())
     }
 
-    async fn save_wallet(&mut self) -> Result<(), Error> {
-        Ok(())
+    fn owner_default_chain(&self, _owner: AccountOwner) -> Option<ChainId> {
+        None
     }
+}
+
+fn empty_command_receiver() -> Arc<Mutex<tokio::sync::mpsc::UnboundedReceiver<chain_listener::ListenerCommand>>> {
+    Arc::new(Mutex::new(tokio::sync::mpsc::unbounded_channel().1))
 }
 
 /// Tests that the chain listener, if there is a message in the inbox, will continue requesting
@@ -179,7 +183,7 @@ async fn test_chain_listener() -> anyhow::Result<()> {
         context,
         storage,
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        empty_command_receiver(),
         false, // Unit test doesn't need background sync
     )
     .run()
@@ -295,7 +299,7 @@ async fn test_chain_listener_follow_only() -> anyhow::Result<()> {
         context.clone(),
         storage.clone(),
         child_token,
-        command_receiver,
+        Arc::new(Mutex::new(command_receiver)),
         false, // Unit test doesn't need background sync
     )
     .run()
@@ -415,7 +419,7 @@ async fn test_chain_listener_admin_chain() -> anyhow::Result<()> {
         context,
         storage.clone(),
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        empty_command_receiver(),
         false, // Unit test doesn't need background sync
     )
     .run()
@@ -498,7 +502,7 @@ async fn test_chain_listener_listen_command_adds_chains_to_wallet() -> anyhow::R
         context.clone(),
         storage.clone(),
         child_token,
-        command_receiver,
+        Arc::new(Mutex::new(command_receiver)),
         false,
     )
     .run()
@@ -508,7 +512,7 @@ async fn test_chain_listener_listen_command_adds_chains_to_wallet() -> anyhow::R
     let handle = linera_base::Task::spawn(async move { chain_listener.await.unwrap() });
 
     let mut chains_to_listen = BTreeMap::new();
-    chains_to_listen.insert(chain_id0, Some(client0.identity().await?));
+    chains_to_listen.insert(chain_id0, Some(client0.identity(false).await?));
     command_sender
         .send(ListenerCommand::Listen(chains_to_listen))
         .expect("Failed to send Listen command");
@@ -529,6 +533,219 @@ async fn test_chain_listener_listen_command_adds_chains_to_wallet() -> anyhow::R
         wallet_chain.next_block_height,
         BlockHeight::ZERO,
         "Chain should be at height 0"
+    );
+
+    cancellation_token.cancel();
+    handle.await;
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn test_chain_listener_does_not_add_child_chain_without_key_by_default(
+) -> anyhow::Result<()> {
+    let mut chain_signer = InMemorySigner::new(Some(42));
+    let parent_owner = chain_signer.generate_new().into();
+    let child_owner = chain_signer.generate_new().into();
+    let config = ChainListenerConfig {
+        skip_process_inbox: true,
+        ..Default::default()
+    };
+    let storage_builder = MemoryStorageBuilder::default();
+    let clock = storage_builder.clock().clone();
+    let mut builder = TestBuilder::new(storage_builder, 4, 1, chain_signer.clone()).await?;
+    let root = builder.add_root_chain(0, Amount::from_tokens(10)).await?;
+
+    let (parent_description, _) = root
+        .open_chain(
+            ChainOwnership::single(parent_owner),
+            ApplicationPermissions::default(),
+            Amount::from_tokens(2),
+        )
+        .await
+        .unwrap_ok_committed();
+    let parent = parent_description.id();
+
+    let mut parent_client = builder.make_client(parent, None, BlockHeight::ZERO).await?;
+    parent_client.set_preferred_owner(parent_owner);
+    parent_client.synchronize_chain_state(parent).await?;
+
+    let (child_description, _) = parent_client
+        .open_chain(
+            ChainOwnership::single(child_owner),
+            ApplicationPermissions::default(),
+            Amount::ONE,
+        )
+        .await
+        .unwrap_ok_committed();
+    let child = child_description.id();
+
+    let genesis_config = GenesisConfig::new_testing(&builder);
+    let admin_chain_id = genesis_config.admin_chain_id();
+    let storage = builder.make_storage().await?;
+    let import_signer = InMemorySigner::new(Some(7));
+
+    let mut context = ClientContext {
+        client: Arc::new(Client::new(
+            environment::Impl {
+                storage: storage.clone(),
+                network: builder.make_node_provider(),
+                signer: import_signer,
+                wallet: environment::TestWallet::default(),
+            },
+            admin_chain_id,
+            false,
+            [(parent, ListeningMode::FullChain)],
+            format!("Client node for {:.8}", parent),
+            Duration::from_secs(30),
+            Duration::from_secs(1),
+            HashSet::new(),
+            ChainClientOptions::test_default(),
+            linera_core::client::RequestsSchedulerConfig::default(),
+        )),
+    };
+    context
+        .update_wallet_for_new_chain(parent, Some(parent_owner), clock.current_time(), Epoch::ZERO)
+        .await?;
+
+    let context = Arc::new(Mutex::new(context));
+    let cancellation_token = CancellationToken::new();
+    let child_token = cancellation_token.child_token();
+    let chain_listener = ChainListener::new(
+        config,
+        context.clone(),
+        storage,
+        child_token,
+        empty_command_receiver(),
+        false,
+    )
+    .run()
+    .await
+    .unwrap();
+
+    let handle = linera_base::Task::spawn(async move { chain_listener.await.unwrap() });
+
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+
+    assert!(
+        context.lock().await.wallet().get(child).is_none(),
+        "child chain should not be added without the new flag"
+    );
+
+    cancellation_token.cancel();
+    handle.await;
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn test_chain_listener_adds_child_chain_without_key_when_flag_enabled(
+) -> anyhow::Result<()> {
+    let mut chain_signer = InMemorySigner::new(Some(42));
+    let parent_owner = chain_signer.generate_new().into();
+    let child_owner = chain_signer.generate_new().into();
+    let config = ChainListenerConfig {
+        skip_process_inbox: true,
+        auto_import_owned_child_chains_without_key: true,
+        ..Default::default()
+    };
+    let storage_builder = MemoryStorageBuilder::default();
+    let clock = storage_builder.clock().clone();
+    let mut builder = TestBuilder::new(storage_builder, 4, 1, chain_signer.clone()).await?;
+    let root = builder.add_root_chain(0, Amount::from_tokens(10)).await?;
+
+    let (parent_description, _) = root
+        .open_chain(
+            ChainOwnership::single(parent_owner),
+            ApplicationPermissions::default(),
+            Amount::from_tokens(2),
+        )
+        .await
+        .unwrap_ok_committed();
+    let parent = parent_description.id();
+
+    let mut parent_client = builder.make_client(parent, None, BlockHeight::ZERO).await?;
+    parent_client.set_preferred_owner(parent_owner);
+    parent_client.synchronize_chain_state(parent).await?;
+
+    let (child_description, _) = parent_client
+        .open_chain(
+            ChainOwnership::single(child_owner),
+            ApplicationPermissions::default(),
+            Amount::ONE,
+        )
+        .await
+        .unwrap_ok_committed();
+    let child = child_description.id();
+
+    let genesis_config = GenesisConfig::new_testing(&builder);
+    let admin_chain_id = genesis_config.admin_chain_id();
+    let storage = builder.make_storage().await?;
+    let import_signer = InMemorySigner::new(Some(7));
+
+    let mut context = ClientContext {
+        client: Arc::new(Client::new(
+            environment::Impl {
+                storage: storage.clone(),
+                network: builder.make_node_provider(),
+                signer: import_signer,
+                wallet: environment::TestWallet::default(),
+            },
+            admin_chain_id,
+            false,
+            [(parent, ListeningMode::FullChain)],
+            format!("Client node for {:.8}", parent),
+            Duration::from_secs(30),
+            Duration::from_secs(1),
+            HashSet::new(),
+            ChainClientOptions::test_default(),
+            linera_core::client::RequestsSchedulerConfig::default(),
+        )),
+    };
+    context
+        .update_wallet_for_new_chain(parent, Some(parent_owner), clock.current_time(), Epoch::ZERO)
+        .await?;
+
+    let context = Arc::new(Mutex::new(context));
+    let cancellation_token = CancellationToken::new();
+    let child_token = cancellation_token.child_token();
+    let chain_listener = ChainListener::new(
+        config,
+        context.clone(),
+        storage,
+        child_token,
+        empty_command_receiver(),
+        false,
+    )
+    .run()
+    .await
+    .unwrap();
+
+    let handle = linera_base::Task::spawn(async move { chain_listener.await.unwrap() });
+
+    for i in 0..50 {
+        tokio::task::yield_now().await;
+
+        if context.lock().await.wallet().get(child).is_some() {
+            break;
+        }
+        if i == 49 {
+            panic!("child chain was not added to the wallet");
+        }
+    }
+
+    let wallet_chain = context
+        .lock()
+        .await
+        .wallet()
+        .get(child)
+        .expect("child chain should be in the wallet");
+    assert_eq!(wallet_chain.owner, Some(child_owner));
+    assert_eq!(
+        context.lock().await.client().chain_mode(child),
+        Some(ListeningMode::FullChain)
     );
 
     cancellation_token.cancel();
@@ -639,7 +856,7 @@ async fn test_listener_uses_autosigner_for_incoming_messages() -> anyhow::Result
         context,
         storage.clone(),
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        empty_command_receiver(),
         false,
     )
     .run()
@@ -823,7 +1040,7 @@ async fn test_chain_listener_sparse_event_download() -> anyhow::Result<()> {
         context.clone(),
         storage.clone(),
         child_token,
-        tokio::sync::mpsc::unbounded_channel().1,
+        empty_command_receiver(),
         false,
     )
     .run()
