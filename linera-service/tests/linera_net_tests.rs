@@ -4155,7 +4155,9 @@ async fn test_import_chain_api_imports_existing_child_chains(
         .await?;
     client2.assign(owner2, parent).await?;
 
-    let (child, _) = client2.open_chain(parent, Some(owner2), Amount::ONE).await?;
+    let (child, _) = client2
+        .open_chain(parent, Some(owner2), Amount::ONE)
+        .await?;
     client2.sync(child).await?;
 
     assert!(client2.is_chain_present_in_wallet(parent));
@@ -4176,12 +4178,26 @@ async fn test_import_chain_api_imports_existing_child_chains(
         parent
     );
     let response = node_service.query_node(query).await?;
-    assert_eq!(response["importChain"].as_str(), Some(parent.to_string().as_str()));
+    assert_eq!(
+        response["importChain"].as_str(),
+        Some(parent.to_string().as_str())
+    );
 
     let wallet = client2.load_wallet()?;
     assert!(wallet.chain_ids().contains(&parent));
     assert!(wallet.chain_ids().contains(&child));
     assert_eq!(wallet.owner_default_chain(owner2), Some(parent));
+    let parent_chain = wallet
+        .get(parent)
+        .expect("imported parent chain should be persisted in the wallet");
+    assert!(
+        parent_chain.block_hash.is_some(),
+        "imported parent chain should persist its latest block hash"
+    );
+    assert!(
+        parent_chain.next_block_height > BlockHeight::ZERO,
+        "imported parent chain should persist a non-zero next block height"
+    );
 
     node_service.ensure_is_running()?;
     node_service.terminate().await?;

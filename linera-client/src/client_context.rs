@@ -584,6 +584,7 @@ impl<Env: Environment> ClientContext<Env> {
                 .map_err(error::Inner::wallet)
                 .context("assigning new chain")?;
         }
+        self.update_wallet_from_client(&chain_client).await?;
         Ok(())
     }
 

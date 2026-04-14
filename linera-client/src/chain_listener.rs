@@ -828,6 +828,14 @@ impl<C: ClientContext + 'static> ChainListener<C> {
                     }
 
                     chains.insert(chain_id, ListeningMode::FullChain);
+                } else if context_guard
+                    .wallet()
+                    .get(chain_id)
+                    .await
+                    .map_err(error::Inner::wallet)?
+                    .is_some_and(|chain| chain.owner == Some(owner))
+                {
+                    chains.insert(chain_id, ListeningMode::FullChain);
                 }
             } else {
                 chains.insert(chain_id, ListeningMode::FollowChain);

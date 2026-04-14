@@ -3,7 +3,7 @@
 
 use std::{
     borrow::Cow,
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     future::IntoFuture,
     iter,
     net::SocketAddr,
@@ -29,8 +29,7 @@ use linera_base::{
     },
     doc_scalar, ensure,
     identifiers::{
-        Account, AccountOwner, ApplicationId, BlobType, ChainId, IndexAndEvent, ModuleId,
-        StreamId,
+        Account, AccountOwner, ApplicationId, BlobType, ChainId, IndexAndEvent, ModuleId, StreamId,
     },
     ownership::{ChainOwnership, TimeoutConfig},
     vm::VmRuntime,
@@ -96,8 +95,6 @@ where
     C: ClientContext,
 {
     context: Arc<Mutex<C>>,
-
-    chain_listener: Arc<Mutex<Option<ChainListener<C>>>>,
     command_sender: UnboundedSender<ListenerCommand>,
 }
 
@@ -366,13 +363,11 @@ where
             .await?;
         client.retry_pending_outgoing_messages().await?;
         client.prepare_chain().await?;
+        self.context.lock().await.update_wallet(&client).await?;
         Ok(())
     }
 
-    async fn import_chain_with_existing_children(
-        &self,
-        root_chain_id: ChainId,
-    ) -> Result<(), Error>
+    async fn import_chain_with_existing_children(&self, root_chain_id: ChainId) -> Result<(), Error>
     where
         C: 'static,
     {
@@ -391,9 +386,14 @@ where
                 .make_chain_client(chain_id)
                 .await?;
             client.synchronize_chain_state(chain_id).await?;
+            self.context.lock().await.update_wallet(&client).await?;
             let imported_owner = {
                 let context = self.context.lock().await;
-                context.wallet().get(chain_id).await?.and_then(|chain| chain.owner)
+                context
+                    .wallet()
+                    .get(chain_id)
+                    .await?
+                    .and_then(|chain| chain.owner)
             };
 
             let next_block_height = client.chain_info().await?.next_block_height;
@@ -401,7 +401,9 @@ where
                 continue;
             }
 
-            let heights = (0..next_block_height.0).map(BlockHeight).collect::<Vec<_>>();
+            let heights = (0..next_block_height.0)
+                .map(BlockHeight)
+                .collect::<Vec<_>>();
             let block_hashes = {
                 let context = self.context.lock().await;
                 context
@@ -411,7 +413,7 @@ where
                     .await?
             };
 
-            let mut discovered_children = BTreeSet::new();
+            let mut discovered_children = BTreeMap::new();
             let mut needs_retry_pending_messages = false;
 
             for block_hash in block_hashes {
@@ -448,7 +450,7 @@ where
                         context
                             .client()
                             .extend_chain_mode(new_chain_id, ListeningMode::FullChain);
-                        discovered_children.insert(new_chain_id);
+                        discovered_children.insert(new_chain_id, owner);
                         needs_retry_pending_messages = true;
                     }
                 }
@@ -463,18 +465,23 @@ where
                     .await?;
             }
 
-            for child_chain_id in &discovered_children {
-                self.chain_listener
-                    .lock()
-                    .await
-                    .as_ref()
-                    .unwrap()
-                    .clone()
-                    .run_with_chain_id(*child_chain_id)
-                    .await?;
+            if !discovered_children.is_empty() {
+                self.command_sender
+                    .send(ListenerCommand::Listen(
+                        discovered_children
+                            .iter()
+                            .map(|(child_chain_id, owner)| (*child_chain_id, Some(*owner)))
+                            .collect(),
+                    ))
+                    .map_err(|err| {
+                        Error::new(format!(
+                            "error sending a command to the chain listener: {}",
+                            err
+                        ))
+                    })?;
             }
 
-            pending_chain_ids.extend(discovered_children);
+            pending_chain_ids.extend(discovered_children.into_keys());
         }
 
         Ok(())
@@ -940,11 +947,7 @@ where
     }
 
     /// ResPeer::CheCko::Initialize offline wallet
-    async fn import_chain(
-        &self,
-        owner: AccountOwner,
-        chain_id: ChainId,
-    ) -> Result<ChainId, Error> {
+    async fn import_chain(&self, owner: AccountOwner, chain_id: ChainId) -> Result<ChainId, Error> {
         ensure!(cfg!(feature = "enable-wallet-rpc"), "Not supported");
 
         tracing::info!("Assigning new chain to public key ...");
@@ -962,15 +965,17 @@ where
             .set_owner_default_chain(owner, chain_id)
             .await?;
 
-        tracing::info!("Running chain {}", chain_id);
-        self.chain_listener
-            .lock()
-            .await
-            .as_ref()
-            .unwrap()
-            .clone()
-            .run_with_chain_id(chain_id)
-            .await?;
+        tracing::info!("Registering chain {} with live listener", chain_id);
+        self.command_sender
+            .send(ListenerCommand::Listen(
+                [(chain_id, Some(owner))].into_iter().collect(),
+            ))
+            .map_err(|err| {
+                Error::new(format!(
+                    "error sending a command to the chain listener: {}",
+                    err
+                ))
+            })?;
 
         tokio::task::yield_now().await;
         std::thread::sleep(std::time::Duration::from_millis(2000));
@@ -1893,8 +1898,6 @@ where
                     query,
                     MutationRoot {
                         context: Arc::clone(&self.context),
-
-                        chain_listener: Arc::clone(&self.chain_listener),
                         command_sender: self.command_sender.clone(),
                     },
                     subscription,
@@ -2246,20 +2249,21 @@ mod tests {
     use linera_base::{
         crypto::{CryptoHash, InMemorySigner},
         data_types::{Amount, ApplicationPermissions, BlockHeight, Epoch, Timestamp},
-        identifiers::{ApplicationId, ChainId},
+        identifiers::{AccountOwner, ApplicationId, ChainId},
         ownership::ChainOwnership,
     };
     use linera_client::{
-        chain_listener::{ChainListener, ChainListenerConfig, ClientContext as _},
+        chain_listener::{ClientContext as _, ListenerCommand},
         Error as ClientError,
     };
     use linera_core::{
         client::{ChainClient, ChainClientOptions, Client, ListeningMode},
         environment,
-        test_utils::{ClientOutcomeResultExt as _, MemoryStorageBuilder, StorageBuilder as _, TestBuilder},
+        test_utils::{
+            ClientOutcomeResultExt as _, MemoryStorageBuilder, StorageBuilder as _, TestBuilder,
+        },
         wallet::{self, Wallet as _},
     };
-    use tokio_util::sync::CancellationToken;
 
     use super::{MutationRoot, QueryResponseCache};
 
@@ -2362,7 +2366,8 @@ mod tests {
 
         fn timing_sender(
             &self,
-        ) -> Option<tokio::sync::mpsc::UnboundedSender<(u64, linera_core::client::TimingType)>> {
+        ) -> Option<tokio::sync::mpsc::UnboundedSender<(u64, linera_core::client::TimingType)>>
+        {
             None
         }
 
@@ -2535,7 +2540,8 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
-    async fn import_chain_backfills_existing_child_chains_without_local_keys() -> anyhow::Result<()> {
+    async fn import_chain_backfills_existing_child_chains_without_local_keys() -> anyhow::Result<()>
+    {
         let mut chain_signer = InMemorySigner::new(Some(42));
         let parent_owner = chain_signer.generate_new().into();
         let child_owner = chain_signer.generate_new().into();
@@ -2607,18 +2613,9 @@ mod tests {
         assert!(context.lock().await.wallet().get(parent).await?.is_some());
         assert!(context.lock().await.wallet().get(child).await?.is_none());
 
-        let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let chain_listener = ChainListener::new(
-            ChainListenerConfig::default(),
-            context.clone(),
-            storage,
-            CancellationToken::new(),
-            Arc::new(Mutex::new(command_receiver)),
-            false,
-        );
+        let (command_sender, _command_receiver) = tokio::sync::mpsc::unbounded_channel();
         let mutation = MutationRoot {
             context: context.clone(),
-            chain_listener: Arc::new(Mutex::new(Some(chain_listener))),
             command_sender,
         };
 
@@ -2628,7 +2625,13 @@ mod tests {
             .map_err(|error| anyhow::anyhow!("{error:?}"))?;
 
         assert_eq!(
-            context.lock().await.wallet().get(child).await?.and_then(|chain| chain.owner),
+            context
+                .lock()
+                .await
+                .wallet()
+                .get(child)
+                .await?
+                .and_then(|chain| chain.owner),
             Some(child_owner)
         );
         Ok(())
@@ -2698,13 +2701,20 @@ mod tests {
         context
             .lock()
             .await
-            .update_wallet_for_new_chain(parent, Some(parent_owner), Timestamp::from(0), Epoch::ZERO)
+            .update_wallet_for_new_chain(
+                parent,
+                Some(parent_owner),
+                Timestamp::from(0),
+                Epoch::ZERO,
+            )
             .await?;
         context
             .lock()
             .await
             .wallet()
-            .modify(parent, |chain| chain.next_block_height = BlockHeight::from(2))
+            .modify(parent, |chain| {
+                chain.next_block_height = BlockHeight::from(2)
+            })
             .await?;
 
         let wallet_parent = context
@@ -2717,18 +2727,9 @@ mod tests {
         assert!(wallet_parent.next_block_height > BlockHeight::ZERO);
         assert!(context.lock().await.wallet().get(child).await?.is_none());
 
-        let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let chain_listener = ChainListener::new(
-            ChainListenerConfig::default(),
-            context.clone(),
-            storage,
-            CancellationToken::new(),
-            Arc::new(Mutex::new(command_receiver)),
-            false,
-        );
+        let (command_sender, _command_receiver) = tokio::sync::mpsc::unbounded_channel();
         let mutation = MutationRoot {
             context: context.clone(),
-            chain_listener: Arc::new(Mutex::new(Some(chain_listener))),
             command_sender,
         };
 
@@ -2738,9 +2739,129 @@ mod tests {
             .map_err(|error| anyhow::anyhow!("{error:?}"))?;
 
         assert_eq!(
-            context.lock().await.wallet().get(child).await?.and_then(|chain| chain.owner),
+            context
+                .lock()
+                .await
+                .wallet()
+                .get(child)
+                .await?
+                .and_then(|chain| chain.owner),
             Some(child_owner)
         );
+        Ok(())
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn import_chain_persists_parent_wallet_metadata_after_sync() -> anyhow::Result<()> {
+        let mut chain_signer = InMemorySigner::new(Some(42));
+        let imported_owner: AccountOwner = chain_signer.generate_new().into();
+        let storage_builder = MemoryStorageBuilder::default();
+        let mut builder = TestBuilder::new(storage_builder, 4, 1, chain_signer.clone()).await?;
+        let root = builder.add_root_chain(0, Amount::from_tokens(10)).await?;
+
+        let (parent_description, _) = root
+            .open_chain(
+                ChainOwnership::single(imported_owner),
+                ApplicationPermissions::default(),
+                Amount::from_tokens(2),
+            )
+            .await
+            .unwrap_ok_committed();
+        let parent = parent_description.id();
+
+        let mut parent_client = builder.make_client(parent, None, BlockHeight::ZERO).await?;
+        parent_client.set_preferred_owner(imported_owner);
+        parent_client.synchronize_chain_state(parent).await?;
+
+        let _child = parent_client
+            .open_chain(
+                ChainOwnership::single(imported_owner),
+                ApplicationPermissions::default(),
+                Amount::ONE,
+            )
+            .await
+            .unwrap_ok_committed();
+        parent_client.synchronize_chain_state(parent).await?;
+
+        let storage = builder.make_storage().await?;
+        let context = Arc::new(Mutex::new(TestClientContext {
+            client: Arc::new(Client::new(
+                environment::Impl {
+                    storage,
+                    network: builder.make_node_provider(),
+                    signer: InMemorySigner::new(Some(99)),
+                    wallet: TestWalletWithAdmin {
+                        inner: environment::TestWallet::default(),
+                        admin_chain_id: builder.admin_chain_id(),
+                    },
+                },
+                builder.admin_chain_id(),
+                false,
+                [(parent, ListeningMode::FullChain)],
+                format!("Client node for {:.8}", parent),
+                Duration::from_secs(30),
+                Duration::from_secs(1),
+                HashSet::new(),
+                ChainClientOptions::test_default(),
+                linera_core::client::RequestsSchedulerConfig::default(),
+            )),
+        }));
+        context
+            .lock()
+            .await
+            .client()
+            .get_chain_description(parent)
+            .await?;
+
+        let (command_sender, _command_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mutation = MutationRoot {
+            context: context.clone(),
+            command_sender,
+        };
+
+        context
+            .lock()
+            .await
+            .assign_new_chain_to_key(parent, imported_owner)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        context
+            .lock()
+            .await
+            .set_owner_default_chain(imported_owner, parent)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        mutation
+            .command_sender
+            .send(ListenerCommand::Listen(
+                [(parent, Some(imported_owner))].into_iter().collect(),
+            ))
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        mutation
+            .chain_initialized(parent)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+        mutation
+            .import_chain_with_existing_children(parent)
+            .await
+            .map_err(|error| anyhow::anyhow!("{error:?}"))?;
+
+        let wallet_parent = context
+            .lock()
+            .await
+            .wallet()
+            .get(parent)
+            .await?
+            .expect("imported parent should be persisted in the wallet");
+        assert!(
+            wallet_parent.block_hash.is_some(),
+            "imported parent should persist its latest block hash"
+        );
+        assert!(
+            wallet_parent.next_block_height > BlockHeight::ZERO,
+            "imported parent should persist a non-zero next block height"
+        );
+
         Ok(())
     }
 }
