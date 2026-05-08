@@ -10,4 +10,6 @@ services:
       - ../output/wallet/rpc:/wallet
     environment:
       RUST_LOG: info
+      NO_PROXY: localhost,127.0.0.1,api.testnet-conway.ams.respeer.ai,api.testnet-conway.faucet.respeer.ai,api.testnet-conway.blobgateway.com,api.testnet-conway.rpc.respeer.ai,api.testnet-conway.lineraswap.fun,api.testnet-conway.linerameme.fun,api.testnet-conway.kline.lineraswap.fun,testnet-conway.linerameme.fun,testnet-conway.lineraswap.fun,graphiql.blobgateway.com,graphiql.ams.respeer.ai,graphiql.linerameme.fun,graphiql.lineraswap.fun
+      no_proxy: localhost,127.0.0.1,api.testnet-conway.ams.respeer.ai,api.testnet-conway.faucet.respeer.ai,api.testnet-conway.blobgateway.com,api.testnet-conway.rpc.respeer.ai,api.testnet-conway.lineraswap.fun,api.testnet-conway.linerameme.fun,api.testnet-conway.kline.lineraswap.fun,testnet-conway.linerameme.fun,testnet-conway.lineraswap.fun,graphiql.blobgateway.com,graphiql.ams.respeer.ai,graphiql.linerameme.fun,graphiql.lineraswap.fun
     restart: always
