@@ -953,6 +953,41 @@ pub enum ClientCommand {
         required_application_ids: Option<Vec<ApplicationId>>,
     },
 
+    /// Serialize an application operation from a GraphQL mutation into BCS bytes.
+    #[command(name = "bcs-serilize-application-operation")]
+    BcsSerializeApplicationOperation {
+        /// Path to the crate containing the operation type.
+        #[arg(long)]
+        operation_type_crate: PathBuf,
+
+        /// The full Rust path to the operation enum (e.g., `abi::ams::AmsOperation`).
+        #[arg(long)]
+        operation_type: String,
+
+        /// The GraphQL mutation to serialize.
+        #[arg(long)]
+        query: String,
+
+        /// The GraphQL variables as a JSON string.
+        #[arg(long, default_value = "{}")]
+        variables: String,
+    },
+
+    /// Execute a serialized application operation on a chain.
+    ExecuteApplicationOperation {
+        /// The chain ID to execute the operation on.
+        #[arg(long)]
+        chain_id: ChainId,
+
+        /// The application ID to execute the operation for.
+        #[arg(long)]
+        application_id: ApplicationId,
+
+        /// The hex-encoded BCS bytes of the operation.
+        #[arg(long)]
+        operation: String,
+    },
+
     /// Create an unassigned key pair.
     Keygen,
 
@@ -1057,6 +1092,8 @@ impl ClientCommand {
             | ClientCommand::ReadDataBlob { .. }
             | ClientCommand::CreateApplication { .. }
             | ClientCommand::PublishAndCreate { .. }
+            | ClientCommand::BcsSerializeApplicationOperation { .. }
+            | ClientCommand::ExecuteApplicationOperation { .. }
             | ClientCommand::Keygen
             | ClientCommand::Assign { .. }
             | ClientCommand::Wallet { .. }

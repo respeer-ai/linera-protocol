@@ -25,6 +25,7 @@ pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0
 pub static malloc_conf: &[u8] = b"prof:true,prof_active:true,lg_prof_sample:19\0";
 
 mod options;
+mod operation_serializer;
 use std::{
     collections::{BTreeMap, BTreeSet},
     env,
@@ -1536,6 +1537,42 @@ impl Runnable for Job {
                 );
             }
 
+            ExecuteApplicationOperation {
+                chain_id,
+                application_id,
+                operation,
+            } => {
+                let mut context = options
+                    .create_client_context(storage, wallet, signer.into_value())
+                    .await?;
+                let start_time = Instant::now();
+                let chain_client = context.make_chain_client(chain_id).await?;
+
+                let operation_bytes = if let Some(hex_str) = operation.strip_prefix("0x") {
+                    linera_base::hex::decode(hex_str)?
+                } else {
+                    linera_base::hex::decode(&operation)?
+                };
+                let operation = linera_execution::Operation::User {
+                    application_id,
+                    bytes: operation_bytes,
+                };
+
+                context
+                    .apply_client_command(&chain_client, |chain_client| {
+                        let chain_client = chain_client.clone();
+                        let operation = operation.clone();
+                        async move { chain_client.execute_operations(vec![operation], vec![]).await }
+                    })
+                    .await
+                    .context("Failed to execute application operation")?;
+
+                info!(
+                    "Application operation executed in {} ms",
+                    start_time.elapsed().as_millis()
+                );
+            }
+
             Project(project_command) => match project_command {
                 ProjectCommand::PublishAndCreate {
                     path,
@@ -1790,7 +1827,8 @@ impl Runnable for Job {
             | Wallet(_)
             | ExtractScriptFromMarkdown { .. }
             | HelpMarkdown
-            | Completion { .. } => {
+            | Completion { .. }
+            | BcsSerializeApplicationOperation { .. } => {
                 unreachable!()
             }
         }
@@ -2219,6 +2257,29 @@ async fn run(options: &Options) -> Result<i32, Error> {
             let owner = AccountOwner::from(public_key);
             println!("{}", owner);
             info!("Key generated in {} ms", start_time.elapsed().as_millis());
+            Ok(0)
+        }
+
+        ClientCommand::BcsSerializeApplicationOperation {
+            operation_type_crate,
+            operation_type,
+            query,
+            variables,
+        } => {
+            let start_time = Instant::now();
+            let hex_bytes = operation_serializer::serialize_application_operation(
+                operation_type_crate,
+                operation_type,
+                query,
+                variables,
+            )
+            .await
+            .context("Failed to serialize application operation")?;
+            println!("{}", hex_bytes);
+            info!(
+                "Application operation serialized in {} ms",
+                start_time.elapsed().as_millis()
+            );
             Ok(0)
         }
 

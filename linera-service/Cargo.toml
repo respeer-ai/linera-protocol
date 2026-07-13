@@ -94,6 +94,7 @@ dirs.workspace = true
 fs-err = { workspace = true, features = ["tokio"] }
 fs_extra = { workspace = true, optional = true }
 futures.workspace = true
+glob.workspace = true
 heck.workspace = true
 http.workspace = true
 k8s-openapi = { workspace = true, optional = true }
@@ -123,16 +124,19 @@ mini-moka.workspace = true
 nonzero_lit.workspace = true
 papaya.workspace = true
 pathdiff = { workspace = true, optional = true }
+proc-macro2.workspace = true
 port-selector.workspace = true
 prometheus = { workspace = true, optional = true }
 prost = { workspace = true }
 quick_cache.workspace = true
+quote.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 serde.workspace = true
 serde-command-opts.workspace = true
 serde_json.workspace = true
 stdext = { workspace = true, optional = true }
+syn = { workspace = true, features = ["full"] }
 tempfile.workspace = true
 thiserror.workspace = true
 tikv-jemallocator = { workspace = true, features = [
@@ -142,7 +146,7 @@ tikv-jemallocator = { workspace = true, features = [
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
-toml.workspace = true
+toml = { workspace = true, features = ["parse"] }
 tonic = { workspace = true, features = [
     "transport",
     "tls-native-roots",
